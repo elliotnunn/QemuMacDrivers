@@ -370,7 +370,7 @@ GraphicsCoreGetPreferredConfiguration(VDSwitchInfoRec *switchInfo)
 	return noErr;
 }
 
-// €***************** Misc status calls *********************/
+// ***************** Misc status calls *********************/
 
 OSStatus
 GraphicsCoreGetBaseAddress(VDPageInfo *pageInfo)

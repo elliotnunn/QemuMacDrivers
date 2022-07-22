@@ -1,7 +1,7 @@
 #ifndef _DRIVER_QD_CALLS_H__
 #define _DRIVER_QD_CALLS_H__
 
-// ###ÊCONTROL ROUTINES ###
+// ### CONTROL ROUTINES ###
 
 OSStatus	GraphicsCoreSetMode(VDPageInfo *pageInfo);
 OSStatus	GraphicsCoreSetEntries(VDSetEntryRecord *entryRecord);
