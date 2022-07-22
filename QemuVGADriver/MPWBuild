@@ -1,0 +1,48 @@
+Set Exit 1
+
+If "{1}" !~ /qemu_vga(_debugosi)«0,1».ndrv/
+	Echo "USAGE: {0} [qemu_vga.ndrv | qemu_vga_debugosi.ndrv]" >Dev:Stderr
+	Exit 1
+End
+
+If "{1}" =~ /≈debugosi≈/
+	Set Defs "-d DEBUG_OSI=1"
+End
+
+# Change into my own containing directory
+Directory "`Echo "{0}" | StreamEdit -d -e '/((≈:)*)®1/ Print ®1'`"
+Set MyDir "`Directory`"
+
+# All C files
+For Src in :src:≈.c
+	Echo {Src}
+	MrC -w off {Defs} -d inline= -i "`Directory`:shared:,{CIncludes}" {Src}
+	Set Objects "{Objects} {Src}.o"
+End
+
+For Src in ::shared:≈.c
+	Echo {Src}
+	MrC -w off -d DEBUG_OSI=1 -d inline= {Src}
+	Set Objects "{Objects} {Src}.o"
+End
+
+# All PowerPC assembly files
+For Src in ::shared:≈.s
+	Echo {Src}
+	PPCAsm -o {Src}.o {Src}
+	Set Objects "{Objects} {Src}.o"
+End
+
+Echo ::builds:{1}
+PPCLink -xm sharedlibrary ∂
+	-export TheDriverDescription,DoDriverIO ∂
+	-t ndrv -c '????' ∂
+	-o ::builds:{1} ∂
+	"{SharedLibraries}DriverServicesLib" ∂
+	"{SharedLibraries}VideoServicesLib" ∂
+	"{SharedLibraries}NameRegistryLib" ∂
+	"{SharedLibraries}PCILib" ∂
+	"{PPCLibraries}PPCCRuntime.o" ∂
+	{Objects}
+
+Delete {Objects}

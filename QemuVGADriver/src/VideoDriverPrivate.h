@@ -1,8 +1,6 @@
 #ifndef __VideoDriverPrivate_H__
 #define __VideoDriverPrivate_H__
 
-#pragma internal off
-
 #include <VideoServices.h>
 #include <Video.h>
 #include <Displays.h>
