@@ -8,13 +8,21 @@ Concepts:
 #include <NameRegistry.h>
 #include <PCI.h>
 #include <Video.h>
+#include <VideoServices.h>
 #include <string.h>
 
 #include "viotransport.h"
 #include "virtio-gpu-structs.h"
 #include "lprintf.h"
+#include "debugpollpatch.h"
 
 static volatile int waiting;
+static int interruptsOn = 1;
+static InterruptServiceIDType interruptService;
+struct virtio_gpu_ctrl_hdr *conf;
+struct virtio_gpu_ctrl_hdr *obuf, *ibuf;
+void *fb;
+int W, H;
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
@@ -162,26 +170,20 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = finalize(pb.finalInfo);
 		break;
 	case kControlCommand:
-		err = control(((CntrlParam *)pb)->csCode, (void *)((CntrlParam *)pb)->csParam);
-		/*if (err == -1993)*/ {
-			int n = ((CntrlParam *)pb)->csCode;
-			if (n < sizeof(controlNames)/sizeof(*controlNames))
-				lprintf("Control(%s) = %d\n", controlNames[n], err);
-			else
-				lprintf("Control(%d) = %d\n", n, err);
-		}
-		if (err == -1993) err = controlErr;
+		err = control((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
+
+		if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames))
+			lprintf("Control(%s) = %d\n", controlNames[(*pb.pb).cntrlParam.csCode], err);
+		else
+			lprintf("Control(%d) = %d\n", (*pb.pb).cntrlParam.csCode, err);
 		break;
 	case kStatusCommand:
-		err = status(((CntrlParam *)pb)->csCode, (void *)((CntrlParam *)pb)->csParam);
-		/*if (err == -1993)*/ {
-			int n = ((CntrlParam *)pb)->csCode;
-			if (n < sizeof(statusNames)/sizeof(*statusNames))
-				lprintf("Status(%s) = %d\n", statusNames[n], err);
-			else
-				lprintf("Status(%d) = %d\n", n, err);
-		}
-		if (err == -1993) err = statusErr;
+		err = status((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
+
+		if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames))
+			lprintf("Status(%s) = %d\n", statusNames[(*pb.pb).cntrlParam.csCode], err);
+		else
+			lprintf("Status(%d) = %d\n", (*pb.pb).cntrlParam.csCode, err);
 		break;
 	case kOpenCommand:
 	case kCloseCommand:
@@ -200,16 +202,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	}
 }
 
-struct virtio_gpu_ctrl_hdr *conf;
-struct virtio_gpu_ctrl_hdr *obuf, *ibuf;
-
-int W, H;
-
-void *fb;
-
 static OSStatus initialize(DriverInitInfo *info) {
-// 	size_t count = EndianSwap32Bit(((struct virtio_gpu_ctrl_hdr *)VTDeviceConfig)->num_scanouts);
-// 	size_t i;
+	// size_t count = EndianSwap32Bit(((struct virtio_gpu_ctrl_hdr *)VTDeviceConfig)->num_scanouts);
+	// size_t i;
 
 	OSStatus err;
 	err = VTInit(&info->deviceEntry, queueSizer, queueRecv, configChanged);
@@ -238,6 +233,15 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	fb = PoolAllocateResident(64*1024*1024, false);
 	lprintf("Allocated 64 mb FB at %08x\n", fb);
+	{
+		size_t x, y;
+		uint32_t *ptr = (void *)fb;
+		for (y=0; y<H; y++) {
+			for (x=0; x<W; x++) {
+				*ptr++ = ((x ^ y) & 1) ? 0x00ffffff : 0x00000000;
+			}
+		}
+	}
 
 	// Create a host resource using VIRTIO_GPU_CMD_RESOURCE_CREATE_2D.
 	{
@@ -246,7 +250,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
-		buf->le32_format = EndianSwap32Bit(VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM);
+		buf->le32_format = EndianSwap32Bit(VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM);
 		buf->le32_width = EndianSwap32Bit(W);
 		buf->le32_height = EndianSwap32Bit(H);
 
@@ -307,6 +311,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 			EndianSwap32Bit(ibuf->le32_type));
 	}
 
+	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &interruptService);
+
 	setVBL();
 
 	return noErr;
@@ -326,9 +332,8 @@ static void setVBL(void) {
 }
 
 static OSStatus VBLBH(void *p1, void *p2) {
-	int i;
-	for (i=0; i<80*1024; i++) {
-		((char *)fb)[i] = 0xff;
+	if (interruptsOn) {
+		VSLDoInterruptService(interruptService);
 	}
 
 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
@@ -371,9 +376,6 @@ static OSStatus VBLBH(void *p1, void *p2) {
 
 static void queueRecv(uint16_t queue, uint16_t buffer, size_t len) {
 	waiting = 0;
-
-	lprintf("Received: q%d buf%d reply=%#x\n", queue, buffer,
-		EndianSwap32Bit(*(uint32_t *)(VTBuffers[queue][buffer+1])));
 }
 
 static OSStatus finalize(DriverFinalInfo *info) {
@@ -396,7 +398,7 @@ static OSStatus control(short csCode, void *param) {
 		case cscSetSync: return SetSync(param);
 		case cscSwitchMode: return SwitchMode(param);
 	}
-	return -1993;
+	return controlErr;
 }
 
 static OSStatus status(short csCode, void *param) {
@@ -421,7 +423,7 @@ static OSStatus status(short csCode, void *param) {
 		case cscRetrieveGammaTable: return RetrieveGammaTable(param);
 		case cscSupportsHardwareCursor: return SupportsHardwareCursor(param);
 	}
-	return -1993;
+	return statusErr;
 }
 
 static void configChanged(void) {
@@ -434,9 +436,7 @@ static void configChanged(void) {
 // --> csPage      Desired page
 // <-- csBaseAddr  Base address of VRAM for the desired page
 static OSStatus GetBaseAddr(VDPageInfo *rec) {
-	if (rec->csPage != 1) return -1993;
-	rec->csBaseAddr = fb;
-	return noErr;
+	return statusErr;
 }
 
 // If the video card is an indexed device, the SetEntries control routine
@@ -445,7 +445,7 @@ static OSStatus GetBaseAddr(VDPageInfo *rec) {
 // --> csStart     First entry in table
 // --> csCount     Number of entries to set
 static OSStatus MySetEntries(VDSetEntryRecord *rec) {
-	return noErr;
+	return controlErr;
 }
 
 // Normally, color table animation is not used on a direct device, but
@@ -454,7 +454,7 @@ static OSStatus MySetEntries(VDSetEntryRecord *rec) {
 // provides the direct device with indexed mode functionality identical to
 // the regular SetEntries control routine.
 static OSStatus DirectSetEntries(VDSetEntryRecord *rec) {
-	return noErr;
+	return controlErr;
 }
 
 // Returns the specified number of consecutive CLUT entries, starting with
@@ -463,33 +463,13 @@ static OSStatus DirectSetEntries(VDSetEntryRecord *rec) {
 // --> csStart     First entry in table
 // --> csCount     Number of entries to set
 static OSStatus GetEntries(VDSetEntryRecord *rec) {
-//
-//
-// 	Boolean useValue	= (entryRecord->csStart < 0);
-// 	UInt32	start		= useValue ? 0UL : (UInt32)entryRecord->csStart;
-// 	UInt32	stop		= start + entryRecord->csCount;
-// 	UInt32	i;
-//
-// 	Trace(GraphicsCoreGetEntries);
-//
-// 	if (GLOBAL.depth != 8)
-// 		return controlErr;
-// 	for(i=start;i<=stop;i++) {
-// 		UInt32	colorIndex = useValue ? entryRecord->csTable[i].value : i;
-// 		QemuVga_GetColorEntry(colorIndex, &entryRecord->csTable[i].rgb);
-// 	}
-//
-// 	return noErr;
-//
-//
-
 	return statusErr;
 }
 
 // Sets the gamma table in the driver that corrects RGB color values.
 // --> csGTable    Pointer to gamma table
 static OSStatus SetGamma(VDGammaRecord *rec) {
-	return noErr;
+	return controlErr;
 }
 
 // Returns a pointer to the current gamma table.
@@ -524,24 +504,21 @@ static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec) {
 // --> csPage      Desired display page to gray
 // --- csBaseAddr  Unused
 static OSStatus GrayPage(VDPageInfo *rec) {
-	lprintf("Gray page requested\n");
-	return noErr;
+	return controlErr;
 }
 
 // Specify whether subsequent SetEntries calls fill a card’s CLUT with
 // actual colors or with the luminance-equivalent gray tones.
 // --> csMode      Enable or disable luminance mapping
 static OSStatus SetGray(VDGrayRecord *rec) {
-	// rec->csMode
-	return noErr;
+	return controlErr;
 }
 
 // Describes the behavior of subsequent SetEntries control calls to indexed
 // devices.
 // <-- csMode      Luminance mapping enabled or disabled
 static OSStatus GetGray(VDGrayRecord *rec) {
-	rec->csMode = 0;
-	return noErr;
+	return statusErr;
 }
 
 // Returns the total number of video pages available in the current video
@@ -552,27 +529,13 @@ static OSStatus GetGray(VDGrayRecord *rec) {
 // <-- csPage      Number of display pages available
 // --- csBaseAddr  Unused
 static OSStatus GetPages(VDPageInfo *rec) {
-	return -1993;
-	/*
-	UInt32 pageCount, depth;
-
-	CHECK_OPEN( statusErr );
-
-	Trace(GetPages);
-
-	depth = DepthModeToDepth(pageInfo->csMode);
-	QemuVga_GetModePages(GLOBAL.curMode, depth, NULL, &pageCount);
-	pageInfo->csPage = pageCount;
-
-	return noErr;
-	*/
+	return statusErr;
 }
 
 // Graphics drivers that support hardware cursors must return true.
 // <-- csSupportsHardwareCursor  true if hardware cursor is supported
 static OSStatus SupportsHardwareCursor(VDSupportsHardwareCursorRec *rec) {
-	rec->csSupportsHardwareCursor = 0;
-	return noErr;
+	return statusErr;
 }
 
 // QuickDraw uses the SetHardwareCursor control call to set up the hardware
@@ -618,119 +581,38 @@ static OSStatus GetHardwareCursorDrawState(VDHardwareCursorDrawStateRec *rec) {
 // pass a csMode value of 1.
 // --> csMode      Enable or disable interrupts
 static OSStatus SetInterrupt(VDFlagRecord *rec) {
-	return -1993;
-	/*
-	CHECK_OPEN( controlErr );
-
-	Trace(SetInterrupt);
-
-	if (!flagRecord->csMode)
-	    QemuVga_EnableInterrupts();
-	else
-	    QemuVga_DisableInterrupts();
-
+	interruptsOn = !rec->csMode;
 	return noErr;
-	*/
 }
 
 // Returns a value of 0 if VBL interrupts are enabled and a value of 1 if
 // VBL interrupts are disabled.
 // <-- csMode      Interrupts enabled or disabled
 static OSStatus GetInterrupt(VDFlagRecord *rec) {
-	return -1993;
-	/*
-	Trace(GetInterrupt);
-
-	CHECK_OPEN( statusErr );
-
-	flagRecord->csMode = !GLOBAL.qdInterruptsEnable;
+	rec->csMode = !interruptsOn;
 	return noErr;
-	*/
 }
 
 // GetSync and SetSync can be used to implement the VESA DPMS as well as
 // enable a sync-on-green mode for the frame buffer.
 static OSStatus SetSync(VDSyncInfoRec *rec) {
-	return -1993;
-	/*
-	UInt8 sync, mask;
-
-	Trace(SetSync);
-
-	CHECK_OPEN( controlErr );
-
-	sync = syncInfo->csMode;
-	mask = syncInfo->csFlags;
-
-	/* Unblank shortcut
-	if (sync == 0 && mask == 0) {
-		sync = 0;
-		mask = kDPMSSyncMask;
-	}
-	/* Blank shortcut
-	if (sync == 0xff && mask == 0xff) {
-		sync = 0x7;
-		mask = kDPMSSyncMask;
-	}
-
-	lprintf("SetSync req: sync=%x mask=%x\n", sync, mask);
-
-	/* Only care about the DPMS mode
-	if ((mask & kDPMSSyncMask) == 0)
-		return noErr;
-
-	/* If any sync is disabled, blank
-	if (sync & kDPMSSyncMask)
-		QemuVga_Blank(true);
-	else
-		QemuVga_Blank(false);
-
-	return noErr;
-	*/
+	return controlErr;
 }
 
 static OSStatus GetSync(VDSyncInfoRec *rec) {
-	return -1993;
-	/*
-	Trace(GetSync);
-
-	if (syncInfo->csMode == 0xff) {
-		/* Return HW caps
-		syncInfo->csMode = (1 << kDisableHorizontalSyncBit) |
-						   (1 << kDisableVerticalSyncBit) |
-						   (1 << kDisableCompositeSyncBit) |
-						   (1 << kNoSeparateSyncControlBit);
-	} else if (syncInfo->csMode == 0x00){
-		syncInfo->csMode = GLOBAL.blanked ? kDPMSSyncMask : 0;
-	} else
-		return statusErr;
-
-	syncInfo->csFlags = 0;
-
-	return noErr;
-	*/
+	return statusErr;
 }
 
 // --> powerState  Switch display hardware to this state
 // <-- powerFlags  Describes the status of the new state
 static OSStatus SetPowerState(VDPowerStateRec *rec) {
-	return -1993;
-	/*
-	Trace(SetPowerState);
-
-	return paramErr;
-	*/
+	return controlErr;
 }
 
 // <-- powerState  Current power state of display hardware
 // <-- powerFlags  Status of current state
 static OSStatus GetPowerState(VDPowerStateRec *rec) {
-	return -1993;
-	/*
-	Trace(GetPowerState);
-
-	return paramErr;
-	*/
+	return statusErr;
 }
 
 // Save the preferred relative bit depth (depth mode) and display mode.
@@ -741,14 +623,7 @@ static OSStatus GetPowerState(VDPowerStateRec *rec) {
 // --- csPage      Unused
 // --- csBaseAddr  Unused
 static OSStatus SavePreferredConfiguration(VDSwitchInfoRec *rec) {
-	return -1993;
-	/*
-	Trace(SavePreferredConfiguration);
-
-	CHECK_OPEN( controlErr );
-
-	return noErr;
-	*/
+	return controlErr;
 }
 
 // <-- csMode      Relative bit depth of preferred resolution
@@ -756,19 +631,7 @@ static OSStatus SavePreferredConfiguration(VDSwitchInfoRec *rec) {
 // --- csPage      Unused
 // --- csBaseAddr  Unused
 static OSStatus GetPreferredConfiguration(VDSwitchInfoRec *rec) {
-	return -1993;
-	/*
-	Trace(GetPreferredConfiguration);
-
-	CHECK_OPEN( statusErr );
-
-	switchInfo->csMode 	 	= DepthToDepthMode(GLOBAL.bootDepth);
-	switchInfo->csData		= GLOBAL.bootMode + 1; /* Modes are 1 based
-	switchInfo->csPage		= 0;
-	switchInfo->csBaseAddr	= FB_START;
-
-	return noErr;
-	*/
+	return statusErr;
 }
 
 // Gathers information about the attached display.
@@ -793,18 +656,7 @@ static OSStatus GetConnection(VDDisplayConnectInfoRec *rec) {
 // <-- csBaseAddr  Base address of video RAM for the current
 //                 DisplayModeID and relative bit depth
 static OSStatus GetMode(VDPageInfo *rec) {
-	return -1993;
-	/*
-	Trace(GetMode);
-
-	CHECK_OPEN( statusErr );
-
-	pageInfo->csMode		= DepthToDepthMode(GLOBAL.depth);
-	pageInfo->csPage		= GLOBAL.curPage;
-	pageInfo->csBaseAddr	= GLOBAL.curBaseAddress;
-
-	return noErr;
-	*/
+	return statusErr;
 }
 
 // PCI graphics drivers return the current DisplayModeID value in the
@@ -827,14 +679,7 @@ static OSStatus GetCurMode(VDSwitchInfoRec *rec) {
 // <-- csTimingData    Scan timing for desired DisplayModeID
 // <-- csTimingFlags   Report whether this scan timing is optional or required
 static OSStatus GetModeTiming(VDTimingInfoRec *rec) {
-	lprintf("GetModeTiming csTimingMode=%d\n", rec->csTimingMode);
-
-	//if (rec->csTimingMode != 1) return paramErr;
-
-	rec->csTimingFormat = kDeclROMtables;
-	rec->csTimingData = timingVESA_640x480_60hz;
-	rec->csTimingFlags = (1 << kModeValid) | (1 << kModeDefault) | (1 <<kModeSafe);
-	return noErr;
+	return statusErr;
 }
 
 // Sets the pixel depth of the screen.
@@ -843,30 +688,7 @@ static OSStatus GetModeTiming(VDTimingInfoRec *rec) {
 // --> csPage          Desired display page
 // <-- csBaseAddr      Base address of video RAM for this csMode
 static OSStatus SetMode(VDPageInfo *rec) {
-	return -1993;
-	/*
-	UInt32 newDepth, newPage, pageCount;
-
-	Trace(SetMode);
-
-	CHECK_OPEN(controlErr);
-
-	newDepth = DepthModeToDepth(pageInfo->csMode);
-	newPage = pageInfo->csPage;
-	QemuVga_GetModePages(GLOBAL.curMode, newDepth, NULL, &pageCount);
-
-	lprintf("Requested depth=%d page=%d\n", newDepth, newPage);
-	if (pageInfo->csPage >= pageCount)
-		return paramErr;
-
-	if (newDepth != GLOBAL.depth || newPage != GLOBAL.curPage)
-		QemuVga_SetMode(GLOBAL.curMode, newDepth, newPage);
-
-	pageInfo->csBaseAddr = GLOBAL.curBaseAddress;
-	lprintf("Returning BA: %lx\n", pageInfo->csBaseAddr);
-
-	return noErr;
-	*/
+	return controlErr;
 }
 
 // --> csMode          Relative bit depth to switch to
@@ -874,31 +696,7 @@ static OSStatus SetMode(VDPageInfo *rec) {
 // --> csPage          Video page number to switch into
 // <-- csBaseAddr      Base address of the new DisplayModeID
 static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
-	return -1993;
-	/*
-	UInt32 newMode, newDepth, newPage, pageCount;
-
-	Trace(SwitchMode);
-
-	CHECK_OPEN(controlErr);
-
-	newMode = switchInfo->csData - 1;
-	newDepth = DepthModeToDepth(switchInfo->csMode);
-	newPage = switchInfo->csPage;
-	QemuVga_GetModePages(GLOBAL.curMode, newDepth, NULL, &pageCount);
-
-	if (newPage >= pageCount)
-		return paramErr;
-
-	if (newMode != GLOBAL.curMode || newDepth != GLOBAL.depth ||
-	    newPage != GLOBAL.curPage) {
-		if (QemuVga_SetMode(newMode, newDepth, newPage))
-			return controlErr;
-	}
-	switchInfo->csBaseAddr = GLOBAL.curBaseAddress;
-
-	return noErr;
-	*/
+	return controlErr;
 }
 
 // Reports all display resolutions that the driver supports.
@@ -910,39 +708,7 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 // <-- csRefreshRate             Vertical refresh rate of the screen
 // <-- csMaxDepthMode            Max relative bit depth for this DisplayModeID
 static OSStatus GetNextResolution(VDResolutionInfoRec *rec) {
-	return -1993;
-	/*
-	UInt32 width, height;
-	int id = resInfo->csPreviousDisplayModeID;
-
-	Trace(GetNextResolution);
-
-	CHECK_OPEN(statusErr);
-
-	if (id == kDisplayModeIDFindFirstResolution)
-		id = 0;
-	else if (id == kDisplayModeIDCurrent)
-		id = GLOBAL.curMode;
-	id++;
-
-	if (id == GLOBAL.numModes + 1) {
-		resInfo->csDisplayModeID = kDisplayModeIDNoMoreResolutions;
-		return noErr;
-	}
-	if (id < 1 || id > GLOBAL.numModes)
-		return paramErr;
-
-	if (QemuVga_GetModeInfo(id - 1, &width, &height))
-		return paramErr;
-
-	resInfo->csDisplayModeID	= id;
-	resInfo->csHorizontalPixels	= width;
-	resInfo->csVerticalLines	= height;
-	resInfo->csRefreshRate		= 60;
-	resInfo->csMaxDepthMode		= MAX_DEPTH_MODE; /* XXX Calculate if it fits !
-
-	return noErr;
-	*/
+	return statusErr;
 }
 
 // Looks quite a bit hard-coded, isn't it ?
@@ -953,72 +719,29 @@ static OSStatus GetNextResolution(VDResolutionInfoRec *rec) {
 //                       and relative bit depth
 // <-- csDeviceType      Direct, fixed, or CLUT
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
-	return -1993;
-	/*
-	UInt32 width, height, depth, rowBytes, pageCount;
-	OSStatus err = noErr;
+	lprintf("GetVideoParameters csDisplayModeID=%d csDepthMode=%d\n",
+		rec->csDisplayModeID, rec->csDisplayModeID);
 
-	Trace(GetVideoParameters);
+	memset(rec->csVPBlockPtr, 0, sizeof(*rec->csVPBlockPtr));
+	rec->csVPBlockPtr->vpBaseOffset = 0; // For us, it's always 0
+	rec->csVPBlockPtr->vpRowBytes = 4 * W;
+	rec->csVPBlockPtr->vpBounds.top = 0; // Always 0
+	rec->csVPBlockPtr->vpBounds.left = 0; // Always 0
+	rec->csVPBlockPtr->vpBounds.bottom	= H;
+	rec->csVPBlockPtr->vpBounds.right = W;
+	rec->csVPBlockPtr->vpVersion = 0; // Always 0
+	rec->csVPBlockPtr->vpPackType = 0; // Always 0
+	rec->csVPBlockPtr->vpPackSize = 0; // Always 0
+	rec->csVPBlockPtr->vpHRes = 0x00480000;	// Hard coded to 72 dpi
+	rec->csVPBlockPtr->vpVRes = 0x00480000;	// Hard coded to 72 dpi
+	rec->csVPBlockPtr->vpPixelType = 16;
+	rec->csVPBlockPtr->vpPixelSize = 32;
+	rec->csVPBlockPtr->vpCmpCount = 3;
+	rec->csVPBlockPtr->vpCmpSize = 8;
+	rec->csVPBlockPtr->vpPlaneBytes = 0;
 
-	CHECK_OPEN(statusErr);
+	rec->csPageCount = 1;
+	rec->csDeviceType = directType;
 
-	if (videoParams->csDisplayModeID < 1 || videoParams->csDisplayModeID > GLOBAL.numModes)
-		return paramErr;
-	if (videoParams->csDepthMode > MAX_DEPTH_MODE)
-		return paramErr;
-	if (QemuVga_GetModeInfo(videoParams->csDisplayModeID - 1, &width, &height))
-		return paramErr;
-
-	depth = DepthModeToDepth(videoParams->csDepthMode);
-	QemuVga_GetModePages(videoParams->csDisplayModeID - 1, depth, NULL, &pageCount);
-	videoParams->csPageCount = pageCount;
-	lprintf("Video Params says %d pages\n", pageCount);
-
-	rowBytes = width * ((depth + 7) / 8);
-	(videoParams->csVPBlockPtr)->vpBaseOffset 		= 0;			// For us, it's always 0
-	(videoParams->csVPBlockPtr)->vpBounds.top 		= 0;			// Always 0
-	(videoParams->csVPBlockPtr)->vpBounds.left 		= 0;			// Always 0
-	(videoParams->csVPBlockPtr)->vpVersion 			= 0;			// Always 0
-	(videoParams->csVPBlockPtr)->vpPackType 		= 0;			// Always 0
-	(videoParams->csVPBlockPtr)->vpPackSize 		= 0;			// Always 0
-	(videoParams->csVPBlockPtr)->vpHRes 			= 0x00480000;	// Hard coded to 72 dpi
-	(videoParams->csVPBlockPtr)->vpVRes 			= 0x00480000;	// Hard coded to 72 dpi
-	(videoParams->csVPBlockPtr)->vpPlaneBytes 		= 0;			// Always 0
-	(videoParams->csVPBlockPtr)->vpBounds.bottom	= height;
-	(videoParams->csVPBlockPtr)->vpBounds.right		= width;
-	(videoParams->csVPBlockPtr)->vpRowBytes			= rowBytes;
-
-	switch (depth) {
-	case 8:
-		videoParams->csDeviceType 						= clutType;
-		(videoParams->csVPBlockPtr)->vpPixelType 		= 0;
-		(videoParams->csVPBlockPtr)->vpPixelSize 		= 8;
-		(videoParams->csVPBlockPtr)->vpCmpCount 		= 1;
-		(videoParams->csVPBlockPtr)->vpCmpSize 			= 8;
-		(videoParams->csVPBlockPtr)->vpPlaneBytes 		= 0;
-		break;
-	case 15:
-	case 16:
-		videoParams->csDeviceType 						= directType;
-		(videoParams->csVPBlockPtr)->vpPixelType 		= 16;
-		(videoParams->csVPBlockPtr)->vpPixelSize 		= 16;
-		(videoParams->csVPBlockPtr)->vpCmpCount 		= 3;
-		(videoParams->csVPBlockPtr)->vpCmpSize 			= 5;
-		(videoParams->csVPBlockPtr)->vpPlaneBytes 		= 0;
-		break;
-	case 32:
-		videoParams->csDeviceType 						= directType;
-		(videoParams->csVPBlockPtr)->vpPixelType 		= 16;
-		(videoParams->csVPBlockPtr)->vpPixelSize 		= 32;
-		(videoParams->csVPBlockPtr)->vpCmpCount 		= 3;
-		(videoParams->csVPBlockPtr)->vpCmpSize 			= 8;
-		(videoParams->csVPBlockPtr)->vpPlaneBytes 		= 0;
-		break;
-	default:
-		err = paramErr;
-		break;
-	}
-
-	return err;
-	*/
+	return noErr;
 }
