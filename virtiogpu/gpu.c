@@ -39,6 +39,7 @@ static OSStatus GetBaseAddr(VDPageInfo *rec);
 static OSStatus MySetEntries(VDSetEntryRecord *rec);
 static OSStatus DirectSetEntries(VDSetEntryRecord *rec);
 static OSStatus GetEntries(VDSetEntryRecord *rec);
+static OSStatus GetClutBehavior(VDClutBehavior *rec);
 static OSStatus SetGamma(VDGammaRecord *rec);
 static OSStatus GetGammaInfoList(VDGetGammaListRec *rec);
 static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec);
@@ -321,7 +322,7 @@ static void queueSizer(uint16_t queue, uint16_t *count, size_t *osize, size_t *i
 }
 
 static void setVBL(void) {
-	AbsoluteTime time = AddDurationToAbsolute(100, UpTime());
+	AbsoluteTime time = AddDurationToAbsolute(10, UpTime());
 	TimerID id;
 	SetInterruptTimer(&time, VBLBH, NULL, &id);
 }
@@ -401,6 +402,7 @@ static OSStatus control(short csCode, void *param) {
 static OSStatus status(short csCode, void *param) {
 	switch (csCode) {
 		case cscGetBaseAddr: return GetBaseAddr(param);
+		case cscGetClutBehavior: return GetClutBehavior(param);
 		case cscGetConnection: return GetConnection(param);
 		case cscGetCurMode: return GetCurMode(param);
 		case cscGetEntries: return GetEntries(param);
@@ -442,7 +444,8 @@ static OSStatus GetBaseAddr(VDPageInfo *rec) {
 // --> csStart     First entry in table
 // --> csCount     Number of entries to set
 static OSStatus MySetEntries(VDSetEntryRecord *rec) {
-	return controlErr;
+	lprintf("SetEntries csStart=%d csCount=%d\n", rec->csStart, rec->csCount);
+	return noErr;
 }
 
 // Normally, color table animation is not used on a direct device, but
@@ -460,7 +463,23 @@ static OSStatus DirectSetEntries(VDSetEntryRecord *rec) {
 // --> csStart     First entry in table
 // --> csCount     Number of entries to set
 static OSStatus GetEntries(VDSetEntryRecord *rec) {
-	return statusErr;
+	int i;
+	ColorSpec *array = (ColorSpec *)rec->csTable;
+	lprintf("GetEntries csStart=%d csCount=%d\n", rec->csStart, rec->csCount);
+	
+	for (i=0; i<=rec->csCount; i++) {
+		array[i].value = 0;
+		array[i].rgb.red = 0;
+		array[i].rgb.green = 0;
+		array[i].rgb.blue = 0;
+	}
+	return noErr;
+}
+
+// Not well documented, but needed by MacsBug
+static OSStatus GetClutBehavior(VDClutBehavior *rec) {
+	*rec = kSetClutAtSetEntries;
+	return noErr;
 }
 
 // Sets the gamma table in the driver that corrects RGB color values.
@@ -515,7 +534,8 @@ static OSStatus SetGray(VDGrayRecord *rec) {
 // devices.
 // <-- csMode      Luminance mapping enabled or disabled
 static OSStatus GetGray(VDGrayRecord *rec) {
-	return statusErr;
+	rec->csMode = 0;
+	return noErr;
 }
 
 // Returns the total number of video pages available in the current video
@@ -532,7 +552,8 @@ static OSStatus GetPages(VDPageInfo *rec) {
 // Graphics drivers that support hardware cursors must return true.
 // <-- csSupportsHardwareCursor  true if hardware cursor is supported
 static OSStatus SupportsHardwareCursor(VDSupportsHardwareCursorRec *rec) {
-	return statusErr;
+	rec->csSupportsHardwareCursor = 0;
+	return noErr;
 }
 
 // QuickDraw uses the SetHardwareCursor control call to set up the hardware
@@ -653,9 +674,13 @@ static OSStatus GetConnection(VDDisplayConnectInfoRec *rec) {
 // <-- csBaseAddr  Base address of video RAM for the current
 //                 DisplayModeID and relative bit depth
 static OSStatus GetMode(VDPageInfo *rec) {
-	return statusErr;
+	rec->csMode = kDepthMode1;
+	rec->csPage = 0;
+	rec->csBaseAddr = fb;
+	return noErr;
 }
 
+// Like GetMode, except:
 // PCI graphics drivers return the current DisplayModeID value in the
 // csData field.
 // <-- csMode      Current relative bit depth
