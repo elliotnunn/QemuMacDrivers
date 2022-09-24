@@ -16,7 +16,6 @@ Concepts:
 #include "lprintf.h"
 #include "debugpollpatch.h"
 
-static volatile int waiting;
 static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
 struct virtio_gpu_ctrl_hdr *conf;
@@ -31,7 +30,7 @@ static OSStatus initialize(DriverInitInfo *info);
 static void queueSizer(uint16_t queue, uint16_t *count, size_t *osize, size_t *isize);
 static void setVBL(void);
 static OSStatus VBLBH(void *p1, void *p2);
-static void queueRecv(uint16_t queue, uint16_t buffer, size_t len);
+static void scheduledRedraw(void);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
@@ -207,7 +206,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// size_t i;
 
 	OSStatus err;
-	err = VTInit(&info->deviceEntry, queueSizer, queueRecv, configChanged);
+	err = VTInit(&info->deviceEntry, queueSizer, NULL /*queueRecv*/, configChanged);
 	if (err) return err;
 
 	conf = VTDeviceConfig;
@@ -218,9 +217,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	obuf->le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_GET_DISPLAY_INFO);
 	obuf->le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 
-	waiting = 1;
 	VTSend(0, 0);
-	while (waiting) {};
+	while (!VTDone(0)) {}
 
 	if (EndianSwap32Bit(ibuf->le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) {
 		lprintf("Did NOT get VIRTIO_GPU_RESP_OK_DISPLAY_INFO\n");
@@ -254,9 +252,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		buf->le32_width = EndianSwap32Bit(W);
 		buf->le32_height = EndianSwap32Bit(H);
 
-		waiting = 1;
 		VTSend(0, 0);
-		while (waiting) {};
+		while (!VTDone(0)) {}
 
 		lprintf("Reply to VIRTIO_GPU_CMD_RESOURCE_CREATE_2D is %#x\n",
 			EndianSwap32Bit(ibuf->le32_type));
@@ -279,9 +276,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		buf2->le32_addr = EndianSwap32Bit((uint32_t)fb + 0x4000); // obviously a bad hack
 		buf2->le32_length = EndianSwap32Bit(64*1024*1024);
 
-		waiting = 1;
 		VTSend(0, 0);
-		while (waiting) {};
+		while (!VTDone(0)) {}
 
 		lprintf("Reply to VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING is %#x\n",
 			EndianSwap32Bit(ibuf->le32_type));
@@ -303,9 +299,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		buf->le32_scanout_id = EndianSwap32Bit(0); // index, 0-15
 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
 
-		waiting = 1;
 		VTSend(0, 0);
-		while (waiting) {};
+		while (!VTDone(0)) {}
 
 		lprintf("Reply to VIRTIO_GPU_CMD_SET_SCANOUT is %#x\n",
 			EndianSwap32Bit(ibuf->le32_type));
@@ -335,6 +330,15 @@ static OSStatus VBLBH(void *p1, void *p2) {
 	if (interruptsOn) {
 		VSLDoInterruptService(interruptService);
 	}
+
+	scheduledRedraw();
+
+	setVBL();
+	return noErr;
+}
+
+static void scheduledRedraw(void) {
+	if (!VTDone(0)) return; // cancel if still waiting
 
 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
 	{
@@ -369,13 +373,6 @@ static OSStatus VBLBH(void *p1, void *p2) {
 
 		VTSend(0, 2);
 	}
-
-	setVBL();
-	return noErr;
-}
-
-static void queueRecv(uint16_t queue, uint16_t buffer, size_t len) {
-	waiting = 0;
 }
 
 static OSStatus finalize(DriverFinalInfo *info) {
