@@ -311,6 +311,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	setVBL();
 
+	InstallDebugPollPatch(scheduledRedraw);
+
 	return noErr;
 }
 
