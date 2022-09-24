@@ -25,4 +25,7 @@ OSStatus VTInit(void *dev,
 // Pass in the index of the output buffer (the input buffer is already chained).
 void VTSend(uint16_t queue, uint16_t buffer);
 
+int VTDone(uint16_t queue);
+void VTSilence(uint16_t queue);
+
 #endif

@@ -422,6 +422,14 @@ void VTSend(uint16_t queue, uint16_t buffer) {
 	}
 }
 
+int VTDone(uint16_t queue) {
+	return gQueues[queue].used->le_idx == gQueues[queue].avail->le_idx;
+}
+
+void VTSilence(uint16_t queue) {
+	gQueues[queue].avail->le_flags = 0x0100; // EndianSwap16Bit(1);
+}
+
 // Run as a secondary interrupt to serialize
 OSStatus enqueueBH(void *queueU16, void *bufferU16) {
 	uint16_t q = (uint16_t)queueU16;
@@ -499,7 +507,7 @@ static void readQueues(void) {
 			size_t len = EndianSwap32Bit(gQueues[q].used->ring[idx].le_len);
 
 			// Call back to the device layer
-			gQueueRecv(q, buf, len);
+			if (gQueueRecv) gQueueRecv(q, buf, len);
 
 			gQueues[q].lastUsed++;
 		}
