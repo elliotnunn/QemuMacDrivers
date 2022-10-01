@@ -1,4 +1,4 @@
-#ifndef _DEBUGPOLLPATCH_H_
-#define _DEBUGPOLLPATCH_H_
+#ifndef DEBUGPOLLPATCH_H
+#define DEBUGPOLLPATCH_H
 void InstallDebugPollPatch(void (*callback)(void));
 #endif

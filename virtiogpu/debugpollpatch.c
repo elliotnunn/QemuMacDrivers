@@ -7,8 +7,6 @@
 #include <Patches.h>
 #include <Types.h>
 
-#include "lprintf.h"
-
 // If changing this code, also change the edit-offsets
 static unsigned char patch[] = {
 	0x0c, 0x80, 0x00, 0x00, 0x00, 0x04, //      cmp.l   #4,d0
