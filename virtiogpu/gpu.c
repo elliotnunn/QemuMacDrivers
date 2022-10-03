@@ -15,6 +15,7 @@ Concepts:
 #include "virtio-gpu-structs.h"
 #include "lprintf.h"
 #include "debugpollpatch.h"
+#include "dirtyrectpatch.h"
 
 static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
@@ -312,6 +313,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	setVBL();
 
 	InstallDebugPollPatch(scheduledRedraw);
+	InstallDirtyRectPatch(NULL);
 
 	return noErr;
 }
