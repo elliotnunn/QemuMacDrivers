@@ -85,100 +85,75 @@
 
 // Enum of MixedMode function signatures for the traps we patch
 enum {
-	kProcInfoGetTrap = kRegisterBased
-		| RESULT_SIZE(kFourByteCode)
-		| REGISTER_RESULT_LOCATION(kRegisterA0)
-		| REGISTER_ROUTINE_PARAMETER(1, kRegisterD1, kFourByteCode)
-		| REGISTER_ROUTINE_PARAMETER(2, kRegisterD0, kTwoByteCode),
-
-	kProcInfoSetTrap = kRegisterBased
-		| REGISTER_ROUTINE_PARAMETER(1, kRegisterD1, kFourByteCode)
-		| REGISTER_ROUTINE_PARAMETER(2, kRegisterA0, kFourByteCode)
-		| REGISTER_ROUTINE_PARAMETER(3, kRegisterD0, kTwoByteCode),
-
-	#define X(StdName, args, procInfo) StdName##ProcInfo = procInfo,
+	#define X(StdName, args, procInfo) k##StdName##ProcInfo = procInfo,
 	PATCH_LIST
 	#undef X
 };
 
 // Globals in which to store UPPs to old trap handlers
-static UniversalProcPtr theirGet;
-static UniversalProcPtr theirSet;
-
 #define X(StdName, args, procInfo) UniversalProcPtr their##StdName;
 PATCH_LIST
 #undef X
 
 // Prototypes for our new trap handlers
-static UniversalProcPtr myGet(uint16_t thisTrapNum, uint16_t trapNum);
-static void mySet(uint16_t thisTrapNum, UniversalProcPtr trapAddr, uint16_t trapNum);
-
 #define X(StdName, args, procInfo) static void my##StdName args;
 PATCH_LIST
 #undef X
 
 // MixedMode outine descriptors for our new trap handlers
-static RoutineDescriptor myGetDesc = BUILD_ROUTINE_DESCRIPTOR(kProcInfoGetTrap, myGet);
-static RoutineDescriptor mySetDesc = BUILD_ROUTINE_DESCRIPTOR(kProcInfoSetTrap, mySet);
-
 #define X(StdName, args, procInfo) \
 	static RoutineDescriptor my##StdName##Desc = BUILD_ROUTINE_DESCRIPTOR( \
-		StdName##ProcInfo, my##StdName);
+		k##StdName##ProcInfo, my##StdName);
 PATCH_LIST
 #undef X
 
 // Other globals and prototypes
-static int finishedBooting(void);
+static void secondStage(void);
+//static int finishedBooting(void);
 static void (*gCallback)(short top, short left, short bottom, short right);
 static void checkTraps(void);
 static void dumpPort(void);
 
 void InstallDirtyRectPatch(void (*callback)(short top, short left, short bottom, short right)) {
+	static char patch[] = {
+		0x0c, 0x6f, 0xff, 0xda, 0x00, 0x06, //      cmp.w   #-38,6(sp) ; InitScripts?
+		0xff, 0x0e,                         //      bne.s   old
+		0x48, 0xe7, 0xe0, 0xe0,             //      movem.l d0-d2/a0-a2,-(sp)
+		0x4e, 0xb9, 0xff, 0xff, 0xff, 0xff, //      jsr     <callback>
+		0x4c, 0xdf, 0x07, 0x07,             //      movem.l (sp)+,d0-d2/a0-a2
+		0x4e, 0xf9, 0xff, 0xff, 0xff, 0xff  // old: jmp     <original>
+	};
+
+	static RoutineDescriptor desc = BUILD_ROUTINE_DESCRIPTOR(0, secondStage);
+
+	*(void **)(patch + 14) = &desc;
+	*(void **)(patch + 24) = GetOSTrapAddress(_ScriptUtil);
+
+	// Clear 68k emulator's instruction cache
+	BlockMove(patch, patch, sizeof(patch));
+	BlockMove(&desc, &desc, sizeof(desc));
+
+	SetOSTrapAddress((void *)patch, _ScriptUtil);
+	
+	gCallback = callback;
+}
+
+static void secondStage(void) {
+	lprintf("Second stage\n");
+
 	// Install our patches, saving the old traps
 	#define X(StdName, args, procInfo) \
 		their##StdName = GetToolTrapAddress(_##StdName); \
 		SetToolTrapAddress(&my##StdName##Desc, _##StdName);
 	PATCH_LIST
 	#undef X
-
-	theirGet = GetOSTrapAddress(_GetToolTrapAddress);
-	SetOSTrapAddress(&myGetDesc, _GetToolTrapAddress);
-
-	theirSet = GetOSTrapAddress(_SetToolTrapAddress);
-	SetOSTrapAddress(&mySetDesc, _SetToolTrapAddress);
-
-	gCallback = callback;
 }
 
-static UniversalProcPtr myGet(uint16_t thisTrapNum, uint16_t trapNum) {
-	if (!finishedBooting()) {
-		switch (trapNum & 0x3ff) {
-			#define X(StdName, args, procInfo) case _##StdName & 0x3ff: return their##StdName;
-			PATCH_LIST
-			#undef X
-		}
-	}
-
-	return (UniversalProcPtr)CallOSTrapUniversalProc(theirGet, kProcInfoGetTrap, thisTrapNum, trapNum);
-}
-
-static void mySet(uint16_t thisTrapNum, UniversalProcPtr trapAddr, uint16_t trapNum) {
-	if (!finishedBooting()) {
-		switch (trapNum & 0x3ff) {
-			#define X(StdName, args, procInfo) case _##StdName & 0x3ff: their##StdName = trapAddr; return;
-			PATCH_LIST
-			#undef X
-		}
-	}
-
-	CallOSTrapUniversalProc(theirSet, kProcInfoSetTrap, thisTrapNum, trapAddr, trapNum);
-}
-
-static int finishedBooting(void) {
-	static int finished = 0;
-	if (!finished && *(signed char *)0x910 >= 0) finished = 1;
-	return finished;
-}
+// static int finishedBooting(void) {
+// 	static int finished = 0;
+// 	if (!finished && *(signed char *)0x910 >= 0) finished = 1;
+// 	return finished;
+// }
 
 static void myStdText(short count, const void *textAddr, Point numer, Point denom) {
 // 	int i;
@@ -190,49 +165,49 @@ static void myStdText(short count, const void *textAddr, Point numer, Point deno
 	dumpPort();
 	checkTraps();
 
-	CallUniversalProc(theirStdText, StdTextProcInfo, count, textAddr, numer, denom);
+	CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
 }
 
 static void myStdLine(Point newPt) {
 	lprintf("StdLine(%#x)\n", newPt);
-	CallUniversalProc(theirStdLine, StdLineProcInfo, newPt);
+	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
 }
 
 static void myStdRect(GrafVerb verb, const Rect *r) {
 	lprintf("StdRect\n");
 	dumpPort();
-	CallUniversalProc(theirStdRect, StdRectProcInfo, verb, r);
+	CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, r);
 }
 
 static void myStdRRect(GrafVerb verb, const Rect *r, short ovalWidth, short ovalHeight) {
 	lprintf("StdRRect\n");
-	CallUniversalProc(theirStdRRect, StdRRectProcInfo, verb, r, ovalWidth, ovalHeight);
+	CallUniversalProc(theirStdRRect, kStdRRectProcInfo, verb, r, ovalWidth, ovalHeight);
 }
 
 static void myStdOval(GrafVerb verb, const Rect *r) {
 	lprintf("StdOval\n");
-	CallUniversalProc(theirStdOval, StdOvalProcInfo, verb, r);
+	CallUniversalProc(theirStdOval, kStdOvalProcInfo, verb, r);
 }
 
 static void myStdArc(GrafVerb verb, const Rect *r, short startAngle, short arcAngle) {
 	lprintf("StdArc\n");
-	CallUniversalProc(theirStdArc, StdArcProcInfo, verb, r, startAngle, arcAngle);
+	CallUniversalProc(theirStdArc, kStdArcProcInfo, verb, r, startAngle, arcAngle);
 }
 
 static void myStdPoly(GrafVerb verb, PolyHandle poly) {
 	lprintf("StdPoly\n");
-	CallUniversalProc(theirStdPoly, StdPolyProcInfo, verb, poly);
+	CallUniversalProc(theirStdPoly, kStdPolyProcInfo, verb, poly);
 }
 
 static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
 	lprintf("StdRgn\n");
-	CallUniversalProc(theirStdRgn, StdRgnProcInfo, verb, rgn);
+	CallUniversalProc(theirStdRgn, kStdRgnProcInfo, verb, rgn);
 }
 
 static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *dstRect, short mode, RgnHandle maskRgn) {
 	lprintf("StdBits\n");
 	dumpPort();
-	CallUniversalProc(theirStdBits, StdBitsProcInfo, srcBits, srcRect, dstRect, mode, maskRgn);
+	CallUniversalProc(theirStdBits, kStdBitsProcInfo, srcBits, srcRect, dstRect, mode, maskRgn);
 }
 
 static void checkTraps(void) {
