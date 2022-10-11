@@ -9,9 +9,24 @@
 
 #include "lprintf.h"
 
-// X(StdName, arguments, procInfo)
+// X(trap, StdName, arguments, procInfo)
 #define PATCH_LIST \
 	X( \
+		0xa922, \
+		BeginUpdate, \
+		(GrafPort *window), \
+		kPascalStackBased \
+			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
+	) \
+	X( \
+		0xa923, \
+		EndUpdate, \
+		(GrafPort *window), \
+		kPascalStackBased \
+			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
+	) \
+	X( \
+		0xa882, \
 		StdText, \
 		(short count, const void *textAddr, Point numer, Point denom), \
 		kPascalStackBased \
@@ -21,21 +36,24 @@
 			| STACK_ROUTINE_PARAMETER(4, kFourByteCode) \
 	) \
 	X( \
+		0xa890, \
 		StdLine, \
 		(Point newPt), \
 		kPascalStackBased \
 			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
 	) \
 	X( \
+		0xa8a0, \
 		StdRect, \
-		(GrafVerb verb, const Rect *r), \
+		(GrafVerb verb, const Rect *rect), \
 		kPascalStackBased \
 			| STACK_ROUTINE_PARAMETER(1, kOneByteCode) \
 			| STACK_ROUTINE_PARAMETER(2, kFourByteCode) \
 	) \
 	X( \
+		0xa8af, \
 		StdRRect, \
-		(GrafVerb verb, const Rect *r, short ovalWidth, short ovalHeight), \
+		(GrafVerb verb, const Rect *rect, short ovalWidth, short ovalHeight), \
 		kPascalStackBased \
 			| STACK_ROUTINE_PARAMETER(1, kOneByteCode) \
 			| STACK_ROUTINE_PARAMETER(2, kFourByteCode) \
@@ -43,6 +61,7 @@
 			| STACK_ROUTINE_PARAMETER(4, kTwoByteCode) \
 	) \
 	X( \
+		0xa8b6, \
 		StdOval, \
 		(GrafVerb verb, const Rect *r), \
 		kPascalStackBased \
@@ -50,6 +69,7 @@
 			| STACK_ROUTINE_PARAMETER(2, kFourByteCode) \
 	) \
 	X( \
+		0xa8bd, \
 		StdArc, \
 		(GrafVerb verb, const Rect *r, short startAngle, short arcAngle), \
 		kPascalStackBased \
@@ -59,6 +79,7 @@
 			| STACK_ROUTINE_PARAMETER(4, kTwoByteCode) \
 	) \
 	X( \
+		0xa8c5, \
 		StdPoly, \
 		(GrafVerb verb, PolyHandle poly), \
 		kPascalStackBased \
@@ -66,6 +87,7 @@
 			| STACK_ROUTINE_PARAMETER(2, kFourByteCode) \
 	) \
 	X( \
+		0xa8d1, \
 		StdRgn, \
 		(GrafVerb verb, RgnHandle rgn), \
 		kPascalStackBased \
@@ -73,6 +95,7 @@
 			| STACK_ROUTINE_PARAMETER(2, kFourByteCode) \
 	) \
 	X( \
+		0xa8eb, \
 		StdBits, \
 		(const BitMap *srcBits, const Rect *srcRect, const Rect *dstRect, short mode, RgnHandle maskRgn), \
 		kPascalStackBased \
@@ -83,25 +106,59 @@
 			| STACK_ROUTINE_PARAMETER(5, kFourByteCode) \
 	) \
 
+// The classics
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
+// Macro so we can efficiently pass rect by reference
+#define QUICKCLIP(port, tp, lt, bt, rt) { \
+	Rect *bb1 = &(*port->clipRgn)->rgnBBox; \
+	Rect *bb2 = &(*port->visRgn)->rgnBBox; \
+	tp = MAX(tp, bb1->top); \
+	lt = MAX(lt, bb1->left); \
+	bt = MIN(bt, bb1->bottom); \
+	rt = MIN(rt, bb1->right); \
+	tp = MAX(tp, bb2->top); \
+	lt = MAX(lt, bb2->left); \
+	bt = MIN(bt, bb2->bottom); \
+	rt = MIN(rt, bb2->right); \
+}
+
+// The system LocalToGlobal ignores portRect!
+#define LOCALTOGLOBAL(port, tp, lt, bt, rt) { \
+	Rect *MACROBOUNDS; \
+	short dx, dy; \
+	if ((port->portBits.rowBytes & 0xc000) == 0xc000) \
+		MACROBOUNDS = &(*((CGrafPort *)port)->portPixMap)->bounds; \
+	else \
+		MACROBOUNDS = &port->portBits.bounds; \
+	dy = MACROBOUNDS->top - port->portRect.top; \
+	dx = MACROBOUNDS->left - port->portRect.left; \
+	tp += dy; \
+	bt += dy; \
+	lt += dx; \
+	rt += dx; \
+}
+
 // Enum of MixedMode function signatures for the traps we patch
 enum {
-	#define X(StdName, args, procInfo) k##StdName##ProcInfo = procInfo,
+	#define X(trap, StdName, args, procInfo) k##StdName##ProcInfo = procInfo,
 	PATCH_LIST
 	#undef X
 };
 
 // Globals in which to store UPPs to old trap handlers
-#define X(StdName, args, procInfo) UniversalProcPtr their##StdName;
+#define X(trap, StdName, args, procInfo) UniversalProcPtr their##StdName;
 PATCH_LIST
 #undef X
 
 // Prototypes for our new trap handlers
-#define X(StdName, args, procInfo) static void my##StdName args;
+#define X(trap, StdName, args, procInfo) static void my##StdName args;
 PATCH_LIST
 #undef X
 
 // MixedMode outine descriptors for our new trap handlers
-#define X(StdName, args, procInfo) \
+#define X(trap, StdName, args, procInfo) \
 	static RoutineDescriptor my##StdName##Desc = BUILD_ROUTINE_DESCRIPTOR( \
 		k##StdName##ProcInfo, my##StdName);
 PATCH_LIST
@@ -109,15 +166,13 @@ PATCH_LIST
 
 // Other globals and prototypes
 static void secondStage(void);
-//static int finishedBooting(void);
 static void (*gCallback)(short top, short left, short bottom, short right);
-static void checkTraps(void);
-static void dumpPort(void);
+static int isOnscreen(GrafPort *thePort);
+static void tintRect(long color, int t, int l, int b, int r);
+static void delay(unsigned long ticks);
 
 void InstallDirtyRectPatch(void (*callback)(short top, short left, short bottom, short right)) {
 	static char patch[] = {
-		0x0c, 0x6f, 0xff, 0xda, 0x00, 0x06, //      cmp.w   #-38,6(sp) ; InitScripts?
-		0xff, 0x0e,                         //      bne.s   old
 		0x48, 0xe7, 0xe0, 0xe0,             //      movem.l d0-d2/a0-a2,-(sp)
 		0x4e, 0xb9, 0xff, 0xff, 0xff, 0xff, //      jsr     <callback>
 		0x4c, 0xdf, 0x07, 0x07,             //      movem.l (sp)+,d0-d2/a0-a2
@@ -126,166 +181,236 @@ void InstallDirtyRectPatch(void (*callback)(short top, short left, short bottom,
 
 	static RoutineDescriptor desc = BUILD_ROUTINE_DESCRIPTOR(0, secondStage);
 
-	*(void **)(patch + 14) = &desc;
-	*(void **)(patch + 24) = GetOSTrapAddress(_ScriptUtil);
+	*(void **)(patch + 6) = &desc;
+	*(void **)(patch + 16) = GetOSTrapAddress(_InitEvents);
 
 	// Clear 68k emulator's instruction cache
 	BlockMove(patch, patch, sizeof(patch));
 	BlockMove(&desc, &desc, sizeof(desc));
 
-	SetOSTrapAddress((void *)patch, _ScriptUtil);
-	
+	SetOSTrapAddress((void *)patch, _InitEvents);
+
 	gCallback = callback;
 }
 
 static void secondStage(void) {
-	lprintf("Second stage\n");
+	static int done = 0;
+	if (done) return;
 
-	// Install our patches, saving the old traps
-	#define X(StdName, args, procInfo) \
-		their##StdName = GetToolTrapAddress(_##StdName); \
-		SetToolTrapAddress(&my##StdName##Desc, _##StdName);
+	// If CurApName is set then we missed our chance
+	if (*(signed char *)0x910 >= 0) {
+		done = 1;
+		return;
+	}
+
+	#define X(trap, StdName, args, procInfo) \
+		if (*(unsigned short *)GetToolTrapAddress(trap) != 0xaafe) return;
 	PATCH_LIST
 	#undef X
+
+	done = 1;
+
+	// Install our patches, saving the old traps
+	#define X(trap, StdName, args, procInfo) \
+		their##StdName = GetToolTrapAddress(trap); \
+		SetToolTrapAddress(&my##StdName##Desc, trap);
+	PATCH_LIST
+	#undef X
+
+	lprintf("Installed QuickDraw patches\n");
 }
 
-// static int finishedBooting(void) {
-// 	static int finished = 0;
-// 	if (!finished && *(signed char *)0x910 >= 0) finished = 1;
-// 	return finished;
-// }
+static void myBeginUpdate(GrafPort *theWindow) {
+	lprintf("BeginUpdate(%#x)\n", theWindow);
+	CallUniversalProc(theirBeginUpdate, kBeginUpdateProcInfo, theWindow);
+}
+
+static void myEndUpdate(GrafPort *theWindow) {
+	lprintf("EndUpdate(%#x)\n", theWindow);
+	CallUniversalProc(theirEndUpdate, kEndUpdateProcInfo, theWindow);
+}
 
 static void myStdText(short count, const void *textAddr, Point numer, Point denom) {
-// 	int i;
-// 	lprintf("StdText: ");
-// 	for (i=0; i<count; i++) {
-// 		lprintf("%c", ((char *)textAddr)[i]);
+// 	int t, l, b, r;
+// 
+// 	GrafPort *port;
+// 	GetPort(&port);
+// 
+// 	if (!isOnscreen(port)) {
+// 		CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
+// 		return;
 // 	}
-// 	lprintf("\n");
-	dumpPort();
-	checkTraps();
-
+// 
+// 	l = port->pnLoc.h;
 	CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
+// 	r = port->pnLoc.h;
+// 
+// 	if (numer.v <= denom.v) {
+// 		t = port->pnLoc.v - port->txSize;
+// 		b = port->pnLoc.v + port->txSize;
+// 	} else {
+// 		t = -0x8000;
+// 		b = 0x7fff;
+// 	}
+// 
+// 	QUICKCLIP(port, t, l, b, r);
+// 	LOCALTOGLOBAL(port, t, l, b, r);
+
+	//tintRect(0xff0000, t, l, b, r);
 }
 
 static void myStdLine(Point newPt) {
-	lprintf("StdLine(%#x)\n", newPt);
+// 	int t, l, b, r;
+// 	GrafPort *port;
+// 
+// 	GetPort(&port);
+// 
+// 	t = port->pnLoc.v;
+// 	l = port->pnLoc.h;
+// 	b = newPt.v;
+// 	r = newPt.h;
+// 	
+// 	if (t > b) {
+// 		int swap = t;
+// 		t = b;
+// 		b = swap;
+// 	}
+// 
+// 	if (l > r) {
+// 		int swap = l;
+// 		l = r;
+// 		r = swap;
+// 	}
+// 
+// 	b += port->pnSize.v;
+// 	l += port->pnSize.h;
+// 	
+// 	QUICKCLIP(port, t, l, b, r);
+// 	LOCALTOGLOBAL(port, t, l, b, r);
+
 	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
+
+	//tintRect(0x00ff00, t, l, b, r);
 }
 
-static void myStdRect(GrafVerb verb, const Rect *r) {
-	lprintf("StdRect\n");
-	dumpPort();
-	CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, r);
+static void myStdRect(GrafVerb verb, const Rect *rect) {
+	int t, l, b, r;
+	GrafPort *port;
+
+	GetPort(&port);
+
+	if (!isOnscreen(port)) {
+		CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, rect);
+		return;
+	}
+
+	t = rect->top;
+	l = rect->left;
+	b = rect->bottom;
+	r = rect->right;
+
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+
+	CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, rect);
+
+	//tintRect(0x0000ff, t, l, b, r);
 }
 
-static void myStdRRect(GrafVerb verb, const Rect *r, short ovalWidth, short ovalHeight) {
-	lprintf("StdRRect\n");
-	CallUniversalProc(theirStdRRect, kStdRRectProcInfo, verb, r, ovalWidth, ovalHeight);
+static void myStdRRect(GrafVerb verb, const Rect *rect, short ovalWidth, short ovalHeight) {
+// 	int t, l, b, r;
+// 	GrafPort *port;
+// 
+// 	GetPort(&port);
+// 
+// 	t = rect->top;
+// 	l = rect->left;
+// 	b = rect->bottom;
+// 	r = rect->right;
+// 	
+// 	QUICKCLIP(port, t, l, b, r);
+// 	LOCALTOGLOBAL(port, t, l, b, r);
+
+	CallUniversalProc(theirStdRRect, kStdRRectProcInfo, verb, rect, ovalWidth, ovalHeight);
+
+	//tintRect(0x000000, t, l, b, r);
 }
 
 static void myStdOval(GrafVerb verb, const Rect *r) {
-	lprintf("StdOval\n");
+	//lprintf("StdOval\n");
 	CallUniversalProc(theirStdOval, kStdOvalProcInfo, verb, r);
 }
 
 static void myStdArc(GrafVerb verb, const Rect *r, short startAngle, short arcAngle) {
-	lprintf("StdArc\n");
+	//lprintf("StdArc\n");
 	CallUniversalProc(theirStdArc, kStdArcProcInfo, verb, r, startAngle, arcAngle);
 }
 
 static void myStdPoly(GrafVerb verb, PolyHandle poly) {
-	lprintf("StdPoly\n");
+	//lprintf("StdPoly\n");
 	CallUniversalProc(theirStdPoly, kStdPolyProcInfo, verb, poly);
 }
 
 static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
-	lprintf("StdRgn\n");
+	//lprintf("StdRgn\n");
 	CallUniversalProc(theirStdRgn, kStdRgnProcInfo, verb, rgn);
 }
 
 static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *dstRect, short mode, RgnHandle maskRgn) {
-	lprintf("StdBits\n");
-	dumpPort();
+	//lprintf("StdBits\n");
 	CallUniversalProc(theirStdBits, kStdBitsProcInfo, srcBits, srcRect, dstRect, mode, maskRgn);
 }
 
-static void checkTraps(void) {
-	int bad = 0;
+static int isOnscreen(GrafPort *thePort) {
+	GDevice *mainDev;
+	void *screenBits;
+	void *portBits;
 
-	lprintf("traps:");
+	if (thePort->picSave) return 0;
 
-	#define X(StdName, args, procInfo) \
-		if(*(void **)(0xe00 + 4 * (_##StdName & 0x3ff)) != &my##StdName##Desc) { \
-			lprintf(" %s=%x", #StdName, *(long *)(0xe00 + 4 * (_##StdName & 0x3ff))); \
-			bad = 1; \
-		}
-	PATCH_LIST
-	#undef X
+	mainDev = **(GDevice ***)0x8a4;
+	screenBits = (*mainDev->gdPMap)->baseAddr;
 
-	if (bad)
-		lprintf("\n");
-	else
-		lprintf(" ok\n");
+	if ((thePort->portBits.rowBytes & 0xc000) == 0xc000) {
+		portBits = (*((CGrafPort *)thePort)->portPixMap)->baseAddr;
+	} else {
+		portBits = thePort->portBits.baseAddr;
+	}
+	
+ 	return portBits == screenBits;
 }
 
-static void dumpPort(void) {
-	GrafPtr qd;
-	GetPort(&qd);
+static void tintRect(long color, int t, int l, int b, int r) {
+	PixMap *screen = *(**(GDevice ***)0x8a4)->gdPMap;
 
-	lprintf(" text=");
-	if (qd->grafProcs->textProc == &myStdTextDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->textProc);
+	long *ptr;
+	int x, y;
+	int odd = 0;
 
-	lprintf(" line=");
-	if (qd->grafProcs->lineProc == &myStdLineDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->lineProc);
+	//lprintf("tintRect(%d,%d,%d,%d,%d)\n", color, t, l, b, r);
 
-	lprintf(" rect=");
-	if (qd->grafProcs->rectProc == &myStdRectDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->rectProc);
+	for (y = t; y < b; y++) {
+		ptr = (long *)((char *)screen->baseAddr + y * (screen->rowBytes & 0x3fff) + 4 * l);
 
-	lprintf(" rRect=");
-	if (qd->grafProcs->rRectProc == &myStdRRectDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->rRectProc);
+		*ptr = color;
 
-	lprintf(" oval=");
-	if (qd->grafProcs->ovalProc == &myStdOvalDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->ovalProc);
+		if (odd) ptr++;
+		odd = !odd;
 
-	lprintf(" arc=");
-	if (qd->grafProcs->arcProc == &myStdArcDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->arcProc);
+		for (x = l; x < r; x += 2) {
+			*ptr = color;
+			if (y == t)
+				ptr++;
+			else
+				ptr += 2;
+		}
+	};
+}
 
-	lprintf(" poly=");
-	if (qd->grafProcs->polyProc == &myStdPolyDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->polyProc);
+#include <LowMem.h>
 
-	lprintf(" rgn=");
-	if (qd->grafProcs->rgnProc == &myStdRgnDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->rgnProc);
+static void delay(unsigned long ticks) {
+	unsigned long t0 = LMGetTicks();
 
-	lprintf(" bits=");
-	if (qd->grafProcs->bitsProc == &myStdBitsDesc)
-		lprintf("me");
-	else
-		lprintf("%x", qd->grafProcs->bitsProc);
-	
-	lprintf("\n");
+	while (LMGetTicks() - t0 < ticks) {}
 }
