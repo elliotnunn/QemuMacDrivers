@@ -231,78 +231,71 @@ static void myEndUpdate(GrafPort *theWindow) {
 }
 
 static void myStdText(short count, const void *textAddr, Point numer, Point denom) {
-// 	int t, l, b, r;
-// 
-// 	GrafPort *port;
-// 	GetPort(&port);
-// 
-// 	if (!isOnscreen(port)) {
-// 		CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
-// 		return;
-// 	}
-// 
-// 	l = port->pnLoc.h;
-	CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
-// 	r = port->pnLoc.h;
-// 
-// 	if (numer.v <= denom.v) {
-// 		t = port->pnLoc.v - port->txSize;
-// 		b = port->pnLoc.v + port->txSize;
-// 	} else {
-// 		t = -0x8000;
-// 		b = 0x7fff;
-// 	}
-// 
-// 	QUICKCLIP(port, t, l, b, r);
-// 	LOCALTOGLOBAL(port, t, l, b, r);
+	int t, l, b, r;
 
-	//tintRect(0xff0000, t, l, b, r);
+	GrafPort *port;
+	GetPort(&port);
+
+	l = port->pnLoc.h;
+	CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
+	if (!isOnscreen(port)) return;
+	r = port->pnLoc.h;
+
+	if (numer.v <= denom.v) {
+		t = port->pnLoc.v - port->txSize;
+		b = port->pnLoc.v + port->txSize;
+	} else {
+		t = -0x8000;
+		b = 0x7fff;
+	}
+
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
 static void myStdLine(Point newPt) {
-// 	int t, l, b, r;
-// 	GrafPort *port;
-// 
-// 	GetPort(&port);
-// 
-// 	t = port->pnLoc.v;
-// 	l = port->pnLoc.h;
-// 	b = newPt.v;
-// 	r = newPt.h;
-// 	
-// 	if (t > b) {
-// 		int swap = t;
-// 		t = b;
-// 		b = swap;
-// 	}
-// 
-// 	if (l > r) {
-// 		int swap = l;
-// 		l = r;
-// 		r = swap;
-// 	}
-// 
-// 	b += port->pnSize.v;
-// 	l += port->pnSize.h;
-// 	
-// 	QUICKCLIP(port, t, l, b, r);
-// 	LOCALTOGLOBAL(port, t, l, b, r);
+	int t, l, b, r;
+	GrafPort *port;
 
 	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
 
-	//tintRect(0x00ff00, t, l, b, r);
+	GetPort(&port);
+	if (!isOnscreen(port)) return;
+
+	t = port->pnLoc.v;
+	l = port->pnLoc.h;
+	b = newPt.v;
+	r = newPt.h;
+	
+	if (t > b) {
+		int swap = t;
+		t = b;
+		b = swap;
+	}
+
+	if (l > r) {
+		int swap = l;
+		l = r;
+		r = swap;
+	}
+
+	b += port->pnSize.v;
+	l += port->pnSize.h;
+	
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
 static void myStdRect(GrafVerb verb, const Rect *rect) {
 	int t, l, b, r;
 	GrafPort *port;
 
-	GetPort(&port);
+	CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, rect);
 
-	if (!isOnscreen(port)) {
-		CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, rect);
-		return;
-	}
+	GetPort(&port);
+	if (!isOnscreen(port)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -311,54 +304,125 @@ static void myStdRect(GrafVerb verb, const Rect *rect) {
 
 	QUICKCLIP(port, t, l, b, r);
 	LOCALTOGLOBAL(port, t, l, b, r);
-
-	CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, rect);
-
-	//tintRect(0x0000ff, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
 static void myStdRRect(GrafVerb verb, const Rect *rect, short ovalWidth, short ovalHeight) {
-// 	int t, l, b, r;
-// 	GrafPort *port;
-// 
-// 	GetPort(&port);
-// 
-// 	t = rect->top;
-// 	l = rect->left;
-// 	b = rect->bottom;
-// 	r = rect->right;
-// 	
-// 	QUICKCLIP(port, t, l, b, r);
-// 	LOCALTOGLOBAL(port, t, l, b, r);
+	int t, l, b, r;
+	GrafPort *port;
 
 	CallUniversalProc(theirStdRRect, kStdRRectProcInfo, verb, rect, ovalWidth, ovalHeight);
 
-	//tintRect(0x000000, t, l, b, r);
+	GetPort(&port);
+	if (!isOnscreen(port)) return;
+
+	t = rect->top;
+	l = rect->left;
+	b = rect->bottom;
+	r = rect->right;
+
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
-static void myStdOval(GrafVerb verb, const Rect *r) {
-	//lprintf("StdOval\n");
-	CallUniversalProc(theirStdOval, kStdOvalProcInfo, verb, r);
+static void myStdOval(GrafVerb verb, const Rect *rect) {
+	int t, l, b, r;
+	GrafPort *port;
+
+	CallUniversalProc(theirStdOval, kStdOvalProcInfo, verb, rect);
+
+	GetPort(&port);
+	if (!isOnscreen(port)) return;
+
+	t = rect->top;
+	l = rect->left;
+	b = rect->bottom;
+	r = rect->right;
+
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
-static void myStdArc(GrafVerb verb, const Rect *r, short startAngle, short arcAngle) {
-	//lprintf("StdArc\n");
-	CallUniversalProc(theirStdArc, kStdArcProcInfo, verb, r, startAngle, arcAngle);
+static void myStdArc(GrafVerb verb, const Rect *rect, short startAngle, short arcAngle) {
+	int t, l, b, r;
+	GrafPort *port;
+
+	CallUniversalProc(theirStdArc, kStdArcProcInfo, verb, rect, startAngle, arcAngle);
+
+	GetPort(&port);
+	if (!isOnscreen(port)) return;
+
+	t = rect->top;
+	l = rect->left;
+	b = rect->bottom;
+	r = rect->right;
+
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
 static void myStdPoly(GrafVerb verb, PolyHandle poly) {
-	//lprintf("StdPoly\n");
+	Rect *rect;
+	int t, l, b, r;
+	GrafPort *port;
+
 	CallUniversalProc(theirStdPoly, kStdPolyProcInfo, verb, poly);
+
+	GetPort(&port);
+	if (!isOnscreen(port)) return;
+
+	rect = &(**poly).polyBBox;
+	t = rect->top;
+	l = rect->left;
+	b = rect->bottom + port->pnSize.v;
+	r = rect->right + port->pnSize.h;
+
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
 static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
-	//lprintf("StdRgn\n");
+	Rect *rect;
+	int t, l, b, r;
+	GrafPort *port;
+
 	CallUniversalProc(theirStdRgn, kStdRgnProcInfo, verb, rgn);
+
+	GetPort(&port);
+	if (!isOnscreen(port)) return;
+
+	rect = &(**rgn).rgnBBox;
+	t = rect->top;
+	l = rect->left;
+	b = rect->bottom;
+	r = rect->right;
+
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
 static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *dstRect, short mode, RgnHandle maskRgn) {
-	//lprintf("StdBits\n");
+	int t, l, b, r;
+	GrafPort *port;
+
 	CallUniversalProc(theirStdBits, kStdBitsProcInfo, srcBits, srcRect, dstRect, mode, maskRgn);
+
+	GetPort(&port);
+	if (!isOnscreen(port)) return;
+
+	t = dstRect->top;
+	l = dstRect->left;
+	b = dstRect->bottom;
+	r = dstRect->right;
+
+	QUICKCLIP(port, t, l, b, r);
+	LOCALTOGLOBAL(port, t, l, b, r);
+	gCallback(t, l, b, r);
 }
 
 static int isOnscreen(GrafPort *thePort) {
