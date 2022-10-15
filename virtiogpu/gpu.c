@@ -17,11 +17,13 @@ Concepts:
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
 
+#define BIG (64*1024*1024)
+
 static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
 struct virtio_gpu_ctrl_hdr *conf;
 struct virtio_gpu_ctrl_hdr *obuf, *ibuf;
-void *fb;
+void *big, *backbuf, *frontbuf;
 int W, H;
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
@@ -173,18 +175,18 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	case kControlCommand:
 		err = control((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
 
-		if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames))
-			lprintf("Control(%s) = %d\n", controlNames[(*pb.pb).cntrlParam.csCode], err);
-		else
-			lprintf("Control(%d) = %d\n", (*pb.pb).cntrlParam.csCode, err);
+// 		if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames))
+// 			lprintf("Control(%s) = %d\n", controlNames[(*pb.pb).cntrlParam.csCode], err);
+// 		else
+// 			lprintf("Control(%d) = %d\n", (*pb.pb).cntrlParam.csCode, err);
 		break;
 	case kStatusCommand:
 		err = status((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
 
-		if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames))
-			lprintf("Status(%s) = %d\n", statusNames[(*pb.pb).cntrlParam.csCode], err);
-		else
-			lprintf("Status(%d) = %d\n", (*pb.pb).cntrlParam.csCode, err);
+// 		if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames))
+// 			lprintf("Status(%s) = %d\n", statusNames[(*pb.pb).cntrlParam.csCode], err);
+// 		else
+// 			lprintf("Status(%d) = %d\n", (*pb.pb).cntrlParam.csCode, err);
 		break;
 	case kOpenCommand:
 	case kCloseCommand:
@@ -231,11 +233,20 @@ static OSStatus initialize(DriverInitInfo *info) {
 	H = EndianSwap32Bit(((struct virtio_gpu_resp_display_info *)ibuf)->pmodes[0].r.le32_height);
 	lprintf("display %dx%d\n", W, H);
 
-	fb = PoolAllocateResident(64*1024*1024, false);
-	lprintf("Allocated 64 mb FB at %08x\n", fb);
+	if ((long)W * H * 4 * 2 > BIG) {
+		lprintf("Resolution too big for our fixed-size buffer (TODO)... hanging\n");
+		*(long *)0x68f168f1 = 0;
+	}
+
+	// TODO: this huge-buffer management is terrible
+	// Should use the obscure early-boot NanoKernel/VM calls
+	big = PoolAllocateResident(BIG, false);
+	backbuf = big;
+	//frontbuf = (char *)big + BIG/2;
+	
 	{
 		size_t x, y;
-		uint32_t *ptr = (void *)fb;
+		uint32_t *ptr = (void *)backbuf;
 		for (y=0; y<H; y++) {
 			for (x=0; x<W; x++) {
 				*ptr++ = ((x ^ y) & 1) ? 0x00ffffff : 0x00000000;
@@ -275,7 +286,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
 		buf->le32_nr_entries = EndianSwap32Bit(1);
 
-		buf2->le32_addr = EndianSwap32Bit((uint32_t)fb + 0x4000); // obviously a bad hack
+		buf2->le32_addr = EndianSwap32Bit((uint32_t)backbuf + 0x4000);
 		buf2->le32_length = EndianSwap32Bit(64*1024*1024);
 
 		VTSend(0, 0);
@@ -313,7 +324,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	setVBL();
 
 	InstallDebugPollPatch(scheduledRedraw);
-	InstallDirtyRectPatch(NULL);
+	InstallDirtyRectPatch((void *)scheduledRedraw);
 
 	return noErr;
 }
@@ -344,6 +355,8 @@ static OSStatus VBLBH(void *p1, void *p2) {
 
 static void scheduledRedraw(void) {
 	if (!VTDone(0)) return; // cancel if still waiting
+
+	//memcpy(frontbuf, backbuf, (size_t)W * H * 4);
 
 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
 	{
@@ -680,7 +693,7 @@ static OSStatus GetConnection(VDDisplayConnectInfoRec *rec) {
 static OSStatus GetMode(VDPageInfo *rec) {
 	rec->csMode = kDepthMode1;
 	rec->csPage = 0;
-	rec->csBaseAddr = fb;
+	rec->csBaseAddr = backbuf;
 	return noErr;
 }
 
@@ -695,7 +708,7 @@ static OSStatus GetCurMode(VDSwitchInfoRec *rec) {
 	rec->csMode = kDepthMode1;
 	rec->csData = 1;
 	rec->csPage = 0;
-	rec->csBaseAddr = fb;
+	rec->csBaseAddr = backbuf;
 	return noErr;
 }
 
