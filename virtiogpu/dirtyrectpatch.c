@@ -1,8 +1,6 @@
 #include "dirtyrectpatch.h"
 
 #include <stdint.h>
-#include <string.h>
-#include <CodeFragments.h>
 #include <MixedMode.h>
 #include <Patches.h>
 #include <QuickDraw.h>
@@ -170,12 +168,8 @@ PATCH_LIST
 static void secondStage(void);
 static void (*gCallback)(short top, short left, short bottom, short right);
 static int isOnscreen(GrafPort *thePort);
-static void flashRect(int t, int l, int b, int r);
 static void tintRect(long color, int t, int l, int b, int r);
 static void delay(unsigned long ticks);
-static void myDevLoop(void (*drawProc)(void *), void *arg, const Rect *rect); // prototype
-static void (*theirDevLoop)(void (*drawProc)(void *), void *arg, const Rect *rect); // global
-static long tvector[2];
 
 void InstallDirtyRectPatch(void (*callback)(short top, short left, short bottom, short right)) {
 	static char patch[] = {
@@ -200,13 +194,6 @@ void InstallDirtyRectPatch(void (*callback)(short top, short left, short bottom,
 }
 
 static void secondStage(void) {
-	OSErr err;
-	CFragConnectionID conn;
-	void *mainAddr;
-	void *symAddr;
-	CFragSymbolClass symClass;
-	Str255 errMessage;
-
 	static int done = 0;
 	if (done) return;
 
@@ -216,62 +203,21 @@ static void secondStage(void) {
 		return;
 	}
 
-	err = GetSharedLibrary("\pNQD", 'pwpc', kFindCFrag, &conn, (Ptr *)&mainAddr, errMessage);
-	lprintf("GetSharedLibrary = %d\n", err);
-	if (err) return;
+	#define X(trap, StdName, args, procInfo) \
+		if (*(unsigned short *)GetToolTrapAddress(trap) != 0xaafe) return;
+	PATCH_LIST
+	#undef X
 
-	// If this symbol exists then we have a good enough version of NQD
-	err = FindSymbol(conn, "\pQDNativeDeviceLoop", (Ptr *)&symAddr, &symClass);
-	lprintf("FindSymbol QDNativeDeviceLoop = %d\n", err);
-	if (err) return;
+	done = 1;
 
-	err = FindSymbol(conn, "\pNQDStdRect", (Ptr *)&symAddr, &symClass);
-	lprintf("FindSymbol NQDStdRect = %d\n", err);
-	if (err) return;
+	// Install our patches, saving the old traps
+	#define X(trap, StdName, args, procInfo) \
+		their##StdName = GetToolTrapAddress(trap); \
+		SetToolTrapAddress(&my##StdName##Desc, trap);
+	PATCH_LIST
+	#undef X
 
-	// The immediately preceding TVector is always DevLoop,
-	// knowledge obtained through paintstaking disassembly
-	symAddr = (char *)symAddr - 8;
-
-	memcpy(tvector, symAddr, 8);
-	theirDevLoop = (void *)tvector;
-
-	// Override their DevLoop routine with ours
-	memcpy(symAddr, &myDevLoop, 8);
-
-// 	#define X(trap, StdName, args, procInfo) \
-// 		if (*(unsigned short *)GetToolTrapAddress(trap) != 0xaafe) return;
-// 	PATCH_LIST
-// 	#undef X
-// 
-// 	done = 1;
-// 
-// 	// Install our patches, saving the old traps
-// 	#define X(trap, StdName, args, procInfo) \
-// 		their##StdName = GetToolTrapAddress(trap); \
-// 		SetToolTrapAddress(&my##StdName##Desc, trap);
-// 	PATCH_LIST
-// 	#undef X
-// 
-// 	lprintf("Installed QuickDraw patches\n");
-}
-
-static void myDevLoop(void (*drawProc)(void *), void *arg, const Rect *rect) {
-	int t, l, b, r;
-	GrafPort *port;
-
-	GetPort(&port);
-	theirDevLoop(drawProc, arg, rect);
-	t = rect->top;
-	l = rect->left;
-	b = rect->bottom;
-	r = rect->right;
-	//drawProc(arg);
-	LOCALTOGLOBAL(port, t, l, b, r);
-	flashRect(t, l, b, r);
-
-	// This would call the original routine:
-	// theirDevLoop(drawProc, arg, rect);
+	lprintf("Installed QuickDraw patches\n");
 }
 
 static void myBeginUpdate(GrafPort *theWindow) {
@@ -459,36 +405,6 @@ static void tintRect(long color, int t, int l, int b, int r) {
 				ptr += 2;
 		}
 	};
-}
-
-static void flashRect(int t, int l, int b, int r) {
-	PixMap *screen = *(**(GDevice ***)0x8a4)->gdPMap;
-
-	long *ptr;
-	int x, y;
-
-	if (t < 0) t = 0;
-	if (l < 0) l = 0;
-	if (b > screen->bounds.bottom) b = screen->bounds.bottom;
-	if (r > screen->bounds.right) r = screen->bounds.right;
-
-	//lprintf("tintRect(%d,%d,%d,%d,%d)\n", color, t, l, b, r);
-
-	for (y = t; y < b; y++) {
-		ptr = (long *)((char *)screen->baseAddr + y * (screen->rowBytes & 0x3fff) + 4 * l);
-		for (x = l; x < r; x += 2) {
-			*ptr++ ^= 0x00ffffff;
-		}
-	}
-
-	delay(1);
-
-	for (y = t; y < b; y++) {
-		ptr = (long *)((char *)screen->baseAddr + y * (screen->rowBytes & 0x3fff) + 4 * l);
-		for (x = l; x < r; x += 2) {
-			*ptr++ ^= 0x00ffffff;
-		}
-	}
 }
 
 #include <LowMem.h>
