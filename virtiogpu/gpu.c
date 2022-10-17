@@ -17,7 +17,7 @@ Concepts:
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
 
-#define BIG (64*1024*1024)
+#define BIG (16*1024*1024)
 
 static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
@@ -242,7 +242,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Should use the obscure early-boot NanoKernel/VM calls
 	big = PoolAllocateResident(BIG, false);
 	backbuf = big;
-	//frontbuf = (char *)big + BIG/2;
+	frontbuf = (char *)big + BIG/2;
+	lprintf("Buffers: front %08x back %08x\n", frontbuf, backbuf);
 	
 	{
 		size_t x, y;
@@ -286,7 +287,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
 		buf->le32_nr_entries = EndianSwap32Bit(1);
 
-		buf2->le32_addr = EndianSwap32Bit((uint32_t)backbuf + 0x4000);
+		buf2->le32_addr = EndianSwap32Bit((uint32_t)frontbuf + 0x4000);
 		buf2->le32_length = EndianSwap32Bit(64*1024*1024);
 
 		VTSend(0, 0);
@@ -356,7 +357,7 @@ static OSStatus VBLBH(void *p1, void *p2) {
 static void scheduledRedraw(void) {
 	if (!VTDone(0)) return; // cancel if still waiting
 
-	//memcpy(frontbuf, backbuf, (size_t)W * H * 4);
+	memcpy(frontbuf, backbuf, (size_t)W * H * 4);
 
 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
 	{
