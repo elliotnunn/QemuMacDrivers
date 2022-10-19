@@ -124,20 +124,16 @@
 	rt = MIN(rt, bb2->right); \
 }
 
-// The system LocalToGlobal ignores portRect!
 #define LOCALTOGLOBAL(port, tp, lt, bt, rt) { \
 	Rect *MACROBOUNDS; \
-	short dx, dy; \
 	if ((port->portBits.rowBytes & 0xc000) == 0xc000) \
 		MACROBOUNDS = &(*((CGrafPort *)port)->portPixMap)->bounds; \
 	else \
 		MACROBOUNDS = &port->portBits.bounds; \
-	dy = MACROBOUNDS->top - port->portRect.top; \
-	dx = MACROBOUNDS->left - port->portRect.left; \
-	tp += dy; \
-	bt += dy; \
-	lt += dx; \
-	rt += dx; \
+	tp -= MACROBOUNDS->top; \
+	bt -= MACROBOUNDS->top; \
+	lt -= MACROBOUNDS->left; \
+	rt -= MACROBOUNDS->left; \
 }
 
 // Enum of MixedMode function signatures for the traps we patch
