@@ -252,17 +252,17 @@ static void myStdText(short count, const void *textAddr, Point numer, Point deno
 
 static void myStdLine(Point newPt) {
 	int t, l, b, r;
+
 	GrafPort *port;
-
-	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
-
 	GetPort(&port);
-	if (!isOnscreen(port)) return;
 
 	t = port->pnLoc.v;
 	l = port->pnLoc.h;
 	b = newPt.v;
 	r = newPt.h;
+
+	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
+	if (!isOnscreen(port)) return;
 	
 	if (t > b) {
 		int swap = t;
@@ -277,7 +277,7 @@ static void myStdLine(Point newPt) {
 	}
 
 	b += port->pnSize.v;
-	l += port->pnSize.h;
+	r += port->pnSize.h;
 	
 	QUICKCLIP(port, t, l, b, r);
 	LOCALTOGLOBAL(port, t, l, b, r);
