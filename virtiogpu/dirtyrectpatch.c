@@ -106,6 +106,44 @@
 			| STACK_ROUTINE_PARAMETER(4, kTwoByteCode) \
 			| STACK_ROUTINE_PARAMETER(5, kFourByteCode) \
 	) \
+	X( \
+		0xa8ec, \
+		CopyBits, \
+		(const BitMap *srcBits, const BitMap *dstBits, const Rect *srcRect, const Rect *dstRect, short mode, RgnHandle maskRgn), \
+		kPascalStackBased \
+			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(2, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(3, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(4, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(5, kTwoByteCode) \
+			| STACK_ROUTINE_PARAMETER(6, kFourByteCode) \
+	) \
+	X( \
+		0xa817, \
+		CopyMask, \
+		(const BitMap *srcBits, const BitMap *maskBits, const BitMap *dstBits, const Rect *srcRect, const Rect *maskRect, const Rect *dstRect), \
+		kPascalStackBased \
+			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(2, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(3, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(4, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(5, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(6, kFourByteCode) \
+	) \
+	X( \
+		0xaa51, \
+		CopyDeepMask, \
+		(const BitMap *srcBits, const BitMap *maskBits, const BitMap *dstBits, const Rect *srcRect, const Rect *maskRect, const Rect *dstRect, short mode, RgnHandle maskRgn), \
+		kPascalStackBased \
+			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(2, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(3, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(4, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(5, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(6, kFourByteCode) \
+			| STACK_ROUTINE_PARAMETER(7, kTwoByteCode) \
+			| STACK_ROUTINE_PARAMETER(8, kFourByteCode) \
+	) \
 
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -120,7 +158,7 @@
 )
 
 #define CLIP(rectarg, tp, lt, bt, rt) { \
-	Rect *rect = rectarg; \
+	const Rect *rect = rectarg; \
 	tp = MAX(tp, rect->top); \
 	lt = MAX(lt, rect->left); \
 	bt = MIN(bt, rect->bottom); \
@@ -128,7 +166,7 @@
 }
 
 #define LOCALTOGLOBAL(bitmapPtr, tp, lt, bt, rt) { \
-	Rect *MACROBOUNDS; \
+	const Rect *MACROBOUNDS; \
 	if (((bitmapPtr)->rowBytes & 0xc000) == 0xc000) \
 		MACROBOUNDS = &(***(PixMap ***)(bitmapPtr)).bounds; \
 	else \
@@ -201,10 +239,12 @@ static void secondStage(void) {
 		return;
 	}
 
-	#define X(trap, StdName, args, procInfo) \
-		if (*(unsigned short *)GetToolTrapAddress(trap) != 0xaafe) return;
-	PATCH_LIST
-	#undef X
+	if (*(unsigned short *)GetToolTrapAddress(0xa8a0) != 0xaafe) return;
+
+// 	#define X(trap, StdName, args, procInfo) \
+// 		if (*(unsigned short *)GetToolTrapAddress(trap) != 0xaafe) return;
+// 	PATCH_LIST
+// 	#undef X
 
 	done = 1;
 
@@ -435,7 +475,77 @@ static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *ds
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 
-	tintRect(0xff, t, l, b, r);
+	gCallback(t, l, b, r);
+}
+
+static void myCopyBits(const BitMap *srcBits, const BitMap *dstBits, const Rect *srcRect, const Rect *dstRect, short mode, RgnHandle maskRgn) {
+	int t, l, b, r;
+	GrafPort *port;
+
+	CallUniversalProc(theirCopyBits, kCopyBitsProcInfo, srcBits, dstBits, srcRect, dstRect, mode, maskRgn);
+
+	if (!ISSCREEN(dstBits)) return;
+
+	t = dstRect->top;
+	l = dstRect->left;
+	b = dstRect->bottom;
+	r = dstRect->right;
+
+	GetPort(&port);
+	if (dstBits == &port->portBits) {
+		CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+		CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	}
+
+	LOCALTOGLOBAL(dstBits, t, l, b, r);
+
+	gCallback(t, l, b, r);
+}
+
+static void myCopyMask(const BitMap *srcBits, const BitMap *maskBits, const BitMap *dstBits, const Rect *srcRect, const Rect *maskRect, const Rect *dstRect) {
+	int t, l, b, r;
+	GrafPort *port;
+
+	CallUniversalProc(theirCopyMask, kCopyMaskProcInfo, srcBits, maskBits, dstBits, srcRect, maskRect, dstRect);
+
+	if (!ISSCREEN(dstBits)) return;
+
+	t = dstRect->top;
+	l = dstRect->left;
+	b = dstRect->bottom;
+	r = dstRect->right;
+
+	GetPort(&port);
+	if (dstBits == &port->portBits) {
+		CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+		CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	}
+
+	LOCALTOGLOBAL(dstBits, t, l, b, r);
+
+	gCallback(t, l, b, r);
+}
+
+static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const BitMap *dstBits, const Rect *srcRect, const Rect *maskRect, const Rect *dstRect, short mode, RgnHandle maskRgn) {
+	int t, l, b, r;
+	GrafPort *port;
+
+	CallUniversalProc(theirCopyDeepMask, kCopyDeepMaskProcInfo, srcBits, maskBits, dstBits, srcRect, maskRect, dstRect, mode, maskRgn);
+
+	if (!ISSCREEN(dstBits)) return;
+
+	t = dstRect->top;
+	l = dstRect->left;
+	b = dstRect->bottom;
+	r = dstRect->right;
+
+	GetPort(&port);
+	if (dstBits == &port->portBits) {
+		CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+		CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	}
+
+	LOCALTOGLOBAL(dstBits, t, l, b, r);
 
 	gCallback(t, l, b, r);
 }
