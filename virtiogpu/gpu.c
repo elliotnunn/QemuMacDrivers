@@ -17,13 +17,20 @@ Concepts:
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
 
-#define BIG (16*1024*1024)
+#define MAXEDGE 1024
+
+// Actively identify non-QD framebuffer access, at great expense
+#define HOOKCHECK 1
+
+// The classics
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
 struct virtio_gpu_ctrl_hdr *conf;
 struct virtio_gpu_ctrl_hdr *obuf, *ibuf;
-void *big, *backbuf, *frontbuf;
+void *backbuf, *frontbuf, *checkbuf;
 int W, H;
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
@@ -33,7 +40,10 @@ static OSStatus initialize(DriverInitInfo *info);
 static void queueSizer(uint16_t queue, uint16_t *count, size_t *osize, size_t *isize);
 static void setVBL(void);
 static OSStatus VBLBH(void *p1, void *p2);
-static void scheduledRedraw(void);
+static uint32_t checksum(uint32_t pixel);
+static uint32_t checksumField(uint32_t pixel);
+static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum);
+static void dirtyRectCallback(short top, short left, short bottom, short right);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
@@ -83,6 +93,41 @@ DriverDescription TheDriverDescription = {
 	0, 0, 0, 0, 0, 0, 0, 0, // reserved
 	1, // nServices
 	kServiceCategoryNdrvDriver, kNdrvTypeIsVideo, 0x00, 0x10, 0x80, 0x00, //v0.1
+};
+
+unsigned char gamma[] = {
+	0x00, 0x04, 0x07, 0x09, 0x0b, 0x0d, 0x0f, 0x11,
+	0x13, 0x15, 0x16, 0x18, 0x1a, 0x1b, 0x1d, 0x1e,
+	0x20, 0x21, 0x23, 0x24, 0x26, 0x27, 0x29, 0x2a,
+	0x2b, 0x2d, 0x2e, 0x2f, 0x31, 0x32, 0x33, 0x34,
+	0x36, 0x37, 0x38, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e,
+	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x48,
+	0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51,
+	0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
+	0x5a, 0x5b, 0x5d, 0x5e, 0x5f, 0x60, 0x61, 0x62,
+	0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a,
+	0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72,
+	0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a,
+	0x7b, 0x7c, 0x7c, 0x7d, 0x7e, 0x7f, 0x80, 0x81,
+	0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+	0x8a, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f, 0x90,
+	0x91, 0x92, 0x93, 0x94, 0x94, 0x95, 0x96, 0x97,
+	0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9d, 0x9e,
+	0x9f, 0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa4, 0xa5,
+	0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xaa, 0xab, 0xac,
+	0xad, 0xae, 0xaf, 0xb0, 0xb0, 0xb1, 0xb2, 0xb3,
+	0xb4, 0xb5, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba,
+	0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xbf, 0xc0,
+	0xc1, 0xc2, 0xc3, 0xc4, 0xc4, 0xc5, 0xc6, 0xc7,
+	0xc8, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xcd,
+	0xce, 0xcf, 0xd0, 0xd1, 0xd1, 0xd2, 0xd3, 0xd4,
+	0xd5, 0xd5, 0xd6, 0xd7, 0xd8, 0xd8, 0xd9, 0xda,
+	0xdb, 0xdc, 0xdc, 0xdd, 0xde, 0xdf, 0xe0, 0xe0,
+	0xe1, 0xe2, 0xe3, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7,
+	0xe7, 0xe8, 0xe9, 0xea, 0xea, 0xeb, 0xec, 0xed,
+	0xee, 0xee, 0xef, 0xf0, 0xf1, 0xf1, 0xf2, 0xf3,
+	0xf4, 0xf4, 0xf5, 0xf6, 0xf7, 0xf7, 0xf8, 0xf9,
+	0xfa, 0xfa, 0xfb, 0xfc, 0xfd, 0xfd, 0xfe, 0xff,
 };
 
 static const char *controlNames[] = {
@@ -233,27 +278,21 @@ static OSStatus initialize(DriverInitInfo *info) {
 	H = EndianSwap32Bit(((struct virtio_gpu_resp_display_info *)ibuf)->pmodes[0].r.le32_height);
 	lprintf("display %dx%d\n", W, H);
 
-	if ((long)W * H * 4 * 2 > BIG) {
+	if (W > MAXEDGE || H > MAXEDGE) {
 		lprintf("Resolution too big for our fixed-size buffer (TODO)... hanging\n");
 		*(long *)0x68f168f1 = 0;
 	}
 
 	// TODO: this huge-buffer management is terrible
 	// Should use the obscure early-boot NanoKernel/VM calls
-	big = PoolAllocateResident(BIG, false);
-	backbuf = big;
-	frontbuf = (char *)big + BIG/2;
+	frontbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
+	backbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
+	#if HOOKCHECK
+		checkbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
+		lprintf("checkbuf = %x\n", checkbuf);
+	#endif
+
 	lprintf("Buffers: front %08x back %08x\n", frontbuf, backbuf);
-	
-	{
-		size_t x, y;
-		uint32_t *ptr = (void *)backbuf;
-		for (y=0; y<H; y++) {
-			for (x=0; x<W; x++) {
-				*ptr++ = ((x ^ y) & 1) ? 0x00ffffff : 0x00000000;
-			}
-		}
-	}
 
 	// Create a host resource using VIRTIO_GPU_CMD_RESOURCE_CREATE_2D.
 	{
@@ -262,7 +301,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
-		buf->le32_format = EndianSwap32Bit(VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM);
+		buf->le32_format = EndianSwap32Bit(VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
 		buf->le32_width = EndianSwap32Bit(W);
 		buf->le32_height = EndianSwap32Bit(H);
 
@@ -324,8 +363,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	setVBL();
 
-	InstallDebugPollPatch(scheduledRedraw);
-	InstallDirtyRectPatch((void *)scheduledRedraw);
+	//InstallDebugPollPatch(scheduledRedraw);
+	InstallDirtyRectPatch(dirtyRectCallback);
 
 	return noErr;
 }
@@ -337,27 +376,50 @@ static void queueSizer(uint16_t queue, uint16_t *count, size_t *osize, size_t *i
 	*isize = 2048;
 }
 
-static void setVBL(void) {
-	AbsoluteTime time = AddDurationToAbsolute(10, UpTime());
-	TimerID id;
-	SetInterruptTimer(&time, VBLBH, NULL, &id);
+static uint32_t checksum(uint32_t pixel) {
+	return (pixel << 8) ^ ((pixel + 1) << 16) ^ (pixel << 24) ^ ((uint32_t)'E' << 24);
 }
 
-static OSStatus VBLBH(void *p1, void *p2) {
-	if (interruptsOn) {
-		VSLDoInterruptService(interruptService);
+static uint32_t checksumField(uint32_t pixel) {
+	return pixel & 0xff000000;
+}
+
+static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum) {
+	return (checksum & 0xff000000) | (pixel & 0x00ffffff);
+}
+
+volatile int lockout;
+
+static void dirtyRectCallback(short top, short left, short bottom, short right) {
+	int x, y;
+
+	top = MAX(MIN(top, H), 0);
+	bottom = MAX(MIN(bottom, H), 0);
+	left = MAX(MIN(left, W), 0);
+	right = MAX(MIN(right, W), 0);
+
+	if (top >= bottom || left >= right) return;
+
+	for (y=top; y<bottom; y++) {
+		uint32_t *src = (void *)((char *)backbuf + y * W * 4 + left * 4);
+		uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
+		uint32_t *check = (void *)((char *)checkbuf + y * W * 4 + left * 4);
+		for (x=left; x<right; x++) {
+			uint32_t s = *src++;
+
+			#if HOOKCHECK
+			*check++ =
+			#endif
+			*dest++ =
+				((uint32_t)gamma[s & 0xff] << 24) |
+				((uint32_t)gamma[(s >> 8) & 0xff] << 16) |
+				((uint32_t)gamma[(s >> 16) & 0xff] << 8);
+		}
 	}
 
-	scheduledRedraw();
+	lprintf("dirtyRectCallback(%d,%d,%d,%d)\n", top, left, bottom, right);
 
-	setVBL();
-	return noErr;
-}
-
-static void scheduledRedraw(void) {
-	if (!VTDone(0)) return; // cancel if still waiting
-
-	memcpy(frontbuf, backbuf, (size_t)W * H * 4);
+	lockout = 1;
 
 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
 	{
@@ -366,8 +428,12 @@ static void scheduledRedraw(void) {
 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 
-		buf->r.le32_x = 0;
-		buf->r.le32_y = 0;
+// 		buf->r.le32_x = EndianSwap32Bit(left);
+// 		buf->r.le32_y = EndianSwap32Bit(top);
+// 		buf->r.le32_width = EndianSwap32Bit(right - left);
+// 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
+		buf->r.le32_x = EndianSwap32Bit(0);
+		buf->r.le32_y = EndianSwap32Bit(0);
 		buf->r.le32_width = EndianSwap32Bit(W);
 		buf->r.le32_height = EndianSwap32Bit(H);
 
@@ -383,8 +449,12 @@ static void scheduledRedraw(void) {
 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_FLUSH);
 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 
-		buf->r.le32_x = 0;
-		buf->r.le32_y = 0;
+// 		buf->r.le32_x = EndianSwap32Bit(left);
+// 		buf->r.le32_y = EndianSwap32Bit(top);
+// 		buf->r.le32_width = EndianSwap32Bit(right - left);
+// 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
+		buf->r.le32_x = EndianSwap32Bit(0);
+		buf->r.le32_y = EndianSwap32Bit(0);
 		buf->r.le32_width = EndianSwap32Bit(W);
 		buf->r.le32_height = EndianSwap32Bit(H);
 
@@ -392,6 +462,80 @@ static void scheduledRedraw(void) {
 
 		VTSend(0, 2);
 	}
+
+	lockout = 0;
+}
+
+static void setVBL(void) {
+	AbsoluteTime time = AddDurationToAbsolute(100, UpTime());
+	TimerID id;
+	SetInterruptTimer(&time, VBLBH, NULL, &id);
+}
+
+static OSStatus VBLBH(void *p1, void *p2) {
+	if (interruptsOn) {
+		VSLDoInterruptService(interruptService);
+	}
+
+// 	#if HOOKCHECK
+// 	{
+// 		int i;
+// 		uint32_t *back = backbuf;
+// 		uint32_t *front = frontbuf;
+// 		uint32_t *check = checkbuf;
+// 		for (i=0; i<W*H; i++) {
+// 			front[i] = back[i];
+//
+// 			// Apply cute shimmery pattern
+// 			if (back[i] != check[i]) {
+// 				front[i] ^= (uint32_t)0xff0000 >> ((i & 2) * 4);
+// 			}
+// 		}
+// 	}
+// 	#else
+// 		memcpy(frontbuf, backbuf, W * H * 4);
+// 	#endif
+//
+// 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
+// 	{
+// 		struct virtio_gpu_transfer_to_host_2d *buf = (void *)VTBuffers[0][0];
+// 		memset(buf, 0, sizeof(*buf));
+// 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
+// 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
+//
+// 		buf->r.le32_x = EndianSwap32Bit(0);
+// 		buf->r.le32_y = EndianSwap32Bit(0);
+// 		buf->r.le32_width = EndianSwap32Bit(W);
+// 		buf->r.le32_height = EndianSwap32Bit(H);
+// // 			buf->r.le32_x = EndianSwap32Bit(boxL);
+// // 			buf->r.le32_y = EndianSwap32Bit(boxT);
+// // 			buf->r.le32_width = EndianSwap32Bit(boxR - boxL);
+// // 			buf->r.le32_height = EndianSwap32Bit(boxB - boxT);
+//
+// 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
+//
+// 		VTSend(0, 0);
+// 	}
+//
+// 	// Use VIRTIO_GPU_CMD_RESOURCE_FLUSH to flush the updated resource to the display.
+// 	{
+// 		struct virtio_gpu_resource_flush *buf = (void *)VTBuffers[0][2];
+// 		memset(buf, 0, sizeof(*buf));
+// 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_FLUSH);
+// 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
+//
+// 		buf->r.le32_x = EndianSwap32Bit(0);
+// 		buf->r.le32_y = EndianSwap32Bit(0);
+// 		buf->r.le32_width = EndianSwap32Bit(W);
+// 		buf->r.le32_height = EndianSwap32Bit(H);
+//
+// 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
+//
+// 		VTSend(0, 2);
+// 	}
+
+	setVBL();
+	return noErr;
 }
 
 static OSStatus finalize(DriverFinalInfo *info) {
@@ -484,7 +628,7 @@ static OSStatus GetEntries(VDSetEntryRecord *rec) {
 	int i;
 	ColorSpec *array = (ColorSpec *)rec->csTable;
 	lprintf("GetEntries csStart=%d csCount=%d\n", rec->csStart, rec->csCount);
-	
+
 	for (i=0; i<=rec->csCount; i++) {
 		array[i].value = 0;
 		array[i].rgb.red = 0;
