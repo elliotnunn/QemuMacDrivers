@@ -111,26 +111,28 @@
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
-// Macro so we can efficiently pass rect by reference
-#define QUICKCLIP(port, tp, lt, bt, rt) { \
-	Rect *bb1 = &(*port->clipRgn)->rgnBBox; \
-	Rect *bb2 = &(*port->visRgn)->rgnBBox; \
-	tp = MAX(tp, bb1->top); \
-	lt = MAX(lt, bb1->left); \
-	bt = MIN(bt, bb1->bottom); \
-	rt = MIN(rt, bb1->right); \
-	tp = MAX(tp, bb2->top); \
-	lt = MAX(lt, bb2->left); \
-	bt = MIN(bt, bb2->bottom); \
-	rt = MIN(rt, bb2->right); \
+#define ISSCREEN(bitmapPtr) ( \
+	*(void **)0x824 == ( \
+		(((bitmapPtr)->rowBytes & 0xc000) == 0xc000) ? \
+		(***(PixMap ***)(bitmapPtr)).baseAddr : \
+		(bitmapPtr)->baseAddr \
+	) \
+)
+
+#define CLIP(rectarg, tp, lt, bt, rt) { \
+	Rect *rect = rectarg; \
+	tp = MAX(tp, rect->top); \
+	lt = MAX(lt, rect->left); \
+	bt = MIN(bt, rect->bottom); \
+	rt = MIN(rt, rect->right); \
 }
 
-#define LOCALTOGLOBAL(port, tp, lt, bt, rt) { \
+#define LOCALTOGLOBAL(bitmapPtr, tp, lt, bt, rt) { \
 	Rect *MACROBOUNDS; \
-	if ((port->portBits.rowBytes & 0xc000) == 0xc000) \
-		MACROBOUNDS = &(*((CGrafPort *)port)->portPixMap)->bounds; \
+	if (((bitmapPtr)->rowBytes & 0xc000) == 0xc000) \
+		MACROBOUNDS = &(***(PixMap ***)(bitmapPtr)).bounds; \
 	else \
-		MACROBOUNDS = &port->portBits.bounds; \
+		MACROBOUNDS = &(bitmapPtr)->bounds; \
 	tp -= MACROBOUNDS->top; \
 	bt -= MACROBOUNDS->top; \
 	lt -= MACROBOUNDS->left; \
@@ -164,7 +166,6 @@ PATCH_LIST
 // Other globals and prototypes
 static void secondStage(void);
 static void (*gCallback)(short top, short left, short bottom, short right);
-static int isOnscreen(GrafPort *thePort);
 static void tintRect(long color, int t, int l, int b, int r);
 static void delay(unsigned long ticks);
 
@@ -237,7 +238,7 @@ static void myStdText(short count, const void *textAddr, Point numer, Point deno
 	CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
 	r = port->pnLoc.h + 1;
 
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	if (numer.v == 1 && denom.v == 1 && port->txSize != 0) {
 		// Avoid calling StdTxMeas in the simple case,
@@ -251,8 +252,9 @@ static void myStdText(short count, const void *textAddr, Point numer, Point deno
 		b = port->pnLoc.v + info.descent + 1;
 	}
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
@@ -268,7 +270,7 @@ static void myStdLine(Point newPt) {
 	r = newPt.h;
 
 	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	if (t > b) {
 		int swap = t;
@@ -285,8 +287,9 @@ static void myStdLine(Point newPt) {
 	b += port->pnSize.v;
 	r += port->pnSize.h;
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
@@ -297,15 +300,16 @@ static void myStdRect(GrafVerb verb, const Rect *rect) {
 	CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, rect);
 
 	GetPort(&port);
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
 	b = rect->bottom;
 	r = rect->right;
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
@@ -316,15 +320,16 @@ static void myStdRRect(GrafVerb verb, const Rect *rect, short ovalWidth, short o
 	CallUniversalProc(theirStdRRect, kStdRRectProcInfo, verb, rect, ovalWidth, ovalHeight);
 
 	GetPort(&port);
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
 	b = rect->bottom;
 	r = rect->right;
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
@@ -335,15 +340,16 @@ static void myStdOval(GrafVerb verb, const Rect *rect) {
 	CallUniversalProc(theirStdOval, kStdOvalProcInfo, verb, rect);
 
 	GetPort(&port);
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
 	b = rect->bottom;
 	r = rect->right;
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
@@ -354,15 +360,16 @@ static void myStdArc(GrafVerb verb, const Rect *rect, short startAngle, short ar
 	CallUniversalProc(theirStdArc, kStdArcProcInfo, verb, rect, startAngle, arcAngle);
 
 	GetPort(&port);
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
 	b = rect->bottom;
 	r = rect->right;
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
@@ -374,7 +381,7 @@ static void myStdPoly(GrafVerb verb, PolyHandle poly) {
 	CallUniversalProc(theirStdPoly, kStdPolyProcInfo, verb, poly);
 
 	GetPort(&port);
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	rect = &(**poly).polyBBox;
 	t = rect->top;
@@ -382,8 +389,9 @@ static void myStdPoly(GrafVerb verb, PolyHandle poly) {
 	b = rect->bottom + port->pnSize.v;
 	r = rect->right + port->pnSize.h;
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
@@ -395,7 +403,7 @@ static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
 	CallUniversalProc(theirStdRgn, kStdRgnProcInfo, verb, rgn);
 
 	GetPort(&port);
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	rect = &(**rgn).rgnBBox;
 	t = rect->top;
@@ -403,8 +411,9 @@ static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
 	b = rect->bottom;
 	r = rect->right;
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
@@ -415,35 +424,20 @@ static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *ds
 	CallUniversalProc(theirStdBits, kStdBitsProcInfo, srcBits, srcRect, dstRect, mode, maskRgn);
 
 	GetPort(&port);
-	if (!isOnscreen(port)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
 	b = dstRect->bottom;
 	r = dstRect->right;
 
-	QUICKCLIP(port, t, l, b, r);
-	LOCALTOGLOBAL(port, t, l, b, r);
+	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
+	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
+
+	tintRect(0xff, t, l, b, r);
+
 	gCallback(t, l, b, r);
-}
-
-static int isOnscreen(GrafPort *thePort) {
-	GDevice *mainDev;
-	void *screenBits;
-	void *portBits;
-
-	if (thePort->picSave) return 0;
-
-	mainDev = **(GDevice ***)0x8a4;
-	screenBits = (*mainDev->gdPMap)->baseAddr;
-
-	if ((thePort->portBits.rowBytes & 0xc000) == 0xc000) {
-		portBits = (*((CGrafPort *)thePort)->portPixMap)->baseAddr;
-	} else {
-		portBits = thePort->portBits.baseAddr;
-	}
-
- 	return portBits == screenBits;
 }
 
 static void tintRect(long color, int t, int l, int b, int r) {
