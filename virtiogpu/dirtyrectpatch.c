@@ -263,7 +263,7 @@ static void myStdLine(Point newPt) {
 
 	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
 	if (!isOnscreen(port)) return;
-	
+
 	if (t > b) {
 		int swap = t;
 		t = b;
@@ -278,7 +278,7 @@ static void myStdLine(Point newPt) {
 
 	b += port->pnSize.v;
 	r += port->pnSize.h;
-	
+
 	QUICKCLIP(port, t, l, b, r);
 	LOCALTOGLOBAL(port, t, l, b, r);
 	gCallback(t, l, b, r);
@@ -436,7 +436,7 @@ static int isOnscreen(GrafPort *thePort) {
 	} else {
 		portBits = thePort->portBits.baseAddr;
 	}
-	
+
  	return portBits == screenBits;
 }
 
