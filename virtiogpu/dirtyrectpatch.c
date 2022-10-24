@@ -206,6 +206,8 @@ static void secondStage(void);
 static void (*gCallback)(short top, short left, short bottom, short right);
 static void tintRect(long color, int t, int l, int b, int r);
 static void delay(unsigned long ticks);
+static GrafPort *deferringPort;
+static void drawPort(GrafPort *port);
 
 void InstallDirtyRectPatch(void (*callback)(short top, short left, short bottom, short right)) {
 	static char patch[] = {
@@ -259,13 +261,36 @@ static void secondStage(void) {
 }
 
 static void myBeginUpdate(GrafPort *theWindow) {
-	lprintf("BeginUpdate(%#x)\n", theWindow);
+	if (deferringPort != NULL) {
+		drawPort(deferringPort);
+	}
+
+	deferringPort = theWindow;
 	CallUniversalProc(theirBeginUpdate, kBeginUpdateProcInfo, theWindow);
 }
 
 static void myEndUpdate(GrafPort *theWindow) {
-	lprintf("EndUpdate(%#x)\n", theWindow);
+	if (deferringPort) drawPort(deferringPort);
+	if (theWindow != deferringPort) drawPort(theWindow);
+
+	deferringPort = NULL;
 	CallUniversalProc(theirEndUpdate, kEndUpdateProcInfo, theWindow);
+}
+
+static void drawPort(GrafPort *port) {
+	int t, l, b, r;
+	Region *rgn;
+
+	rgn = *port->visRgn;
+	t = rgn->rgnBBox.top;
+	l = rgn->rgnBBox.left;
+	b = rgn->rgnBBox.bottom;
+	r = rgn->rgnBBox.right;
+
+	rgn = *port->clipRgn;
+	CLIP(&rgn->rgnBBox, t, l, b, r);
+
+	gCallback(t, l, b, r);
 }
 
 static void myStdText(short count, const void *textAddr, Point numer, Point denom) {
@@ -278,7 +303,7 @@ static void myStdText(short count, const void *textAddr, Point numer, Point deno
 	CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
 	r = port->pnLoc.h + 1;
 
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	if (numer.v == 1 && denom.v == 1 && port->txSize != 0) {
 		// Avoid calling StdTxMeas in the simple case,
@@ -310,7 +335,7 @@ static void myStdLine(Point newPt) {
 	r = newPt.h;
 
 	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	if (t > b) {
 		int swap = t;
@@ -340,7 +365,7 @@ static void myStdRect(GrafVerb verb, const Rect *rect) {
 	CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, rect);
 
 	GetPort(&port);
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -360,7 +385,7 @@ static void myStdRRect(GrafVerb verb, const Rect *rect, short ovalWidth, short o
 	CallUniversalProc(theirStdRRect, kStdRRectProcInfo, verb, rect, ovalWidth, ovalHeight);
 
 	GetPort(&port);
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -380,7 +405,7 @@ static void myStdOval(GrafVerb verb, const Rect *rect) {
 	CallUniversalProc(theirStdOval, kStdOvalProcInfo, verb, rect);
 
 	GetPort(&port);
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -400,7 +425,7 @@ static void myStdArc(GrafVerb verb, const Rect *rect, short startAngle, short ar
 	CallUniversalProc(theirStdArc, kStdArcProcInfo, verb, rect, startAngle, arcAngle);
 
 	GetPort(&port);
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -421,7 +446,7 @@ static void myStdPoly(GrafVerb verb, PolyHandle poly) {
 	CallUniversalProc(theirStdPoly, kStdPolyProcInfo, verb, poly);
 
 	GetPort(&port);
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	rect = &(**poly).polyBBox;
 	t = rect->top;
@@ -443,7 +468,7 @@ static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
 	CallUniversalProc(theirStdRgn, kStdRgnProcInfo, verb, rgn);
 
 	GetPort(&port);
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	rect = &(**rgn).rgnBBox;
 	t = rect->top;
@@ -464,7 +489,7 @@ static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *ds
 	CallUniversalProc(theirStdBits, kStdBitsProcInfo, srcBits, srcRect, dstRect, mode, maskRgn);
 
 	GetPort(&port);
-	if (port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
@@ -484,7 +509,7 @@ static void myCopyBits(const BitMap *srcBits, const BitMap *dstBits, const Rect 
 
 	CallUniversalProc(theirCopyBits, kCopyBitsProcInfo, srcBits, dstBits, srcRect, dstRect, mode, maskRgn);
 
-	if (!ISSCREEN(dstBits)) return;
+	if (dstBits == &deferringPort->portBits || !ISSCREEN(dstBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
@@ -508,7 +533,7 @@ static void myCopyMask(const BitMap *srcBits, const BitMap *maskBits, const BitM
 
 	CallUniversalProc(theirCopyMask, kCopyMaskProcInfo, srcBits, maskBits, dstBits, srcRect, maskRect, dstRect);
 
-	if (!ISSCREEN(dstBits)) return;
+	if (dstBits == &deferringPort->portBits || !ISSCREEN(dstBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
@@ -532,7 +557,7 @@ static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const 
 
 	CallUniversalProc(theirCopyDeepMask, kCopyDeepMaskProcInfo, srcBits, maskBits, dstBits, srcRect, maskRect, dstRect, mode, maskRgn);
 
-	if (!ISSCREEN(dstBits)) return;
+	if (dstBits == &deferringPort->portBits || !ISSCREEN(dstBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
