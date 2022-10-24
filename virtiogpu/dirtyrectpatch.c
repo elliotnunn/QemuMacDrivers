@@ -4,6 +4,7 @@
 #include <MixedMode.h>
 #include <Patches.h>
 #include <QuickDraw.h>
+#include <QuickDrawText.h>
 #include <Traps.h>
 #include <Types.h>
 
@@ -232,17 +233,22 @@ static void myStdText(short count, const void *textAddr, Point numer, Point deno
 	GrafPort *port;
 	GetPort(&port);
 
-	l = port->pnLoc.h;
+	l = port->pnLoc.h - 1;
 	CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
-	if (!isOnscreen(port)) return;
-	r = port->pnLoc.h;
+	r = port->pnLoc.h + 1;
 
-	if (numer.v <= denom.v) {
+	if (!isOnscreen(port)) return;
+
+	if (numer.v == 1 && denom.v == 1 && port->txSize != 0) {
+		// Avoid calling StdTxMeas in the simple case,
+		// at the expense of overestimating the rect.
 		t = port->pnLoc.v - port->txSize;
 		b = port->pnLoc.v + port->txSize;
 	} else {
-		t = -0x8000;
-		b = 0x7fff;
+		FontInfo info;
+		StdTxMeas(count, textAddr, &numer, &denom, &info);
+		t = port->pnLoc.v - info.ascent - 1;
+		b = port->pnLoc.v + info.descent + 1;
 	}
 
 	QUICKCLIP(port, t, l, b, r);
