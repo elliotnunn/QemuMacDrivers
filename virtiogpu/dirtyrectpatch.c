@@ -144,6 +144,18 @@
 			| STACK_ROUTINE_PARAMETER(7, kTwoByteCode) \
 			| STACK_ROUTINE_PARAMETER(8, kFourByteCode) \
 	) \
+	X( \
+		0x1fb8, \
+		DrawCursor, \
+		(void), \
+		kPascalStackBased \
+	) \
+	X( \
+		0x1fbc, \
+		EraseCursor, \
+		(void), \
+		kPascalStackBased \
+	) \
 
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -252,8 +264,14 @@ static void secondStage(void) {
 
 	// Install our patches, saving the old traps
 	#define X(trap, StdName, args, procInfo) \
-		their##StdName = GetToolTrapAddress(trap); \
-		SetToolTrapAddress(&my##StdName##Desc, trap);
+		if (trap >= 0xa000) { \
+			their##StdName = GetToolTrapAddress(trap); \
+			SetToolTrapAddress(&my##StdName##Desc, trap); \
+		} else { \
+			lprintf("Old %#x is %#x and new is %#x\n", trap, *(UniversalProcPtr *)(trap), &my##StdName##Desc); \
+			their##StdName = *(UniversalProcPtr *)(trap); \
+			*(UniversalProcPtr *)(trap) = &my##StdName##Desc; \
+		}
 	PATCH_LIST
 	#undef X
 
@@ -573,6 +591,29 @@ static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const 
 	LOCALTOGLOBAL(dstBits, t, l, b, r);
 
 	gCallback(t, l, b, r);
+}
+
+int lastCX, lastCY;
+
+static void myDrawCursor(void) {
+	int t, l;
+
+	t = *(short *)0x830 /*mouse.v*/ - *(short *)0x834 /*crsrpin.top*/ - *(short *)0x884 /*thecrsr.hotspot.v*/;
+	l = *(short *)0x832 /*mouse.h*/ - *(short *)0x836 /*crsrpin.left*/ - *(short *)0x886 /*thecrsr.hotspot.h*/;
+
+	lprintf("DrawCursor %d,%d\n", t, l);
+
+	CallUniversalProc(theirDrawCursor, kDrawCursorProcInfo);
+
+	gCallback(t, l, t + 16, l + 16);
+
+	lastCX = t; lastCY = l;
+}
+
+static void myEraseCursor(void) {
+	CallUniversalProc(theirEraseCursor, kEraseCursorProcInfo);
+
+	gCallback(lastCX, lastCY, lastCX + 16, lastCY + 16);
 }
 
 static void tintRect(long color, int t, int l, int b, int r) {
