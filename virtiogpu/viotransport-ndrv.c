@@ -32,15 +32,12 @@ struct virtq {
 };
 
 // Internal globals
-static RegEntryID *gDevice;
 static struct virtq *gQueues;
 static uint16_t *gNotify;
 static uint32_t gNotifyMultiplier;
 static uint8_t *gISRStatus;
 static void (*gQueueRecv)(uint16_t queue, uint16_t buffer, size_t len);
 static void (*gConfigChanged)(void);
-static int gConfigAccess;
-static int gHackNoteBar, gHackNoteOffset;
 
 static void panic(char *msg) {
 	lprintf("panic: %s\n", msg);
@@ -51,7 +48,7 @@ static void panic(char *msg) {
 static void initQueues(struct virtio_pci_common_cfg *comConf,
 	void (*queueSizer)(uint16_t queue, uint16_t *count, size_t *isize, size_t *osize));
 static void readCapabilities(RegEntryID *dev,
-	void **commonConf, void **notify, uint32_t *notifyMult, void **isrStatus, void **devConf, int *configAccess);
+	void **commonConf, void **notify, uint32_t *notifyMult, void **isrStatus, void **devConf);
 static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]);
 static void allocPg(size_t count, void **logicals, uint32_t *physicals, int isIn, int isOut);
 OSStatus enqueueBH(void *queueU16, void *bufferU16);
@@ -67,17 +64,12 @@ OSStatus VTInit(void *dev,
 	struct virtio_pci_common_cfg *comConf = NULL;
 	OSStatus err;
 
-	gDevice = dev;
-
 	// Get logical pointers into the BARs
 	readCapabilities(dev,
 		(void **)&comConf,
 		(void **)&gNotify, &gNotifyMultiplier,
 		(void **)&gISRStatus,
-		&VTDeviceConfig,
-		&gConfigAccess);
-
-	lprintf("Notifications at %x with multiplier %x\n", gNotify, gNotifyMultiplier);
+		&VTDeviceConfig);
 
 	if (!comConf || !gNotify || !gISRStatus || !VTDeviceConfig) return paramErr;
 
@@ -302,10 +294,10 @@ static void initQueues(struct virtio_pci_common_cfg *comConf,
 
 // Iterate over the PCI "capability" structures in config space
 static void readCapabilities(RegEntryID *dev,
-	void **commonConf, void **notify, uint32_t *notifyMult, void **isrStatus, void **devConf, int *configAccess) {
+	void **commonConf, void **notify, uint32_t *notifyMult, void **isrStatus, void **devConf) {
 	void *bars[6];
 	uint8_t capptr = 0;
-	int want = 0x3e; // want 1,2,3,4,5
+	int want = 0x1e; // want 1,2,3,4
 
 	findLogicalBARs(dev, bars);
 	ExpMgrConfigReadByte(dev, (void *)0x34, &capptr);
@@ -337,14 +329,10 @@ static void readCapabilities(RegEntryID *dev,
 			} else if (cfg_type == 2) { // VIRTIO_PCI_CAP_NOTIFY_CFG
 				*notify = address;
 				ExpMgrConfigReadLong(dev, (void *)(capptr + 12), notifyMult);
-				gHackNoteBar = bar;
-				gHackNoteOffset = offset;
 			} else if (cfg_type == 3) { // VIRTIO_PCI_CAP_ISR_CFG
 				*isrStatus = address;
 			} else if (cfg_type == 4) { // VIRTIO_PCI_CAP_DEVICE_CFG
 				*devConf = address;
-			} else if (cfg_type == 5) { // VIRTIO_PCI_CAP_PCI_CFG
-				*configAccess = capptr;
 			}
 		}
 
@@ -427,37 +415,11 @@ void VTSend(uint16_t queue, uint16_t buffer) {
 	// Call the critical section as a secondary interrupt
 	CallSecondaryInterruptHandler2(enqueueBH, NULL, (void *)queue, (void *)buffer);
 
-	lprintf("Doing the dodgy... cap=%#x bar=%#x size=%#x offset=%#x val=%#x\n", gConfigAccess, gHackNoteBar, 2, gHackNoteOffset + queue*gNotifyMultiplier, queue);
-
-	lprintf("used queue flags %x\n", gQueues[queue].used->le_flags == 0);
-
-	// The VIRTIO_PCI_CAP_PCI_CFG capability creates an alternative (and likely
-	// suboptimal) access method to the common configuration, notification, ISR
-	// and device-specific configuration regions.
-
-	// The capability is immediately followed by an additional field like so:
-	//     struct virtio_pci_cfg_cap {
-	//         struct virtio_pci_cap cap;
-	//         u8 pci_cfg_data[4]; /* Data for BAR access. */
-	//     };
-
-	// The fields cap.bar, cap.length, cap.offset and pci_cfg_data are
-	// read-write (RW) for the driver.
-
-	// To access a device region, the driver writes into the capability
-	// structure (ie. within the PCI configuration space) as follows:
-	// - The driver sets the BAR to access by writing to cap.bar.
-	ExpMgrConfigWriteByte(gDevice, (LogicalAddress)(gConfigAccess + 4), gHackNoteBar);
-
-	// - The driver sets the size of the access by writing 1, 2 or 4 to cap.length.
-	ExpMgrConfigWriteLong(gDevice, (LogicalAddress)(gConfigAccess + 12), 2);
-
-	// - The driver sets the offset within the BAR by writing to cap.offset.
-	ExpMgrConfigWriteLong(gDevice, (LogicalAddress)(gConfigAccess + 8), gHackNoteOffset + queue*gNotifyMultiplier);
-
-	// At that point, pci_cfg_data will provide a window of size cap.length
-	// into the given cap.bar at offset cap.offset.
-	ExpMgrConfigWriteWord(gDevice, (LogicalAddress)(gConfigAccess + 16), queue);
+	// "If flags is 0, the driver MUST send a notification"
+	if (gQueues[queue].used->le_flags == 0) {
+		gNotify[queue * gNotifyMultiplier / 2] = EndianSwap16Bit(queue);
+		SynchronizeIO();
+	}
 }
 
 int VTDone(uint16_t queue) {
@@ -473,8 +435,6 @@ OSStatus enqueueBH(void *queueU16, void *bufferU16) {
 	uint16_t q = (uint16_t)queueU16;
 	uint16_t b = (uint16_t)bufferU16;
 	uint16_t idx;
-
-	lprintf("Sending %d.%d\n", q, b);
 
 	idx = EndianSwap16Bit(gQueues[q].avail->le_idx);
 	gQueues[q].avail->le_ring[idx & (gQueues[q].count - 1)] = EndianSwap16Bit(b);
