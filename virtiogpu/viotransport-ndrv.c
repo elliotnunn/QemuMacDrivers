@@ -47,7 +47,7 @@ static void panic(char *msg) {
 // Internal routines.
 static void initQueues(struct virtio_pci_common_cfg *comConf,
 	void (*queueSizer)(uint16_t queue, uint16_t *count, size_t *isize, size_t *osize));
-static void readCapabilities(RegEntryID *dev, 
+static void readCapabilities(RegEntryID *dev,
 	void **commonConf, void **notify, uint32_t *notifyMult, void **isrStatus, void **devConf);
 static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]);
 static void allocPg(size_t count, void **logicals, uint32_t *physicals, int isIn, int isOut);
