@@ -284,6 +284,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Should use the obscure early-boot NanoKernel/VM calls
 	frontbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
 	backbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
+	cursorbuf = PoolAllocateResident(64 * 64 * 4, true);
 
 	lprintf("Buffers: front %08x back %08x\n", frontbuf, backbuf);
 
