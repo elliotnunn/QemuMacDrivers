@@ -19,9 +19,6 @@ Concepts:
 
 #define MAXEDGE 1024
 
-// Actively identify non-QD framebuffer access, at great expense
-#define HOOKCHECK 1
-
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -30,7 +27,7 @@ static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
 struct virtio_gpu_ctrl_hdr *conf;
 struct virtio_gpu_ctrl_hdr *obuf, *ibuf;
-void *backbuf, *frontbuf, *checkbuf;
+void *backbuf, *frontbuf;
 int W, H;
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
@@ -287,10 +284,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Should use the obscure early-boot NanoKernel/VM calls
 	frontbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
 	backbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
-	#if HOOKCHECK
-		checkbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
-		lprintf("checkbuf = %x\n", checkbuf);
-	#endif
 
 	lprintf("Buffers: front %08x back %08x\n", frontbuf, backbuf);
 
@@ -406,10 +399,6 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 		uint32_t *check = (void *)((char *)checkbuf + y * W * 4 + left * 4);
 		for (x=left; x<right; x++) {
 			uint32_t s = *src++;
-
-			#if HOOKCHECK
-			*check++ =
-			#endif
 			*dest++ =
 				((uint32_t)gamma[s & 0xff] << 24) |
 				((uint32_t)gamma[(s >> 8) & 0xff] << 16) |
@@ -476,63 +465,6 @@ static OSStatus VBLBH(void *p1, void *p2) {
 	if (interruptsOn) {
 		VSLDoInterruptService(interruptService);
 	}
-
-// 	#if HOOKCHECK
-// 	{
-// 		int i;
-// 		uint32_t *back = backbuf;
-// 		uint32_t *front = frontbuf;
-// 		uint32_t *check = checkbuf;
-// 		for (i=0; i<W*H; i++) {
-// 			front[i] = back[i];
-//
-// 			// Apply cute shimmery pattern
-// 			if (back[i] != check[i]) {
-// 				front[i] ^= (uint32_t)0xff0000 >> ((i & 2) * 4);
-// 			}
-// 		}
-// 	}
-// 	#else
-// 		memcpy(frontbuf, backbuf, W * H * 4);
-// 	#endif
-//
-// 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
-// 	{
-// 		struct virtio_gpu_transfer_to_host_2d *buf = (void *)VTBuffers[0][0];
-// 		memset(buf, 0, sizeof(*buf));
-// 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
-// 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-//
-// 		buf->r.le32_x = EndianSwap32Bit(0);
-// 		buf->r.le32_y = EndianSwap32Bit(0);
-// 		buf->r.le32_width = EndianSwap32Bit(W);
-// 		buf->r.le32_height = EndianSwap32Bit(H);
-// // 			buf->r.le32_x = EndianSwap32Bit(boxL);
-// // 			buf->r.le32_y = EndianSwap32Bit(boxT);
-// // 			buf->r.le32_width = EndianSwap32Bit(boxR - boxL);
-// // 			buf->r.le32_height = EndianSwap32Bit(boxB - boxT);
-//
-// 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
-//
-// 		VTSend(0, 0);
-// 	}
-//
-// 	// Use VIRTIO_GPU_CMD_RESOURCE_FLUSH to flush the updated resource to the display.
-// 	{
-// 		struct virtio_gpu_resource_flush *buf = (void *)VTBuffers[0][2];
-// 		memset(buf, 0, sizeof(*buf));
-// 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_FLUSH);
-// 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-//
-// 		buf->r.le32_x = EndianSwap32Bit(0);
-// 		buf->r.le32_y = EndianSwap32Bit(0);
-// 		buf->r.le32_width = EndianSwap32Bit(W);
-// 		buf->r.le32_height = EndianSwap32Bit(H);
-//
-// 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
-//
-// 		VTSend(0, 2);
-// 	}
 
 	setVBL();
 	return noErr;
