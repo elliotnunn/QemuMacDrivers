@@ -328,7 +328,7 @@ static void readCapabilities(RegEntryID *dev,
 				*commonConf = address;
 			} else if (cfg_type == 2) { // VIRTIO_PCI_CAP_NOTIFY_CFG
 				*notify = address;
-				ExpMgrConfigReadLong(dev, (void *)(capptr + 12), notifyMult);
+				ExpMgrConfigReadLong(dev, (void *)(capptr + 16), notifyMult);
 			} else if (cfg_type == 3) { // VIRTIO_PCI_CAP_ISR_CFG
 				*isrStatus = address;
 			} else if (cfg_type == 4) { // VIRTIO_PCI_CAP_DEVICE_CFG
