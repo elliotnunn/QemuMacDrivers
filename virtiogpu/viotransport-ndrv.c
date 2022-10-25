@@ -226,7 +226,7 @@ static void initQueues(struct virtio_pci_common_cfg *comConf,
 				int pageOffset = gQueues[q].osize / 2 * buf % 0x1000;
 				logical = (char *)opages[pageIndex] + pageOffset;
 				physical = (uint32_t)((char *)opagesp[pageIndex] + pageOffset);
-				
+
 				flags = 1; // VIRTQ_DESC_F_NEXT
 				next = buf + 1;
 			} else { // input page
@@ -275,7 +275,7 @@ static void initQueues(struct virtio_pci_common_cfg *comConf,
 
 			lprintf("  Descriptor ring at %#010x(log) %#010x(phys)\n",
 				gQueues[i].desc, EndianSwap32Bit(comConf->le_queue_desc));
-		
+
 			for (j=0; j<gQueues[i].count; j++) {
 				lprintf("    [%#06x] logical:%#010x {addr:%#010x len:%#06x flags:%#06x next:%#06x}\n",
 					j,
@@ -285,7 +285,7 @@ static void initQueues(struct virtio_pci_common_cfg *comConf,
 					EndianSwap16Bit(gQueues[i].desc[j].le_flags),
 					EndianSwap16Bit(gQueues[i].desc[j].le_next));
 			}
-			
+
 			lprintf("\n");
 		}
 	}
@@ -484,7 +484,7 @@ static OSStatus queueInterruptBH(void *arg1, void *arg2) {
 
 	// Check for new buffers in the queue
 	readQueues();
-	
+
 	// Re-enable interrupts
 	queueIntQueued = 0;
 	for (q=0; q<VTNumQueues; q++) {
