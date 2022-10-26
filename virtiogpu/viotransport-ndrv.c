@@ -222,16 +222,16 @@ static void initQueues(struct virtio_pci_common_cfg *comConf,
 			uint32_t physical;
 			uint16_t flags, next;
 			if (buf % 2 == 0) { // output page
-				int pageIndex = 1 + 1 + gQueues[q].osize / 2 * buf / 0x1000;
-				int pageOffset = gQueues[q].osize / 2 * buf % 0x1000;
+				int pageIndex = 1 + 1 + gQueues[q].osize * (buf / 2) / 0x1000;
+				int pageOffset = gQueues[q].osize * (buf / 2) % 0x1000;
 				logical = (char *)opages[pageIndex] + pageOffset;
 				physical = (uint32_t)((char *)opagesp[pageIndex] + pageOffset);
 
 				flags = 1; // VIRTQ_DESC_F_NEXT
 				next = buf + 1;
 			} else { // input page
-				int pageIndex = 1 + gQueues[q].osize / 2 * buf / 0x1000;
-				int pageOffset = gQueues[q].osize / 2 * buf % 0x1000;
+				int pageIndex = 1 + gQueues[q].isize * (buf / 2) / 0x1000;
+				int pageOffset = gQueues[q].isize * (buf / 2) % 0x1000;
 				logical = (char *)ipages[pageIndex] + pageOffset;
 				physical = (uint32_t)((char *)ipagesp[pageIndex] + pageOffset);
 
