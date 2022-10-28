@@ -413,7 +413,7 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 		}
 	}
 
-	lprintf("dirtyRectCallback(%d,%d,%d,%d)\n", top, left, bottom, right);
+	//lprintf("dirtyRectCallback(%d,%d,%d,%d)\n", top, left, bottom, right);
 
 	lockout = 1;
 
@@ -424,14 +424,12 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 
-// 		buf->r.le32_x = EndianSwap32Bit(left);
-// 		buf->r.le32_y = EndianSwap32Bit(top);
-// 		buf->r.le32_width = EndianSwap32Bit(right - left);
-// 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
-		buf->r.le32_x = EndianSwap32Bit(0);
-		buf->r.le32_y = EndianSwap32Bit(0);
-		buf->r.le32_width = EndianSwap32Bit(W);
-		buf->r.le32_height = EndianSwap32Bit(H);
+		buf->r.le32_x = EndianSwap32Bit(left);
+		buf->r.le32_y = EndianSwap32Bit(top);
+		buf->r.le32_width = EndianSwap32Bit(right - left);
+		buf->r.le32_height = EndianSwap32Bit(bottom - top);
+		
+		buf->le32_offset = EndianSwap32Bit(top*W*4 + left*4);
 
 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
 
@@ -445,14 +443,10 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_FLUSH);
 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 
-// 		buf->r.le32_x = EndianSwap32Bit(left);
-// 		buf->r.le32_y = EndianSwap32Bit(top);
-// 		buf->r.le32_width = EndianSwap32Bit(right - left);
-// 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
-		buf->r.le32_x = EndianSwap32Bit(0);
-		buf->r.le32_y = EndianSwap32Bit(0);
-		buf->r.le32_width = EndianSwap32Bit(W);
-		buf->r.le32_height = EndianSwap32Bit(H);
+		buf->r.le32_x = EndianSwap32Bit(left);
+		buf->r.le32_y = EndianSwap32Bit(top);
+		buf->r.le32_width = EndianSwap32Bit(right - left);
+		buf->r.le32_height = EndianSwap32Bit(bottom - top);
 
 		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
 
