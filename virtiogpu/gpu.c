@@ -18,6 +18,7 @@ Concepts:
 #include "dirtyrectpatch.h"
 
 #define MAXEDGE 1024
+#define TRACECALLS 0
 
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -215,20 +216,28 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = finalize(pb.finalInfo);
 		break;
 	case kControlCommand:
-		err = control((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
+		if (TRACECALLS) {
+			if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames)) {
+				lprintf("Control(%s)\n", controlNames[(*pb.pb).cntrlParam.csCode]);
+			} else {
+				lprintf("Control(%d)\n", (*pb.pb).cntrlParam.csCode);
+			}
+		}
 
-// 		if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames))
-// 			lprintf("Control(%s) = %d\n", controlNames[(*pb.pb).cntrlParam.csCode], err);
-// 		else
-// 			lprintf("Control(%d) = %d\n", (*pb.pb).cntrlParam.csCode, err);
+		err = control((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
+		if (TRACECALLS) lprintf("    = %d\n", err);
 		break;
 	case kStatusCommand:
-		err = status((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
+		if (TRACECALLS) {
+			if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames)) {
+				lprintf("Status(%s)\n", controlNames[(*pb.pb).cntrlParam.csCode]);
+			} else {
+				lprintf("Status(%d)\n", (*pb.pb).cntrlParam.csCode);
+			}
+		}
 
-// 		if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames))
-// 			lprintf("Status(%s) = %d\n", statusNames[(*pb.pb).cntrlParam.csCode], err);
-// 		else
-// 			lprintf("Status(%d) = %d\n", (*pb.pb).cntrlParam.csCode, err);
+		err = status((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
+		if (TRACECALLS) lprintf("    = %d\n", err);
 		break;
 	case kOpenCommand:
 	case kCloseCommand:
