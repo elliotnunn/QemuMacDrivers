@@ -270,30 +270,25 @@ static OSStatus initialize(DriverInitInfo *info) {
 	memset(obuf, 0, sizeof(*obuf));
 	obuf->le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_GET_DISPLAY_INFO);
 	obuf->le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-
 	VTSend(0, 0);
 	while (!VTDone(0)) {}
 
-	if (EndianSwap32Bit(ibuf->le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) {
-		lprintf("Did NOT get VIRTIO_GPU_RESP_OK_DISPLAY_INFO\n");
-		return paramErr;
-	}
+	if (EndianSwap32Bit(ibuf->le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) return paramErr;
 
 	W = EndianSwap32Bit(((struct virtio_gpu_resp_display_info *)ibuf)->pmodes[0].r.le32_width);
 	H = EndianSwap32Bit(((struct virtio_gpu_resp_display_info *)ibuf)->pmodes[0].r.le32_height);
-	lprintf("display %dx%d\n", W, H);
 
-	if (W > MAXEDGE || H > MAXEDGE) {
-		lprintf("Resolution too big for our fixed-size buffer (TODO)... hanging\n");
-		*(long *)0x68f168f1 = 0;
-	}
+	if (W > MAXEDGE || H > MAXEDGE) return paramErr;
 
 	// TODO: this huge-buffer management is terrible
 	// Should use the obscure early-boot NanoKernel/VM calls
-	frontbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
-	backbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
+	frontbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4 + 0x1000, true);
+	if (frontbuf == NULL) return paramErr;
+	frontbuf = (void *)(((long)frontbuf + 0xfff) & ~0xfff);
 
-	lprintf("Buffers: front %08x back %08x\n", frontbuf, backbuf);
+	backbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
+	if (backbuf == NULL) return paramErr;
+	backbuf = (void *)(((long)backbuf + 0xfff) & ~0xfff);
 
 	// Create a host resource using VIRTIO_GPU_CMD_RESOURCE_CREATE_2D.
 	{
