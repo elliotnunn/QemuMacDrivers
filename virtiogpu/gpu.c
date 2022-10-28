@@ -20,6 +20,7 @@ Concepts:
 
 #define MAXEDGE 1024
 #define TRACECALLS 0
+#define SCREEN_RESOURCE 99
 
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -294,7 +295,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		memset(req, 0, sizeof(*req));
 		req->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
 		req->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-		req->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
+		req->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
 		req->le32_format = EndianSwap32Bit(VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
 		req->le32_width = EndianSwap32Bit(W);
 		req->le32_height = EndianSwap32Bit(H);
@@ -318,7 +319,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		memset(req, 0, sizeof(*req) + sizeof(*req2));
 		req->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
 		req->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-		req->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
+		req->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
 		req->le32_nr_entries = EndianSwap32Bit(1);
 		req2->le32_addr = EndianSwap32Bit((uint32_t)frontbuf + 0x4000);
 		req2->le32_length = EndianSwap32Bit(64*1024*1024);
@@ -343,7 +344,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		req->r.le32_width = EndianSwap32Bit(W);
 		req->r.le32_height = EndianSwap32Bit(H);
 		req->le32_scanout_id = EndianSwap32Bit(0); // index, 0-15
-		req->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
+		req->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
 
 		VTSend(0, 0);
 		while (!VTDone(0)) {}
@@ -420,7 +421,7 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 		
 		buf->le32_offset = EndianSwap32Bit(top*W*4 + left*4);
 
-		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
+		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
 
 		VTSend(0, 0);
 	}
@@ -437,7 +438,7 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 		buf->r.le32_width = EndianSwap32Bit(right - left);
 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
 
-		buf->le32_resource_id = EndianSwap32Bit(99); // guest-assigned
+		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
 
 		VTSend(0, 2);
 	}
