@@ -30,6 +30,7 @@ static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
 void *backbuf, *frontbuf;
 int W, H;
+int qdUpdatesWorking;
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
@@ -41,7 +42,8 @@ static OSStatus VBLBH(void *p1, void *p2);
 static uint32_t checksum(uint32_t pixel);
 static uint32_t checksumField(uint32_t pixel);
 static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum);
-static void dirtyRectCallback(short top, short left, short bottom, short right);
+static void qdScreenUpdated(short top, short left, short bottom, short right);
+static void updateScreen(short top, short left, short bottom, short right);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
@@ -355,7 +357,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &interruptService);
 	setVBL();
 
-	InstallDirtyRectPatch(dirtyRectCallback);
+	InstallDirtyRectPatch(qdScreenUpdated);
 
 	return noErr;
 }
@@ -379,10 +381,8 @@ static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum) {
 	return (checksum & 0xff000000) | (pixel & 0x00ffffff);
 }
 
-volatile int lockout;
-
-static void dirtyRectCallback(short top, short left, short bottom, short right) {
-	int x, y;
+static void qdScreenUpdated(short top, short left, short bottom, short right) {
+	qdUpdatesWorking = 1;
 
 	top = MAX(MIN(top, H), 0);
 	bottom = MAX(MIN(bottom, H), 0);
@@ -390,6 +390,12 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 	right = MAX(MIN(right, W), 0);
 
 	if (top >= bottom || left >= right) return;
+
+	updateScreen(top, left, bottom, right);
+}
+
+static void updateScreen(short top, short left, short bottom, short right) {
+	int x, y;
 
 	for (y=top; y<bottom; y++) {
 		uint32_t *src = (void *)((char *)backbuf + y * W * 4 + left * 4);
@@ -402,10 +408,6 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 				((uint32_t)gamma[(s >> 16) & 0xff] << 8);
 		}
 	}
-
-	//lprintf("dirtyRectCallback(%d,%d,%d,%d)\n", top, left, bottom, right);
-
-	lockout = 1;
 
 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
 	{
@@ -444,12 +446,10 @@ static void dirtyRectCallback(short top, short left, short bottom, short right) 
 	}
 
 	while (!VTDone(0)) {}
-
-	lockout = 0;
 }
 
 static void setVBL(void) {
-	AbsoluteTime time = AddDurationToAbsolute(100, UpTime());
+	AbsoluteTime time = AddDurationToAbsolute(10, UpTime());
 	TimerID id;
 	SetInterruptTimer(&time, VBLBH, NULL, &id);
 }
@@ -457,6 +457,10 @@ static void setVBL(void) {
 static OSStatus VBLBH(void *p1, void *p2) {
 	if (interruptsOn) {
 		VSLDoInterruptService(interruptService);
+	}
+
+	if (!qdUpdatesWorking) {
+		updateScreen(0, 0, H, W);
 	}
 
 	setVBL();
