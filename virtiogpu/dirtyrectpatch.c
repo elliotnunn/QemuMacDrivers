@@ -289,7 +289,7 @@ static void drawPort(GrafPort *port) {
 
 	rgn = *port->clipRgn;
 	CLIP(&rgn->rgnBBox, t, l, b, r);
-
+	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
 	gCallback(t, l, b, r);
 }
 
