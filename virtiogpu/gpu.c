@@ -5,6 +5,7 @@ Concepts:
 
 #include <Devices.h>
 #include <DriverServices.h>
+#include <LowMem.h>
 #include <NameRegistry.h>
 #include <PCI.h>
 #include <Video.h>
@@ -358,6 +359,47 @@ static OSStatus initialize(DriverInitInfo *info) {
 	setVBL();
 
 	InstallDirtyRectPatch(qdScreenUpdated);
+
+	// With copying:
+	// Performance test: 1x1 at 6744 Hz
+	// Performance test: 2x2 at 6819 Hz
+	// Performance test: 4x4 at 6786 Hz
+	// Performance test: 8x8 at 6827 Hz
+	// Performance test: 16x16 at 6560 Hz
+	// Performance test: 32x32 at 5719 Hz
+	// Performance test: 64x64 at 3333 Hz
+	// Performance test: 128x128 at 1313 Hz
+	// Performance test: 256x256 at 400 Hz
+	// Performance test: 512x512 at 103 Hz
+	// (removing gamma lookup makes minimal difference)
+
+	// Without copying:
+	// Performance test: 1x1 at 12445 Hz
+	// Performance test: 2x2 at 12479 Hz
+	// Performance test: 4x4 at 12546 Hz
+	// Performance test: 8x8 at 12675 Hz
+	// Performance test: 16x16 at 12656 Hz
+	// Performance test: 32x32 at 12643 Hz
+	// Performance test: 64x64 at 12532 Hz
+	// Performance test: 128x128 at 12376 Hz
+	// Performance test: 256x256 at 10937 Hz
+	// Performance test: 512x512 at 7667 Hz
+	{
+		int size;
+		long t;
+		long n;
+		for (size=1; size<=512; size*=2) {
+			t = LMGetTicks() + 1;
+			while (t > LMGetTicks()) {}
+			t += 60;
+			n = 0;
+			while (t > LMGetTicks()) {
+				updateScreen(0, 0, size, size);
+				n++;
+			}
+			lprintf("Performance test: %dx%d at %d Hz\n", size, size, n);
+		}
+	}
 
 	return noErr;
 }
