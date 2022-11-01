@@ -372,6 +372,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Performance test: 256x256 at 400 Hz
 	// Performance test: 512x512 at 103 Hz
 	// (removing gamma lookup makes minimal difference)
+	// (rewriting in assembly also makes minimal difference)
 
 	// Without copying:
 	// Performance test: 1x1 at 12445 Hz
@@ -384,22 +385,22 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Performance test: 128x128 at 12376 Hz
 	// Performance test: 256x256 at 10937 Hz
 	// Performance test: 512x512 at 7667 Hz
-	{
-		int size;
-		long t;
-		long n;
-		for (size=1; size<=512; size*=2) {
-			t = LMGetTicks() + 1;
-			while (t > LMGetTicks()) {}
-			t += 60;
-			n = 0;
-			while (t > LMGetTicks()) {
-				updateScreen(0, 0, size, size);
-				n++;
-			}
-			lprintf("Performance test: %dx%d at %d Hz\n", size, size, n);
-		}
-	}
+	//{
+	//	int size;
+	//	long t;
+	//	long n;
+	//	for (size=1; size<=512; size*=2) {
+	//		t = LMGetTicks() + 1;
+	//		while (t > LMGetTicks()) {}
+	//		t += 60;
+	//		n = 0;
+	//		while (t > LMGetTicks()) {
+	//			updateScreen(0, 0, size, size);
+	//			n++;
+	//		}
+	//		lprintf("Performance test: %dx%d at %d Hz\n", size, size, n);
+	//	}
+	//}
 
 	return noErr;
 }
