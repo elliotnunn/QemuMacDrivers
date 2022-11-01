@@ -4,7 +4,7 @@
 COptions = -i :polyfill -proto strict
 PPCCOptions = {COptions}
 
-::builds:qemu_vga.ndrv ƒ gpu.c.x viotransport-ndrv.c.x lprintf.s.x hardwarecursor.c.x debugpollpatch.c.x dirtyrectpatch.c.x
+::builds:qemu_vga.ndrv ƒ gpu.c.x viotransport-ndrv.c.x lprintf.s.x hardwarecursor-speedhack.c.x debugpollpatch.c.x dirtyrectpatch.c.x
 	PPCLink -xm sharedlibrary ∂
 		-export TheDriverDescription,DoDriverIO ∂
 		-t ndrv -c '????' ∂
