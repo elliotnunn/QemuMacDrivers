@@ -1,0 +1,6 @@
+MacsBug
+=======
+
+MacOS debuggers run with all 68k interrupts disabled (except NMI). This prevents a timer interrupt from being used to refresh the screen. (MacsBug does not use QuickDraw, so we cannot intercept QuickDraw calls).
+
+Therefore we patch the 68k DebugUtil trap, specifically the DebugPoll selector, which MacsBug calls in a tight loop. The patch updates the entire screen.

@@ -1,8 +1,3 @@
-/*
-Concepts:
-"Mode" means bit depth, not resolution nor refresh rate
-*/
-
 #include <Devices.h>
 #include <DriverServices.h>
 #include <LowMem.h>
@@ -41,7 +36,8 @@ enum {
 	k4bit = kDepthMode3,
 	k8bit = kDepthMode4,
 	k16bit = kDepthMode5,
-	k32bit = kDepthMode6
+	k32bit = kDepthMode6,
+	kDepthModeMax = kDepthMode6
 };
 
 static int interruptsOn = 1;
@@ -452,7 +448,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return paramErr;
 	}
 
-	setDepth(k8bit);
+	setDepth(k32bit);
 	memcpy(publicGamma, &builtinGamma[0].table, sizeof(builtinGamma[0].table));
 
 	// Is it really necessary for us to fill the table?
@@ -1241,7 +1237,7 @@ static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
 	lprintf("GetVideoParameters csDisplayModeID=%d csDepthMode=%d\n",
 		rec->csDisplayModeID, rec->csDepthMode);
 
-	if (rec->csDepthMode < k1bit || rec->csDepthMode > k32bit) {
+	if (rec->csDepthMode < kDepthMode1 || rec->csDepthMode > kDepthModeMax) {
 		return statusErr;
 	}
 
