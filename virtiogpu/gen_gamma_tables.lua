@@ -1,6 +1,6 @@
 #!/usr/bin/env lua
 
-# Borrowed from https://github.com/SolraBizna/mac_qfb_driver
+-- Borrowed from https://github.com/SolraBizna/mac_qfb_driver
 
 local function linear2srgb(x)
    if x <= 0.0031308 then return x * 12.92
