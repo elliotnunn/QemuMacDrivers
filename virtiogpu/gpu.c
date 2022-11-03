@@ -20,8 +20,14 @@ Concepts:
 #include "hardwarecursor.h"
 
 #define MAXEDGE 1024
-#define TRACECALLS 0
+#define TRACECALLS 1
 #define SCREEN_RESOURCE 99
+
+// Before QuickDraw calls can be captured, microsec, 60.15 Hz
+#define FAST_REFRESH_PERIOD -16626
+
+// When QuickDraw calls are being captured, millisec, 4 Hz
+#define SLOW_REFRESH_PERIOD 250
 
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
