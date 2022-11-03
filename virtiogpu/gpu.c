@@ -1251,14 +1251,14 @@ static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
 	// vpBaseOffset (offset from NuBus slot to first page, always zero for us)
 	// vpBounds.topLeft vpVersion vpPackType vpPackSize vpPlaneBytes
 
-	// These fields don't change per-mode:
+	// These fields don't change per mode:
 	rec->csPageCount = 1;
 	rec->csVPBlockPtr->vpHRes = 0x00480000;	// Hard coded to 72 dpi
 	rec->csVPBlockPtr->vpVRes = 0x00480000;	// Hard coded to 72 dpi
 	rec->csVPBlockPtr->vpBounds.bottom = H;
 	rec->csVPBlockPtr->vpBounds.right = W;
 
-	// This does change per field, but we have a function to calculate it
+	// This does change per mode, but we have a function to calculate it
 	rec->csVPBlockPtr->vpRowBytes = rowBytesFor(rec->csDepthMode, W);
 
 	switch (rec->csDepthMode) {
