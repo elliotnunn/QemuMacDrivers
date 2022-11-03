@@ -11,12 +11,14 @@ Concepts:
 #include <Video.h>
 #include <VideoServices.h>
 #include <string.h>
+#include <fp.h>
 
 #include "viotransport.h"
 #include "virtio-gpu-structs.h"
 #include "lprintf.h"
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
+#include "gammatables.h"
 #include "hardwarecursor.h"
 
 #define MAXEDGE 1024
@@ -33,11 +35,23 @@ Concepts:
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
+enum {
+	k1bit = kDepthMode1,
+	k2bit = kDepthMode2,
+	k4bit = kDepthMode3,
+	k8bit = kDepthMode4,
+	k16bit = kDepthMode5,
+	k32bit = kDepthMode6
+};
+
 static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
 void *backbuf, *frontbuf;
-int W, H;
+int W, H, rowBytes;
+int mode;
 int qdUpdatesWorking;
+ColorSpec publicCLUT[256];
+uint32_t privateCLUT[256];
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
@@ -49,17 +63,22 @@ static OSStatus VBLBH(void *p1, void *p2);
 static uint32_t checksum(uint32_t pixel);
 static uint32_t checksumField(uint32_t pixel);
 static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum);
+static void updateWholeScreen(void);
 static void qdScreenUpdated(short top, short left, short bottom, short right);
 static void updateScreen(short top, short left, short bottom, short right);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
 static void configChanged(void);
+static void setDepth(int relativeDepth);
+static long rowBytesFor(int relativeDepth, long width);
+static void reCLUT(int index);
 static OSStatus GetBaseAddr(VDPageInfo *rec);
 static OSStatus MySetEntries(VDSetEntryRecord *rec);
 static OSStatus DirectSetEntries(VDSetEntryRecord *rec);
 static OSStatus GetEntries(VDSetEntryRecord *rec);
 static OSStatus GetClutBehavior(VDClutBehavior *rec);
+static OSStatus SetClutBehavior(VDClutBehavior *rec);
 static OSStatus SetGamma(VDGammaRecord *rec);
 static OSStatus GetGammaInfoList(VDGetGammaListRec *rec);
 static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec);
@@ -98,7 +117,7 @@ DriverDescription TheDriverDescription = {
 	kServiceCategoryNdrvDriver, kNdrvTypeIsVideo, 0x00, 0x10, 0x80, 0x00, //v0.1
 };
 
-unsigned char gamma[] = {
+uint8_t gammaRed[] = {
 	0x00, 0x04, 0x07, 0x09, 0x0b, 0x0d, 0x0f, 0x11,
 	0x13, 0x15, 0x16, 0x18, 0x1a, 0x1b, 0x1d, 0x1e,
 	0x20, 0x21, 0x23, 0x24, 0x26, 0x27, 0x29, 0x2a,
@@ -132,6 +151,78 @@ unsigned char gamma[] = {
 	0xf4, 0xf4, 0xf5, 0xf6, 0xf7, 0xf7, 0xf8, 0xf9,
 	0xfa, 0xfa, 0xfb, 0xfc, 0xfd, 0xfd, 0xfe, 0xff,
 };
+
+uint8_t gammaGrn[] = {
+	0x00, 0x04, 0x07, 0x09, 0x0b, 0x0d, 0x0f, 0x11,
+	0x13, 0x15, 0x16, 0x18, 0x1a, 0x1b, 0x1d, 0x1e,
+	0x20, 0x21, 0x23, 0x24, 0x26, 0x27, 0x29, 0x2a,
+	0x2b, 0x2d, 0x2e, 0x2f, 0x31, 0x32, 0x33, 0x34,
+	0x36, 0x37, 0x38, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e,
+	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x48,
+	0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51,
+	0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
+	0x5a, 0x5b, 0x5d, 0x5e, 0x5f, 0x60, 0x61, 0x62,
+	0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a,
+	0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72,
+	0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a,
+	0x7b, 0x7c, 0x7c, 0x7d, 0x7e, 0x7f, 0x80, 0x81,
+	0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+	0x8a, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f, 0x90,
+	0x91, 0x92, 0x93, 0x94, 0x94, 0x95, 0x96, 0x97,
+	0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9d, 0x9e,
+	0x9f, 0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa4, 0xa5,
+	0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xaa, 0xab, 0xac,
+	0xad, 0xae, 0xaf, 0xb0, 0xb0, 0xb1, 0xb2, 0xb3,
+	0xb4, 0xb5, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba,
+	0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xbf, 0xc0,
+	0xc1, 0xc2, 0xc3, 0xc4, 0xc4, 0xc5, 0xc6, 0xc7,
+	0xc8, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xcd,
+	0xce, 0xcf, 0xd0, 0xd1, 0xd1, 0xd2, 0xd3, 0xd4,
+	0xd5, 0xd5, 0xd6, 0xd7, 0xd8, 0xd8, 0xd9, 0xda,
+	0xdb, 0xdc, 0xdc, 0xdd, 0xde, 0xdf, 0xe0, 0xe0,
+	0xe1, 0xe2, 0xe3, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7,
+	0xe7, 0xe8, 0xe9, 0xea, 0xea, 0xeb, 0xec, 0xed,
+	0xee, 0xee, 0xef, 0xf0, 0xf1, 0xf1, 0xf2, 0xf3,
+	0xf4, 0xf4, 0xf5, 0xf6, 0xf7, 0xf7, 0xf8, 0xf9,
+	0xfa, 0xfa, 0xfb, 0xfc, 0xfd, 0xfd, 0xfe, 0xff,
+};
+
+uint8_t gammaBlu[] = {
+	0x00, 0x04, 0x07, 0x09, 0x0b, 0x0d, 0x0f, 0x11,
+	0x13, 0x15, 0x16, 0x18, 0x1a, 0x1b, 0x1d, 0x1e,
+	0x20, 0x21, 0x23, 0x24, 0x26, 0x27, 0x29, 0x2a,
+	0x2b, 0x2d, 0x2e, 0x2f, 0x31, 0x32, 0x33, 0x34,
+	0x36, 0x37, 0x38, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e,
+	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x48,
+	0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51,
+	0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
+	0x5a, 0x5b, 0x5d, 0x5e, 0x5f, 0x60, 0x61, 0x62,
+	0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a,
+	0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72,
+	0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a,
+	0x7b, 0x7c, 0x7c, 0x7d, 0x7e, 0x7f, 0x80, 0x81,
+	0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+	0x8a, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f, 0x90,
+	0x91, 0x92, 0x93, 0x94, 0x94, 0x95, 0x96, 0x97,
+	0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9d, 0x9e,
+	0x9f, 0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa4, 0xa5,
+	0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xaa, 0xab, 0xac,
+	0xad, 0xae, 0xaf, 0xb0, 0xb0, 0xb1, 0xb2, 0xb3,
+	0xb4, 0xb5, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba,
+	0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xbf, 0xc0,
+	0xc1, 0xc2, 0xc3, 0xc4, 0xc4, 0xc5, 0xc6, 0xc7,
+	0xc8, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xcd,
+	0xce, 0xcf, 0xd0, 0xd1, 0xd1, 0xd2, 0xd3, 0xd4,
+	0xd5, 0xd5, 0xd6, 0xd7, 0xd8, 0xd8, 0xd9, 0xda,
+	0xdb, 0xdc, 0xdc, 0xdd, 0xde, 0xdf, 0xe0, 0xe0,
+	0xe1, 0xe2, 0xe3, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7,
+	0xe7, 0xe8, 0xe9, 0xea, 0xea, 0xeb, 0xec, 0xed,
+	0xee, 0xee, 0xef, 0xf0, 0xf1, 0xf1, 0xf2, 0xf3,
+	0xf4, 0xf4, 0xf5, 0xf6, 0xf7, 0xf7, 0xf8, 0xf9,
+	0xfa, 0xfa, 0xfb, 0xfc, 0xfd, 0xfd, 0xfe, 0xff,
+};
+
+char publicGamma[1024] = {1};
 
 static const char *controlNames[] = {
 	"Reset",                        // 0
@@ -234,8 +325,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		break;
 	case kStatusCommand:
 		if (TRACECALLS) {
-			if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames)) {
-				lprintf("Status(%s)\n", controlNames[(*pb.pb).cntrlParam.csCode]);
+			if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames)) {
+				lprintf("Status(%s)\n", statusNames[(*pb.pb).cntrlParam.csCode]);
 			} else {
 				lprintf("Status(%d)\n", (*pb.pb).cntrlParam.csCode);
 			}
@@ -361,10 +452,37 @@ static OSStatus initialize(DriverInitInfo *info) {
 		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return paramErr;
 	}
 
+	setDepth(k8bit);
+	memcpy(publicGamma, &builtinGamma[0].table, sizeof(builtinGamma[0].table));
+
+	// Is it really necessary for us to fill the table?
+	{
+		int i;
+		for (i=0; i<256; i++) {
+			publicCLUT[i].value = i;
+			if (i == 0) {
+				publicCLUT[i].rgb.red = 0xffff;
+				publicCLUT[i].rgb.green = 0xffff;
+				publicCLUT[i].rgb.blue = 0xffff;
+			} else if (i == 1) {
+				publicCLUT[i].rgb.red = 0;
+				publicCLUT[i].rgb.green = 0;
+				publicCLUT[i].rgb.blue = 0;
+			} else {
+				publicCLUT[i].rgb.red = (uint16_t)i << 12;
+				publicCLUT[i].rgb.green = (uint16_t)i << 12;
+				publicCLUT[i].rgb.blue = (uint16_t)i << 12;
+			}
+
+			reCLUT(i);
+		}
+	}
+
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &interruptService);
 	setVBL();
 
 	InstallDirtyRectPatch(qdScreenUpdated);
+	InstallDebugPollPatch(updateWholeScreen);
 
 	// With copying:
 	// Performance test: 1x1 at 6744 Hz
@@ -430,6 +548,10 @@ static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum) {
 	return (checksum & 0xff000000) | (pixel & 0x00ffffff);
 }
 
+static void updateWholeScreen(void) {
+	updateScreen(0, 0, H, W);
+}
+
 static void qdScreenUpdated(short top, short left, short bottom, short right) {
 	qdUpdatesWorking = 1;
 
@@ -446,15 +568,125 @@ static void qdScreenUpdated(short top, short left, short bottom, short right) {
 static void updateScreen(short top, short left, short bottom, short right) {
 	int x, y;
 
-	for (y=top; y<bottom; y++) {
-		uint32_t *src = (void *)((char *)backbuf + y * W * 4 + left * 4);
-		uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
-		for (x=left; x<right; x++) {
-			uint32_t s = *src++;
-			*dest++ =
-				((uint32_t)gamma[s & 0xff] << 24) |
-				((uint32_t)gamma[(s >> 8) & 0xff] << 16) |
-				((uint32_t)gamma[(s >> 16) & 0xff] << 8);
+	// These blitters are not satisfactory
+	if (mode == k1bit) {
+		uint32_t c0 = privateCLUT[0], c1 = privateCLUT[1];
+		int leftBytes = (left / 8) & ~3;
+		int rightBytes = ((right + 31) / 8) & ~3;
+		for (y=top; y<bottom; y++) {
+			uint32_t *src = (void *)((char *)backbuf + y * rowBytes + leftBytes);
+			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~31) * 4);
+			for (x=leftBytes; x<rightBytes; x+=4) {
+				uint32_t s = *src++;
+				*dest++ = (s & 0x80000000) ? c1 : c0;
+				*dest++ = (s & 0x40000000) ? c1 : c0;
+				*dest++ = (s & 0x20000000) ? c1 : c0;
+				*dest++ = (s & 0x10000000) ? c1 : c0;
+				*dest++ = (s & 0x08000000) ? c1 : c0;
+				*dest++ = (s & 0x04000000) ? c1 : c0;
+				*dest++ = (s & 0x02000000) ? c1 : c0;
+				*dest++ = (s & 0x01000000) ? c1 : c0;
+				*dest++ = (s & 0x00800000) ? c1 : c0;
+				*dest++ = (s & 0x00400000) ? c1 : c0;
+				*dest++ = (s & 0x00200000) ? c1 : c0;
+				*dest++ = (s & 0x00100000) ? c1 : c0;
+				*dest++ = (s & 0x00080000) ? c1 : c0;
+				*dest++ = (s & 0x00040000) ? c1 : c0;
+				*dest++ = (s & 0x00020000) ? c1 : c0;
+				*dest++ = (s & 0x00010000) ? c1 : c0;
+				*dest++ = (s & 0x00008000) ? c1 : c0;
+				*dest++ = (s & 0x00004000) ? c1 : c0;
+				*dest++ = (s & 0x00002000) ? c1 : c0;
+				*dest++ = (s & 0x00001000) ? c1 : c0;
+				*dest++ = (s & 0x00000800) ? c1 : c0;
+				*dest++ = (s & 0x00000400) ? c1 : c0;
+				*dest++ = (s & 0x00000200) ? c1 : c0;
+				*dest++ = (s & 0x00000100) ? c1 : c0;
+				*dest++ = (s & 0x00000080) ? c1 : c0;
+				*dest++ = (s & 0x00000040) ? c1 : c0;
+				*dest++ = (s & 0x00000020) ? c1 : c0;
+				*dest++ = (s & 0x00000010) ? c1 : c0;
+				*dest++ = (s & 0x00000008) ? c1 : c0;
+				*dest++ = (s & 0x00000004) ? c1 : c0;
+				*dest++ = (s & 0x00000002) ? c1 : c0;
+				*dest++ = (s & 0x00000001) ? c1 : c0;
+			}
+		}
+	} else if (mode == k2bit) {
+		int leftBytes = (left / 4) & ~3;
+		int rightBytes = ((right + 15) / 4) & ~3;
+		for (y=top; y<bottom; y++) {
+			uint32_t *src = (void *)((char *)backbuf + y * rowBytes + leftBytes);
+			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~15) * 4);
+			for (x=leftBytes; x<rightBytes; x+=4) {
+				uint32_t s = *src++;
+				*dest++ = privateCLUT[(s >> 30) & 3];
+				*dest++ = privateCLUT[(s >> 28) & 3];
+				*dest++ = privateCLUT[(s >> 26) & 3];
+				*dest++ = privateCLUT[(s >> 24) & 3];
+				*dest++ = privateCLUT[(s >> 22) & 3];
+				*dest++ = privateCLUT[(s >> 20) & 3];
+				*dest++ = privateCLUT[(s >> 18) & 3];
+				*dest++ = privateCLUT[(s >> 16) & 3];
+				*dest++ = privateCLUT[(s >> 14) & 3];
+				*dest++ = privateCLUT[(s >> 12) & 3];
+				*dest++ = privateCLUT[(s >> 10) & 3];
+				*dest++ = privateCLUT[(s >> 8) & 3];
+				*dest++ = privateCLUT[(s >> 6) & 3];
+				*dest++ = privateCLUT[(s >> 4) & 3];
+				*dest++ = privateCLUT[(s >> 2) & 3];
+				*dest++ = privateCLUT[(s >> 0) & 3];
+			}
+		}
+	} else if (mode == k4bit) {
+		int leftBytes = (left / 2) & ~3;
+		int rightBytes = ((right + 7) / 2) & ~3;
+		for (y=top; y<bottom; y++) {
+			uint32_t *src = (void *)((char *)backbuf + y * rowBytes + leftBytes);
+			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~7) * 4);
+			for (x=leftBytes; x<rightBytes; x+=4) {
+				uint32_t s = *src++;
+				*dest++ = privateCLUT[(s >> 28) & 15];
+				*dest++ = privateCLUT[(s >> 24) & 15];
+				*dest++ = privateCLUT[(s >> 20) & 15];
+				*dest++ = privateCLUT[(s >> 16) & 15];
+				*dest++ = privateCLUT[(s >> 12) & 15];
+				*dest++ = privateCLUT[(s >> 8) & 15];
+				*dest++ = privateCLUT[(s >> 4) & 15];
+				*dest++ = privateCLUT[(s >> 0) & 15];
+			}
+		}
+	} else if (mode == k8bit) {
+		for (y=top; y<bottom; y++) {
+			uint8_t *src = (void *)((char *)backbuf + y * rowBytes + left);
+			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
+			for (x=left; x<right; x++) {
+				*dest++ = privateCLUT[*src++];
+			}
+		}
+	} else if (mode == k16bit) {
+		for (y=top; y<bottom; y++) {
+			uint16_t *src = (void *)((char *)backbuf + y * rowBytes + left * 2);
+			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
+			for (x=left; x<right; x++) {
+				uint16_t s = *src++;
+				*dest++ =
+					((uint32_t)gammaBlu[((s & 0x1f) << 3) | ((s & 0x1f) << 3 >> 5)] << 24) |
+					((uint32_t)gammaGrn[((s & 0x3e0) >> 5 << 3) | ((s & 0x3e0) >> 5 << 3 >> 5)] << 16) |
+					((uint32_t)gammaRed[((s & 0x7c00) >> 10 << 3) | ((s & 0x7c00) >> 10 << 3 >> 5)] << 8);
+			}
+		}
+	} else if (mode == k32bit) {
+		for (y=top; y<bottom; y++) {
+			uint32_t *src = (void *)((char *)backbuf + y * rowBytes + left * 4);
+			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
+			for (x=left; x<right; x++) {
+				uint32_t s = *src++;
+				*dest++ =
+					((uint32_t)gammaBlu[s & 0xff] << 24) |
+					((uint32_t)gammaGrn[(s >> 8) & 0xff] << 16) |
+					((uint32_t)gammaRed[(s >> 16) & 0xff] << 8);
+			}
 		}
 	}
 
@@ -469,7 +701,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		buf->r.le32_y = EndianSwap32Bit(top);
 		buf->r.le32_width = EndianSwap32Bit(right - left);
 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
-		
+
 		buf->le32_offset = EndianSwap32Bit(top*W*4 + left*4);
 
 		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
@@ -498,7 +730,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 }
 
 static void setVBL(void) {
-	AbsoluteTime time = AddDurationToAbsolute(10, UpTime());
+	AbsoluteTime time = AddDurationToAbsolute(33, UpTime());
 	TimerID id;
 	SetInterruptTimer(&time, VBLBH, NULL, &id);
 }
@@ -508,9 +740,9 @@ static OSStatus VBLBH(void *p1, void *p2) {
 		VSLDoInterruptService(interruptService);
 	}
 
-	if (!qdUpdatesWorking) {
+	//if (!qdUpdatesWorking) {
 		updateScreen(0, 0, H, W);
-	}
+	//}
 
 	setVBL();
 	return noErr;
@@ -526,6 +758,7 @@ static OSStatus control(short csCode, void *param) {
 		case cscDrawHardwareCursor: return DrawHardwareCursor(param);
 		case cscGrayPage: return GrayPage(param);
 		case cscSavePreferredConfiguration: return SavePreferredConfiguration(param);
+		case cscSetClutBehavior: return SetClutBehavior(param);
 		case cscSetEntries: return MySetEntries(param);
 		case cscSetGamma: return SetGamma(param);
 		case cscSetGray: return SetGray(param);
@@ -569,6 +802,49 @@ static void configChanged(void) {
 	lprintf("configChanged\n");
 }
 
+// Should also call this if the resolution is changed
+static void setDepth(int relativeDepth) {
+	lprintf("SetDepth to %d\n", relativeDepth);
+
+	mode = relativeDepth;
+	rowBytes = rowBytesFor(mode, W);
+
+	updateScreen(0, 0, H, W);
+}
+
+static long rowBytesFor(int relativeDepth, long width) {
+	long ret;
+
+	if (relativeDepth == k1bit) {
+		ret = (width + 7) / 8;
+	} else if (relativeDepth == k2bit) {
+		ret = (width + 3) / 4;
+	} else if (relativeDepth == k4bit) {
+		ret = (width + 1) / 2;
+	} else if (relativeDepth == k8bit) {
+		ret = width;
+	} else if (relativeDepth == k16bit) {
+		ret = width * 2;
+	} else if (relativeDepth == k32bit) {
+		ret = width * 4;
+	}
+
+	// 32-bit align
+	ret += 3;
+	ret -= ret % 4;
+
+	return ret;
+}
+
+// Update privateCLUT from publicCLUT
+// TODO: needs gamma correction
+static void reCLUT(int index) {
+	privateCLUT[index] =
+		((uint32_t)gammaRed[publicCLUT[index].rgb.red >> 8] << 8) |
+		((uint32_t)gammaGrn[publicCLUT[index].rgb.green >> 8] << 16) |
+		((uint32_t)gammaBlu[publicCLUT[index].rgb.blue >> 8] << 24);
+}
+
 // Returns the base address of a specified page in the current mode.
 // --- csMode      Unused
 // --- csData      Unused
@@ -584,8 +860,8 @@ static OSStatus GetBaseAddr(VDPageInfo *rec) {
 // --> csStart     First entry in table
 // --> csCount     Number of entries to set
 static OSStatus MySetEntries(VDSetEntryRecord *rec) {
-	lprintf("SetEntries csStart=%d csCount=%d\n", rec->csStart, rec->csCount);
-	return noErr;
+	if (mode > k8bit) return controlErr;
+	return DirectSetEntries(rec);
 }
 
 // Normally, color table animation is not used on a direct device, but
@@ -594,7 +870,20 @@ static OSStatus MySetEntries(VDSetEntryRecord *rec) {
 // provides the direct device with indexed mode functionality identical to
 // the regular SetEntries control routine.
 static OSStatus DirectSetEntries(VDSetEntryRecord *rec) {
-	return controlErr;
+	int src, dst;
+
+	for (src=0; src<=rec->csCount; src++) {
+		if (rec->csStart == -1) {
+			dst = rec->csTable[src].value;
+		} else {
+			dst = rec->csStart + src;
+		}
+
+		publicCLUT[dst].rgb = rec->csTable[src].rgb;
+		reCLUT(dst);
+	}
+
+	return noErr;
 }
 
 // Returns the specified number of consecutive CLUT entries, starting with
@@ -603,35 +892,84 @@ static OSStatus DirectSetEntries(VDSetEntryRecord *rec) {
 // --> csStart     First entry in table
 // --> csCount     Number of entries to set
 static OSStatus GetEntries(VDSetEntryRecord *rec) {
-	int i;
-	ColorSpec *array = (ColorSpec *)rec->csTable;
-	lprintf("GetEntries csStart=%d csCount=%d\n", rec->csStart, rec->csCount);
+	int src, dst;
 
-	for (i=0; i<=rec->csCount; i++) {
-		array[i].value = 0;
-		array[i].rgb.red = 0;
-		array[i].rgb.green = 0;
-		array[i].rgb.blue = 0;
+	for (dst=0; dst<=rec->csCount; dst++) {
+		if (rec->csStart == -1) {
+			src = rec->csTable[dst].value;
+		} else {
+			src = rec->csStart + dst;
+		}
+
+		rec->csTable[dst] = publicCLUT[src];
 	}
+
 	return noErr;
 }
 
 // Not well documented, but needed by MacsBug
 static OSStatus GetClutBehavior(VDClutBehavior *rec) {
-	*rec = kSetClutAtSetEntries;
+	*rec = kSetClutAtVBL;
 	return noErr;
+}
+
+static OSStatus SetClutBehavior(VDClutBehavior *rec) {
+	return controlErr;
 }
 
 // Sets the gamma table in the driver that corrects RGB color values.
 // --> csGTable    Pointer to gamma table
 static OSStatus SetGamma(VDGammaRecord *rec) {
-	return controlErr;
+	GammaTbl *tbl = (void *)rec->csGTable;
+	void *data = (char *)tbl + 12 + tbl->gFormulaSize;
+	long totalSize = 12 + tbl->gFormulaSize + (long)tbl->gChanCnt * tbl->gDataCnt * tbl->gDataWidth / 8;
+	int i, j;
+
+	// red, green, blue
+	for (i=0; i<3; i++) {
+		uint8_t *src, *dst;
+		if (tbl->gChanCnt == 3) {
+			src = (uint8_t *)data + i * tbl->gDataCnt * tbl->gDataWidth / 8;
+		} else {
+			src = (uint8_t *)data;
+		}
+
+		if (i == 0) {
+			dst = (void *)gammaRed;
+		} else if (i == 1) {
+			dst = (void *)gammaGrn;
+		} else {
+			dst = (void *)gammaBlu;
+		}
+
+		// Calculate and report approximate exponent
+		{
+			const char colors[] = "RGB";
+			double middle = ((double)src[127] + (double)src[128]) / 2.0 / 255.0;
+			double exponent = -log2(middle);
+			lprintf("Approximate %c exponent = %.3f\n", colors[i], exponent);
+		}
+
+		for (j=0; j<256 && j<tbl->gDataCnt; j++) {
+			dst[j] = src[j * (tbl->gDataWidth/8)];
+
+//			lprintf("%d\n", src[j * (tbl->gDataWidth/8)]);
+
+// 			lprintf("0x%02x,", src[j * (tbl->gDataWidth/8)]);
+// 			if ((j % 8) == 7) lprintf("\n");
+		}
+//		lprintf("\n");
+	}
+
+	memcpy(publicGamma, tbl, totalSize);
+	return noErr;
 }
 
 // Returns a pointer to the current gamma table.
 // <-- csGTable    Pointer to gamma table
 static OSStatus GetGamma(VDGammaRecord *rec) {
-	return statusErr;
+	rec->csGTable = publicGamma;
+	return noErr;
 }
 
 // Clients wishing to find a graphics card’s available gamma tables
@@ -643,14 +981,64 @@ static OSStatus GetGamma(VDGammaRecord *rec) {
 // <-- csGammaTableSize        Size of the gamma table in bytes
 // <-- csGammaTableName        Gamma table name (C string)
 static OSStatus GetGammaInfoList(VDGetGammaListRec *rec) {
-	return statusErr;
+	enum {first = 1};
+	long last = first + builtinGammaCount - 1;
+
+	long id;
+
+	if (rec->csPreviousGammaTableID == kGammaTableIDFindFirst) {
+		id = first;
+	} else if (rec->csPreviousGammaTableID == kGammaTableIDSpecific) {
+		id = rec->csGammaTableID;
+
+		if (id < first || id > last) {
+			return paramErr;
+		}
+	} else if (rec->csPreviousGammaTableID >= first && rec->csPreviousGammaTableID < last) {
+		id = rec->csPreviousGammaTableID + 1;
+	} else if (rec->csPreviousGammaTableID == last) {
+		rec->csGammaTableID = kGammaTableIDNoMoreTables;
+		lprintf("GetGammaInfoList prevID=%d ... ID=%d size=%d name=%s\n",
+			rec->csPreviousGammaTableID,
+			rec->csGammaTableID,
+			rec->csGammaTableSize,
+			rec->csGammaTableName);
+		return noErr;
+	} else {
+		return paramErr;
+	}
+
+	rec->csGammaTableID = id;
+	rec->csGammaTableSize = sizeof(builtinGamma[0].table);
+	memcpy(rec->csGammaTableName, builtinGamma[id-first].name, 32);
+
+	lprintf("GetGammaInfoList prevID=%d ... ID=%d size=%d name=%s\n",
+		rec->csPreviousGammaTableID,
+		rec->csGammaTableID,
+		rec->csGammaTableSize,
+		rec->csGammaTableName);
+
+	return noErr;
 }
 
 // Copies the designated gamma table into the designated location.
 // --> csGammaTableID      ID of gamma table to retrieve
 // <-> csGammaTablePtr     Location to copy table into
 static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec) {
-	return statusErr;
+	enum {first = 1};
+	long last = first + builtinGammaCount - 1;
+
+	long id = rec->csGammaTableID;
+
+	if (id < first || id > last) {
+		return paramErr;
+	}
+
+	lprintf("copying gamma table %d x %db\n", id, sizeof(builtinGamma[0].table));
+
+	memcpy(rec->csGammaTablePtr, &builtinGamma[id-first].table, sizeof(builtinGamma[0].table));
+
+	return noErr;
 }
 
 // Fills the specified video page with a dithered gray pattern in the
@@ -686,7 +1074,8 @@ static OSStatus GetGray(VDGrayRecord *rec) {
 // <-- csPage      Number of display pages available
 // --- csBaseAddr  Unused
 static OSStatus GetPages(VDPageInfo *rec) {
-	return statusErr;
+	rec->csPage = 1;
+	return noErr;
 }
 
 // To enable interrupts, pass a csMode value of 0; to disable interrupts,
@@ -708,11 +1097,12 @@ static OSStatus GetInterrupt(VDFlagRecord *rec) {
 // GetSync and SetSync can be used to implement the VESA DPMS as well as
 // enable a sync-on-green mode for the frame buffer.
 static OSStatus SetSync(VDSyncInfoRec *rec) {
-	return controlErr;
+	return noErr;
 }
 
 static OSStatus GetSync(VDSyncInfoRec *rec) {
-	return statusErr;
+	rec->csMode = 0;
+	return noErr;
 }
 
 // --> powerState  Switch display hardware to this state
@@ -768,7 +1158,7 @@ static OSStatus GetConnection(VDDisplayConnectInfoRec *rec) {
 // <-- csBaseAddr  Base address of video RAM for the current
 //                 DisplayModeID and relative bit depth
 static OSStatus GetMode(VDPageInfo *rec) {
-	rec->csMode = kDepthMode1;
+	rec->csMode = mode;
 	rec->csPage = 0;
 	rec->csBaseAddr = backbuf;
 	return noErr;
@@ -782,7 +1172,7 @@ static OSStatus GetMode(VDPageInfo *rec) {
 // <-- csPage      Current page
 // <-- csBaseAddr  Base address of current page
 static OSStatus GetCurMode(VDSwitchInfoRec *rec) {
-	rec->csMode = kDepthMode1;
+	rec->csMode = mode;
 	rec->csData = 1;
 	rec->csPage = 0;
 	rec->csBaseAddr = backbuf;
@@ -804,7 +1194,14 @@ static OSStatus GetModeTiming(VDTimingInfoRec *rec) {
 // --> csPage          Desired display page
 // <-- csBaseAddr      Base address of video RAM for this csMode
 static OSStatus SetMode(VDPageInfo *rec) {
-	return controlErr;
+	if (rec->csPage != 0) {
+		return paramErr;
+	}
+
+	setDepth(rec->csMode);
+	updateScreen(0, 0, W, H);
+	rec->csBaseAddr = backbuf;
+	return noErr;
 }
 
 // --> csMode          Relative bit depth to switch to
@@ -812,7 +1209,14 @@ static OSStatus SetMode(VDPageInfo *rec) {
 // --> csPage          Video page number to switch into
 // <-- csBaseAddr      Base address of the new DisplayModeID
 static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
-	return controlErr;
+	if (rec->csPage != 0) {
+		return paramErr;
+	}
+
+	setDepth(rec->csMode);
+	updateScreen(0, 0, W, H);
+	rec->csBaseAddr = backbuf;
+	return noErr;
 }
 
 // Reports all display resolutions that the driver supports.
@@ -827,7 +1231,6 @@ static OSStatus GetNextResolution(VDResolutionInfoRec *rec) {
 	return statusErr;
 }
 
-// Looks quite a bit hard-coded, isn't it ?
 // --> csDisplayModeID   ID of the desired DisplayModeID
 // --> csDepthMode       Relative bit depth
 // <-> *csVPBlockPtr     Pointer to a VPBlock
@@ -836,28 +1239,72 @@ static OSStatus GetNextResolution(VDResolutionInfoRec *rec) {
 // <-- csDeviceType      Direct, fixed, or CLUT
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
 	lprintf("GetVideoParameters csDisplayModeID=%d csDepthMode=%d\n",
-		rec->csDisplayModeID, rec->csDisplayModeID);
+		rec->csDisplayModeID, rec->csDepthMode);
+
+	if (rec->csDepthMode < k1bit || rec->csDepthMode > k32bit) {
+		return statusErr;
+	}
 
 	memset(rec->csVPBlockPtr, 0, sizeof(*rec->csVPBlockPtr));
-	rec->csVPBlockPtr->vpBaseOffset = 0; // For us, it's always 0
-	rec->csVPBlockPtr->vpRowBytes = 4 * W;
-	rec->csVPBlockPtr->vpBounds.top = 0; // Always 0
-	rec->csVPBlockPtr->vpBounds.left = 0; // Always 0
-	rec->csVPBlockPtr->vpBounds.bottom	= H;
-	rec->csVPBlockPtr->vpBounds.right = W;
-	rec->csVPBlockPtr->vpVersion = 0; // Always 0
-	rec->csVPBlockPtr->vpPackType = 0; // Always 0
-	rec->csVPBlockPtr->vpPackSize = 0; // Always 0
+
+	// These fields are always left at zero:
+	// vpBaseOffset (offset from NuBus slot to first page, always zero for us)
+	// vpBounds.topLeft vpVersion vpPackType vpPackSize vpPlaneBytes
+
+	// These fields don't change per-mode:
+	rec->csPageCount = 1;
 	rec->csVPBlockPtr->vpHRes = 0x00480000;	// Hard coded to 72 dpi
 	rec->csVPBlockPtr->vpVRes = 0x00480000;	// Hard coded to 72 dpi
-	rec->csVPBlockPtr->vpPixelType = 16;
-	rec->csVPBlockPtr->vpPixelSize = 32;
-	rec->csVPBlockPtr->vpCmpCount = 3;
-	rec->csVPBlockPtr->vpCmpSize = 8;
-	rec->csVPBlockPtr->vpPlaneBytes = 0;
+	rec->csVPBlockPtr->vpBounds.bottom = H;
+	rec->csVPBlockPtr->vpBounds.right = W;
 
-	rec->csPageCount = 1;
-	rec->csDeviceType = directType;
+	// This does change per field, but we have a function to calculate it
+	rec->csVPBlockPtr->vpRowBytes = rowBytesFor(rec->csDepthMode, W);
+
+	switch (rec->csDepthMode) {
+	case k1bit:
+		rec->csVPBlockPtr->vpPixelType = 0; // indexed
+		rec->csVPBlockPtr->vpPixelSize = 1;
+		rec->csVPBlockPtr->vpCmpCount = 1;
+		rec->csVPBlockPtr->vpCmpSize = 1;
+		rec->csDeviceType = clutType;
+		break;
+	case k2bit:
+		rec->csVPBlockPtr->vpPixelType = 0; // indexed
+		rec->csVPBlockPtr->vpPixelSize = 2;
+		rec->csVPBlockPtr->vpCmpCount = 1;
+		rec->csVPBlockPtr->vpCmpSize = 2;
+		rec->csDeviceType = clutType;
+		break;
+	case k4bit:
+		rec->csVPBlockPtr->vpPixelType = 0; // indexed
+		rec->csVPBlockPtr->vpPixelSize = 4;
+		rec->csVPBlockPtr->vpCmpCount = 1;
+		rec->csVPBlockPtr->vpCmpSize = 4;
+		rec->csDeviceType = clutType;
+		break;
+	case k8bit:
+		rec->csVPBlockPtr->vpPixelType = 0; // indexed
+		rec->csVPBlockPtr->vpPixelSize = 8;
+		rec->csVPBlockPtr->vpCmpCount = 1;
+		rec->csVPBlockPtr->vpCmpSize = 8;
+		rec->csDeviceType = clutType;
+		break;
+	case k16bit:
+		rec->csVPBlockPtr->vpPixelType = 16; // direct
+		rec->csVPBlockPtr->vpPixelSize = 16;
+		rec->csVPBlockPtr->vpCmpCount = 3;
+		rec->csVPBlockPtr->vpCmpSize = 5;
+		rec->csDeviceType = directType;
+		break;
+	case k32bit:
+		rec->csVPBlockPtr->vpPixelType = 16; // direct
+		rec->csVPBlockPtr->vpPixelSize = 32;
+		rec->csVPBlockPtr->vpCmpCount = 3;
+		rec->csVPBlockPtr->vpCmpSize = 8;
+		rec->csDeviceType = directType;
+		break;
+	}
 
 	return noErr;
 }
