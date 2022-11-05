@@ -252,8 +252,16 @@ static void secondStage(void) {
 
 	// Install our patches, saving the old traps
 	#define X(trap, StdName, args, procInfo) \
-		their##StdName = GetToolTrapAddress(trap); \
-		SetToolTrapAddress(&my##StdName##Desc, trap);
+		if (trap >= 0xa800) { \
+			their##StdName = GetToolTrapAddress(trap); \
+			SetToolTrapAddress(&my##StdName##Desc, trap); \
+		} else if (trap >= 0xa000) { \
+			their##StdName = GetOSTrapAddress(trap); \
+			SetOSTrapAddress(&my##StdName##Desc, trap); \
+		} else { \
+			their##StdName = *(void **)trap; \
+			*(void **)trap = &my##StdName##Desc; \
+		}
 	PATCH_LIST
 	#undef X
 
