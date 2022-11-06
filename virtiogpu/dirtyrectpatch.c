@@ -207,7 +207,7 @@ static void secondStage(void);
 static void dirtyRect(short top, short left, short bottom, short right);
 static int lockout;
 static uint8_t pending;
-static volatile short pendingT, pendingL, pendingB, pendingR;
+static volatile short pendingT = 0x7fff, pendingL = 0x7fff, pendingB, pendingR;
 static void (*gCallback)(short top, short left, short bottom, short right);
 static GrafPort *deferringPort;
 static void drawPort(GrafPort *port);
@@ -292,7 +292,8 @@ static void dirtyRect(short top, short left, short bottom, short right) {
 			left = pendingL;
 			bottom = pendingB;
 			right = pendingR;
-			pendingT = pendingL = pendingB = pendingR = 0;
+			pendingT = pendingL = 0x7fff;
+			pendingB = pendingR = 0;
 			gCallback(top, left, bottom, right);
 			lockout = 0;
 		}
