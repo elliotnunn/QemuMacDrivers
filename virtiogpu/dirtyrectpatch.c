@@ -204,8 +204,6 @@ PATCH_LIST
 // Other globals and prototypes
 static void secondStage(void);
 static void (*gCallback)(short top, short left, short bottom, short right);
-static void tintRect(long color, int t, int l, int b, int r);
-static void delay(unsigned long ticks);
 static GrafPort *deferringPort;
 static void drawPort(GrafPort *port);
 
@@ -581,39 +579,4 @@ static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const 
 	LOCALTOGLOBAL(dstBits, t, l, b, r);
 
 	gCallback(t, l, b, r);
-}
-
-static void tintRect(long color, int t, int l, int b, int r) {
-	PixMap *screen = *(**(GDevice ***)0x8a4)->gdPMap;
-
-	long *ptr;
-	int x, y;
-	int odd = 0;
-
-	//lprintf("tintRect(%d,%d,%d,%d,%d)\n", color, t, l, b, r);
-
-	for (y = t; y < b; y++) {
-		ptr = (long *)((char *)screen->baseAddr + y * (screen->rowBytes & 0x3fff) + 4 * l);
-
-		*ptr = color;
-
-		if (odd) ptr++;
-		odd = !odd;
-
-		for (x = l; x < r; x += 2) {
-			*ptr = color;
-			if (y == t)
-				ptr++;
-			else
-				ptr += 2;
-		}
-	};
-}
-
-#include <LowMem.h>
-
-static void delay(unsigned long ticks) {
-	unsigned long t0 = LMGetTicks();
-
-	while (LMGetTicks() - t0 < ticks) {}
 }
