@@ -1,6 +1,7 @@
 #include "dirtyrectpatch.h"
 
 #include <stdint.h>
+#include <DriverSynchronization.h>
 #include <MixedMode.h>
 #include <Patches.h>
 #include <QuickDraw.h>
@@ -203,6 +204,10 @@ PATCH_LIST
 
 // Other globals and prototypes
 static void secondStage(void);
+static void dirtyRect(short top, short left, short bottom, short right);
+static int lockout;
+static uint8_t pending;
+static volatile short pendingT, pendingL, pendingB, pendingR;
 static void (*gCallback)(short top, short left, short bottom, short right);
 static GrafPort *deferringPort;
 static void drawPort(GrafPort *port);
@@ -266,6 +271,34 @@ static void secondStage(void) {
 	lprintf("Installed QuickDraw patches\n");
 }
 
+static void dirtyRect(short top, short left, short bottom, short right) {
+	if (top <= left || bottom <= right) return;
+
+	if (lockout) {
+		pending = 0x80;
+
+		while (pendingT > top) pendingT = top;
+		while (pendingL > left) pendingL = left;
+		while (pendingB < bottom) pendingB = bottom;
+		while (pendingR < right) pendingR = right;
+	} else {
+		lockout = 1;
+		gCallback(top, left, bottom, right);
+		lockout = 0;
+
+		while (TestAndClear(0, &pending)) {
+			lockout = 1;
+			top = pendingT;
+			left = pendingL;
+			bottom = pendingB;
+			right = pendingR;
+			pendingT = pendingL = pendingB = pendingR = 0;
+			gCallback(top, left, bottom, right);
+			lockout = 0;
+		}
+	}
+}
+
 static void myBeginUpdate(GrafPort *theWindow) {
 	if (deferringPort != NULL) {
 		drawPort(deferringPort);
@@ -296,7 +329,7 @@ static void drawPort(GrafPort *port) {
 	rgn = *port->clipRgn;
 	CLIP(&rgn->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdText(short count, const void *textAddr, Point numer, Point denom) {
@@ -326,7 +359,7 @@ static void myStdText(short count, const void *textAddr, Point numer, Point deno
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdLine(Point newPt) {
@@ -361,7 +394,7 @@ static void myStdLine(Point newPt) {
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdRect(GrafVerb verb, const Rect *rect) {
@@ -381,7 +414,7 @@ static void myStdRect(GrafVerb verb, const Rect *rect) {
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdRRect(GrafVerb verb, const Rect *rect, short ovalWidth, short ovalHeight) {
@@ -401,7 +434,7 @@ static void myStdRRect(GrafVerb verb, const Rect *rect, short ovalWidth, short o
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdOval(GrafVerb verb, const Rect *rect) {
@@ -421,7 +454,7 @@ static void myStdOval(GrafVerb verb, const Rect *rect) {
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdArc(GrafVerb verb, const Rect *rect, short startAngle, short arcAngle) {
@@ -441,7 +474,7 @@ static void myStdArc(GrafVerb verb, const Rect *rect, short startAngle, short ar
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdPoly(GrafVerb verb, PolyHandle poly) {
@@ -463,7 +496,7 @@ static void myStdPoly(GrafVerb verb, PolyHandle poly) {
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
@@ -485,7 +518,7 @@ static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *dstRect, short mode, RgnHandle maskRgn) {
@@ -505,8 +538,7 @@ static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *ds
 	CLIP(&(*port->clipRgn)->rgnBBox, t, l, b, r);
 	CLIP(&(*port->visRgn)->rgnBBox, t, l, b, r);
 	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myCopyBits(const BitMap *srcBits, const BitMap *dstBits, const Rect *srcRect, const Rect *dstRect, short mode, RgnHandle maskRgn) {
@@ -529,8 +561,7 @@ static void myCopyBits(const BitMap *srcBits, const BitMap *dstBits, const Rect 
 	}
 
 	LOCALTOGLOBAL(dstBits, t, l, b, r);
-
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myCopyMask(const BitMap *srcBits, const BitMap *maskBits, const BitMap *dstBits, const Rect *srcRect, const Rect *maskRect, const Rect *dstRect) {
@@ -553,8 +584,7 @@ static void myCopyMask(const BitMap *srcBits, const BitMap *maskBits, const BitM
 	}
 
 	LOCALTOGLOBAL(dstBits, t, l, b, r);
-
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
 
 static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const BitMap *dstBits, const Rect *srcRect, const Rect *maskRect, const Rect *dstRect, short mode, RgnHandle maskRgn) {
@@ -577,6 +607,5 @@ static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const 
 	}
 
 	LOCALTOGLOBAL(dstBits, t, l, b, r);
-
-	gCallback(t, l, b, r);
+	dirtyRect(t, l, b, r);
 }
