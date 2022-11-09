@@ -91,6 +91,8 @@ OSStatus SetHardwareCursor(VDSetHardwareCursorRec *rec) {
 	int ok;
 	int x, y;
 
+	return paramErr;
+
 	for (i=0; i<sizeof(colourCodes)/sizeof(*colourCodes); i++) {
 		colourCodes[i] = i;
 	}
@@ -194,6 +196,8 @@ OSStatus DrawHardwareCursor(VDDrawHardwareCursorRec *rec) {
 	struct virtio_gpu_update_cursor *obuf = (void *)VTBuffers[1][0];
 	struct virtio_gpu_ctrl_hdr *ibuf = (void *)VTBuffers[1][1];
 
+	return paramErr;
+
 	// Need to re-guess the hotspot and tell the host
 	if (rec->csCursorVisible && !cursorVisible) {
 		if (cursorIsArrow) {
@@ -244,6 +248,8 @@ OSStatus DrawHardwareCursor(VDDrawHardwareCursorRec *rec) {
 // <-- csCursorSet         true if cursor was successfully set by the last
 //                         SetHardwareCursor call
 OSStatus GetHardwareCursorDrawState(VDHardwareCursorDrawStateRec *rec) {
+	return paramErr;
+
 	rec->csCursorX = cursorX;
 	rec->csCursorY = cursorY;
 	rec->csCursorVisible = cursorVisible;
