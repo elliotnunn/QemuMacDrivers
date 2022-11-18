@@ -17,7 +17,7 @@
 #include "hardwarecursor.h"
 
 #define MAXEDGE 1024
-#define TRACECALLS 1
+#define TRACECALLS 0
 #define SCREEN_RESOURCE 99
 
 // Before QuickDraw calls can be captured, microsec, 60.15 Hz
@@ -564,6 +564,8 @@ static void qdScreenUpdated(short top, short left, short bottom, short right) {
 static void updateScreen(short top, short left, short bottom, short right) {
 	int x, y;
 
+	logTime('Blit', 0);
+
 	// These blitters are not satisfactory
 	if (mode == k1bit) {
 		uint32_t c0 = privateCLUT[0], c1 = privateCLUT[1];
@@ -726,19 +728,20 @@ static void updateScreen(short top, short left, short bottom, short right) {
 }
 
 static void setVBL(void) {
-	AbsoluteTime time = AddDurationToAbsolute(33, UpTime());
+	AbsoluteTime time = AddDurationToAbsolute(1000, UpTime());
 	TimerID id;
 	SetInterruptTimer(&time, VBLBH, NULL, &id);
 }
 
 static OSStatus VBLBH(void *p1, void *p2) {
 	if (interruptsOn) {
+		//if (*(signed char *)0x910 >= 0) Debugger();
 		VSLDoInterruptService(interruptService);
 	}
 
-	//if (!qdUpdatesWorking) {
+	if (!qdUpdatesWorking) {
 		updateScreen(0, 0, H, W);
-	//}
+	}
 
 	setVBL();
 	return noErr;

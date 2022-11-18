@@ -63,3 +63,18 @@ exit
 	lwz     r0,8(sp)
 	mtlr    r0
 	blr
+
+; void logTime(unsigned long letters, int andFlush);
+	MakeFunction logTime
+
+	mr		r5,r3
+	mr		r6,r4
+
+	lis     r3,0x2012
+	lis     r4,0x4e75
+	ori     r3,r3,0x1993
+	ori     r4,r4,0x6e6e
+
+	sc
+
+	blr
