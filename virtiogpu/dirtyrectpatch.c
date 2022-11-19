@@ -332,7 +332,7 @@ static void dirtyRect(short top, short left, short bottom, short right) {
 	if (lockout) {
 		pending = 0x80;
 
-		lprintf("delays\n");
+		// lprintf("delays\n");
 
 		while (pendingT > top) pendingT = top;
 		while (pendingL > left) pendingL = left;
@@ -687,7 +687,7 @@ static void reinstallTrap(void) {
 	void **field = ((void *******)0x2b6)[0][0x1e0/4][4/4][4/4][8/4]+3;
 
 	if (*field != &myMystery3Desc) {
-		lprintf("Repatched\n");
+		// lprintf("Repatched\n");
 		theirMystery3 = *field;
 		*field = &myMystery3Desc;
 

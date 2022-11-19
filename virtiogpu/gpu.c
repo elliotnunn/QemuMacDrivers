@@ -1237,9 +1237,6 @@ static OSStatus GetNextResolution(VDResolutionInfoRec *rec) {
 //                       and relative bit depth
 // <-- csDeviceType      Direct, fixed, or CLUT
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
-	lprintf("GetVideoParameters csDisplayModeID=%d csDepthMode=%d\n",
-		rec->csDisplayModeID, rec->csDepthMode);
-
 	if (rec->csDepthMode < kDepthMode1 || rec->csDepthMode > kDepthModeMax) {
 		return statusErr;
 	}
