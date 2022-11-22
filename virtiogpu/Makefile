@@ -18,3 +18,15 @@ PPCCOptions = {COptions}
 		"{SharedLibraries}PCILib" ∂
 		"{PPCLibraries}PPCCRuntime.o" ∂
 		{Deps}
+
+::builds:pci1af4,1009 ƒ 9p.c.x viotransport-ndrv.c.x lprintf.s.x
+	PPCLink -xm sharedlibrary ∂
+		-export TheDriverDescription,DoDriverIO ∂
+		-t ndrv -c '????' ∂
+		-o {Targ} ∂
+		"{SharedLibraries}StdCLib" ∂
+		"{SharedLibraries}DriverServicesLib" ∂
+		"{SharedLibraries}NameRegistryLib" ∂
+		"{SharedLibraries}PCILib" ∂
+		"{PPCLibraries}PPCCRuntime.o" ∂
+		{Deps}

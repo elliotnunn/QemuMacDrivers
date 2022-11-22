@@ -196,6 +196,7 @@ static void initQueues(struct virtio_pci_common_cfg *comConf,
 		gQueues[q].count = EndianSwap16Bit(comConf->le_queue_size);
 		if (gQueues[q].count > 256) gQueues[q].count = 256; // fit desc ring in a page
 		queueSizer(q, &gQueues[q].count, &gQueues[q].osize, &gQueues[q].isize);
+		if (gQueues[q].count == 0) continue;
 		comConf->le_queue_size = EndianSwap16Bit(gQueues[q].count);
 
 		// Allocate the memory with minimal waste
@@ -474,7 +475,7 @@ static InterruptMemberNumber interruptTH(InterruptSetMember ist, void *refCon, u
 }
 
 static OSStatus configInterruptBH(void *arg1, void *arg2) {
-	gConfigChanged();
+	if (gConfigChanged) gConfigChanged();
 	return noErr;
 }
 
