@@ -365,6 +365,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	if (!VInit(&info->deviceEntry)) goto fail;
 	lprintf("Passed VInit\n");
+
+	if (!VFeaturesOK()) goto fail;
+
 	if (QInit(0, 256) == 0) goto fail;
 	lprintf("Passed QInit\n");
 

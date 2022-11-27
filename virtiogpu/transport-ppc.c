@@ -121,7 +121,7 @@ bool VGetDevFeature(uint32_t number) {
 void VSetFeature(uint32_t number, bool val) {
 	uint32_t le_mask = EndianSwap32Bit(1 << (number % 32));
 
-	gCommonConfig->le_device_feature_select = EndianSwap32Bit(number / 32);
+	gCommonConfig->le_driver_feature_select = EndianSwap32Bit(number / 32);
 	SynchronizeIO();
 	if (val)
 		gCommonConfig->le_driver_feature |= le_mask;
