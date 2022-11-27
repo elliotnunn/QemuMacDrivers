@@ -4,22 +4,32 @@
 COptions = -i :polyfill -proto strict
 PPCCOptions = {COptions}
 
-::builds:qemu_vga.ndrv ƒ gpu.c.x viotransport-ndrv.c.x lprintf.s.x hardwarecursor.c.x debugpollpatch.c.x dirtyrectpatch.c.x gammatables.c.x
+::builds:qemu_vga.ndrv ƒ allocator-ppc.c.x ∂
+                         atomic-ppc.c.x ∂
+                         debugpollpatch.c.x ∂
+                         dirtyrectpatch.c.x ∂
+                         gammatables.c.x ∂
+                         lprintf.s.x ∂
+                         transport-ppc.c.x ∂
+                         virtqueue.c.x ∂
+                         wait.s.x ∂
+                         device-gpu.c.x
 	PPCLink -xm sharedlibrary ∂
 		-export TheDriverDescription,DoDriverIO ∂
 		-t ndrv -c '????' ∂
 		-o {Targ} ∂
-		"{SharedLibraries}StdCLib" ∂
+		-weaklib InterfaceLib -d ∂
+		"{PPCLibraries}PPCCRuntime.o" ∂
+		"{SharedLibraries}DriverServicesLib" ∂
 		"{SharedLibraries}InterfaceLib" ∂
 		"{SharedLibraries}MathLib" ∂
-		"{SharedLibraries}DriverServicesLib" ∂
-		"{SharedLibraries}VideoServicesLib" ∂
 		"{SharedLibraries}NameRegistryLib" ∂
 		"{SharedLibraries}PCILib" ∂
-		"{PPCLibraries}PPCCRuntime.o" ∂
+		"{SharedLibraries}StdCLib" ∂
+		"{SharedLibraries}VideoServicesLib" ∂
 		{Deps}
 
-::builds:pci1af4,1009 ƒ 9p.c.x viotransport-ndrv.c.x lprintf.s.x
+::builds:pci1af4,1009 ƒ 9p.c.x transport-ndrv.c.x lprintf.s.x
 	PPCLink -xm sharedlibrary ∂
 		-export TheDriverDescription,DoDriverIO ∂
 		-t ndrv -c '????' ∂

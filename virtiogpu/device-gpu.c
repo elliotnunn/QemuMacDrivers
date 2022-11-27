@@ -1,20 +1,24 @@
 #include <Devices.h>
 #include <DriverServices.h>
+#include <fp.h>
 #include <LowMem.h>
 #include <NameRegistry.h>
 #include <PCI.h>
+#include <string.h>
 #include <Video.h>
 #include <VideoServices.h>
-#include <string.h>
-#include <fp.h>
 
-#include "viotransport.h"
-#include "virtio-gpu-structs.h"
-#include "lprintf.h"
+#include "allocator.h"
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
-#include "hardwarecursor.h"
+#include "lprintf.h"
+#include "transport.h"
+#include "virtio-gpu-structs.h"
+#include "virtqueue.h"
+#include "wait.h"
+
+#include "device.h"
 
 #define MAXEDGE 1024
 #define TRACECALLS 0
@@ -40,9 +44,14 @@ enum {
 	kDepthModeMax = kDepthMode6
 };
 
+volatile void *last_tag;
+
 static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
 void *backbuf, *frontbuf;
+
+uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
+
 int W, H, rowBytes;
 int mode;
 int qdUpdatesWorking;
@@ -53,7 +62,6 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
 
 static OSStatus initialize(DriverInitInfo *info);
-static void queueSizer(uint16_t queue, uint16_t *count, size_t *osize, size_t *isize);
 static void setVBL(void);
 static OSStatus VBLBH(void *p1, void *p2);
 static uint32_t checksum(uint32_t pixel);
@@ -65,7 +73,6 @@ static void updateScreen(short top, short left, short bottom, short right);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
-static void configChanged(void);
 static void setDepth(int relativeDepth);
 static long rowBytesFor(int relativeDepth, long width);
 static void reCLUT(int index);
@@ -298,6 +305,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
+	(void)spaceID; // Apple never implemented multiple address space support
+
 	switch (code) {
 	case kInitializeCommand:
 	case kReplaceCommand:
@@ -349,46 +358,57 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-	OSStatus err;
-	err = VTInit(&info->deviceEntry, queueSizer, NULL /*queueRecv*/, configChanged);
-	if (err) return err;
+	void *obuf, *ibuf;
+	uint32_t physical_bufs[2];
+
+	lprintf("Init\n");
+
+	if (!VInit(&info->deviceEntry)) goto fail;
+	lprintf("Passed VInit\n");
+	if (QInit(0, 256) == 0) goto fail;
+	lprintf("Passed QInit\n");
+
+	obuf = AllocPages(1, physical_bufs);
+	ibuf = (char *)obuf + 2048;
+	physical_bufs[1] = physical_bufs[0] + 2048;
 
 	// Allocate our two enormous framebuffers
-	backbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4, true);
-	if (backbuf == NULL) return paramErr;
-	backbuf = (void *)(((long)backbuf + 0xfff) & ~0xfff);
+	// TODO: limit the framebuffers to a percentage of total RAM
+	backbuf = PoolAllocateResident(MAXEDGE*MAXEDGE*4, true);
+	if (backbuf == NULL) goto fail;
 
-	frontbuf = PoolAllocateResident(MAXEDGE * MAXEDGE * 4 + 0x1000, true);
-	if (frontbuf == NULL) return paramErr;
-	frontbuf = (void *)(((long)frontbuf + 0xfff) & ~0xfff);
-
-	InitHardwareCursor();
+	// Need the physical page addresses of the front buffer
+	frontbuf = AllocPages(MAXEDGE*MAXEDGE*4/4096, fbpages);
+	if (frontbuf == NULL) goto fail;
 
 	// Get a list of displays ("scanouts") and their sizes
 	// (for now, only the first display)
 	{
-		struct virtio_gpu_ctrl_hdr *req = VTBuffers[0][0];
-		struct virtio_gpu_resp_display_info *reply = VTBuffers[0][1];
+		struct virtio_gpu_ctrl_hdr *req = obuf;
+		struct virtio_gpu_resp_display_info *reply = ibuf;
+		uint32_t sizes[2] = {sizeof(*req), sizeof(*reply)};
 
-		memset(req, 0, sizeof(*req));
 		req->le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_GET_DISPLAY_INFO);
 		req->le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 
-		VTSend(0, 0);
-		while (!VTDone(0)) {}
+		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini1');
+		QNotify(0);
+		while (last_tag != (void *)'ini1') WaitForInterrupt();
 
-		if (EndianSwap32Bit(reply->hdr.le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) return paramErr;
+		if (EndianSwap32Bit(reply->hdr.le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) goto fail;
 		W = EndianSwap32Bit(reply->pmodes[0].r.le32_width);
 		H = EndianSwap32Bit(reply->pmodes[0].r.le32_height);
-		if (W > MAXEDGE || H > MAXEDGE) return paramErr;
+		if (W > MAXEDGE || H > MAXEDGE) goto fail;
 	}
+
+	memset(obuf, 0, 4096);
 
 	// Create a host resource using VIRTIO_GPU_CMD_RESOURCE_CREATE_2D.
 	{
-		struct virtio_gpu_resource_create_2d *req = VTBuffers[0][0];
-		struct virtio_gpu_ctrl_hdr *reply = VTBuffers[0][1];
+		struct virtio_gpu_resource_create_2d *req = obuf;
+		struct virtio_gpu_ctrl_hdr *reply = ibuf;
+		uint32_t sizes[2] = {sizeof(*req), sizeof(*reply)};
 
-		memset(req, 0, sizeof(*req));
 		req->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
 		req->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 		req->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
@@ -396,42 +416,61 @@ static OSStatus initialize(DriverInitInfo *info) {
 		req->le32_width = EndianSwap32Bit(W);
 		req->le32_height = EndianSwap32Bit(H);
 
-		VTSend(0, 0);
-		while (!VTDone(0)) {}
+		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini2');
+		QNotify(0);
+		while (last_tag != (void *)'ini2') WaitForInterrupt();
 
-		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return paramErr;
+		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
 	}
 
-	// Allocate a framebuffer from guest ram, and attach it as backing
-	// storage to the resource just created, using
-	// VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING. Scatter lists are supported,
-	// so the framebuffer doesn’t need to be contignous in guest physical
-	// memory.
-	{
-		struct virtio_gpu_resource_attach_backing *req = VTBuffers[0][0];
-		struct virtio_gpu_mem_entry *req2 = (void *)((char *)req + sizeof(*req));
-		struct virtio_gpu_ctrl_hdr *reply = VTBuffers[0][1];
+	memset(obuf, 0, 4096);
 
-		memset(req, 0, sizeof(*req) + sizeof(*req2));
+	// Attach guest allocated backing memory to the resource just created.
+	// Maximum 254 entries in the gather list, which should be plenty.
+	{
+		struct virtio_gpu_resource_attach_backing *req = obuf;
+		struct virtio_gpu_ctrl_hdr *reply = ibuf;
+		uint32_t sizes[2] = {sizeof(*req), sizeof(*reply)};
+
+		uint32_t extent_base=0, extent_len=0;
+		int extent=-1, i;
+
+		for (i=0; i<sizeof(fbpages)/sizeof(*fbpages); i++) {
+			if (fbpages[i] != extent_base + extent_len) {
+				// New extent
+				extent++;
+				if (extent > sizeof(req->entries)/sizeof(*req->entries)) goto fail;
+
+				req->entries[extent].le32_addr = EndianSwap32Bit(fbpages[i]);
+				extent_base = fbpages[i];
+				extent_len = 4096;
+			} else {
+				extent_len += 4096;
+			}
+
+			req->entries[extent].le32_length = EndianSwap32Bit(extent_len);
+		}
+
 		req->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
 		req->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 		req->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
-		req->le32_nr_entries = EndianSwap32Bit(1);
-		req2->le32_addr = EndianSwap32Bit((uint32_t)frontbuf + 0x4000);
-		req2->le32_length = EndianSwap32Bit(64*1024*1024);
+		req->le32_nr_entries = EndianSwap32Bit(extent);
 
-		VTSend(0, 0);
-		while (!VTDone(0)) {}
+		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini3');
+		QNotify(0);
+		while (last_tag != (void *)'ini3') WaitForInterrupt();
 
-		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return paramErr;
+		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
 	}
+
+	memset(obuf, 0, 4096);
 
 	// Use VIRTIO_GPU_CMD_SET_SCANOUT to link the framebuffer to a display
 	// scanout.
 	{
-		struct virtio_gpu_set_scanout *req = VTBuffers[0][0];
-		struct virtio_gpu_ctrl_hdr *reply = VTBuffers[0][1];
-		memset(req, 0, sizeof(*req));
+		struct virtio_gpu_set_scanout *req = obuf;
+		struct virtio_gpu_ctrl_hdr *reply = ibuf;
+		uint32_t sizes[2] = {sizeof(*req), sizeof(*reply)};
 
 		req->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_SET_SCANOUT);
 		req->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
@@ -442,10 +481,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 		req->le32_scanout_id = EndianSwap32Bit(0); // index, 0-15
 		req->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
 
-		VTSend(0, 0);
-		while (!VTDone(0)) {}
+		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini4');
+		QNotify(0);
+		while (last_tag != (void *)'ini4') WaitForInterrupt();
 
-		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return paramErr;
+		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
 	}
 
 	setDepth(k32bit);
@@ -523,13 +563,17 @@ static OSStatus initialize(DriverInitInfo *info) {
 	//}
 
 	return noErr;
+
+fail:
+	VFail();
+	return paramErr;
 }
 
-static void queueSizer(uint16_t queue, uint16_t *count, size_t *osize, size_t *isize) {
-	// Tiny queues
-	*count = 4;
-	*osize = 64;
-	*isize = 2048;
+void DConfigChange(void) {
+}
+
+void DNotified(uint16_t q, size_t len, void *tag) {
+	last_tag = tag;
 }
 
 static uint32_t checksum(uint32_t pixel) {
@@ -688,43 +732,43 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		}
 	}
 
-	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
-	{
-		struct virtio_gpu_transfer_to_host_2d *buf = (void *)VTBuffers[0][0];
-		memset(buf, 0, sizeof(*buf));
-		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
-		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-
-		buf->r.le32_x = EndianSwap32Bit(left);
-		buf->r.le32_y = EndianSwap32Bit(top);
-		buf->r.le32_width = EndianSwap32Bit(right - left);
-		buf->r.le32_height = EndianSwap32Bit(bottom - top);
-
-		buf->le32_offset = EndianSwap32Bit(top*W*4 + left*4);
-
-		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
-
-		VTSend(0, 0);
-	}
-
-	// Use VIRTIO_GPU_CMD_RESOURCE_FLUSH to flush the updated resource to the display.
-	{
-		struct virtio_gpu_resource_flush *buf = (void *)VTBuffers[0][2];
-		memset(buf, 0, sizeof(*buf));
-		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_FLUSH);
-		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-
-		buf->r.le32_x = EndianSwap32Bit(left);
-		buf->r.le32_y = EndianSwap32Bit(top);
-		buf->r.le32_width = EndianSwap32Bit(right - left);
-		buf->r.le32_height = EndianSwap32Bit(bottom - top);
-
-		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
-
-		VTSend(0, 2);
-	}
-
-	while (!VTDone(0)) {}
+// 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
+// 	{
+// 		struct virtio_gpu_transfer_to_host_2d *buf = (void *)VTBuffers[0][0];
+// 		memset(buf, 0, sizeof(*buf));
+// 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
+// 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
+//
+// 		buf->r.le32_x = EndianSwap32Bit(left);
+// 		buf->r.le32_y = EndianSwap32Bit(top);
+// 		buf->r.le32_width = EndianSwap32Bit(right - left);
+// 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
+//
+// 		buf->le32_offset = EndianSwap32Bit(top*W*4 + left*4);
+//
+// 		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
+//
+// 		VTSend(0, 0);
+// 	}
+//
+// 	// Use VIRTIO_GPU_CMD_RESOURCE_FLUSH to flush the updated resource to the display.
+// 	{
+// 		struct virtio_gpu_resource_flush *buf = (void *)VTBuffers[0][2];
+// 		memset(buf, 0, sizeof(*buf));
+// 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_FLUSH);
+// 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
+//
+// 		buf->r.le32_x = EndianSwap32Bit(left);
+// 		buf->r.le32_y = EndianSwap32Bit(top);
+// 		buf->r.le32_width = EndianSwap32Bit(right - left);
+// 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
+//
+// 		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
+//
+// 		VTSend(0, 2);
+// 	}
+//
+// 	while (!VTDone(0)) {}
 }
 
 static void setVBL(void) {
@@ -754,14 +798,14 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static OSStatus control(short csCode, void *param) {
 	switch (csCode) {
 		case cscDirectSetEntries: return DirectSetEntries(param);
-		case cscDrawHardwareCursor: return DrawHardwareCursor(param);
+		//case cscDrawHardwareCursor: return DrawHardwareCursor(param);
 		case cscGrayPage: return GrayPage(param);
 		case cscSavePreferredConfiguration: return SavePreferredConfiguration(param);
 		case cscSetClutBehavior: return SetClutBehavior(param);
 		case cscSetEntries: return MySetEntries(param);
 		case cscSetGamma: return SetGamma(param);
 		case cscSetGray: return SetGray(param);
-		case cscSetHardwareCursor: return SetHardwareCursor(param);
+		//case cscSetHardwareCursor: return SetHardwareCursor(param);
 		case cscSetInterrupt: return SetInterrupt(param);
 		case cscSetMode: return SetMode(param);
 		case cscSetPowerState: return SetPowerState(param);
@@ -781,7 +825,7 @@ static OSStatus status(short csCode, void *param) {
 		case cscGetGamma: return GetGamma(param);
 		case cscGetGammaInfoList: return GetGammaInfoList(param);
 		case cscGetGray: return GetGray(param);
-		case cscGetHardwareCursorDrawState: return GetHardwareCursorDrawState(param);
+		//case cscGetHardwareCursorDrawState: return GetHardwareCursorDrawState(param);
 		case cscGetInterrupt: return GetInterrupt(param);
 		case cscGetMode: return GetMode(param);
 		case cscGetModeTiming: return GetModeTiming(param);
@@ -792,13 +836,9 @@ static OSStatus status(short csCode, void *param) {
 		case cscGetSync: return GetSync(param);
 		case cscGetVideoParameters: return GetVideoParameters(param);
 		case cscRetrieveGammaTable: return RetrieveGammaTable(param);
-		case cscSupportsHardwareCursor: return SupportsHardwareCursor(param);
+		//case cscSupportsHardwareCursor: return SupportsHardwareCursor(param);
 	}
 	return statusErr;
-}
-
-static void configChanged(void) {
-	lprintf("configChanged\n");
 }
 
 // Should also call this if the resolution is changed

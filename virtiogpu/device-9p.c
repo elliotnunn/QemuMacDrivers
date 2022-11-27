@@ -8,7 +8,8 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include "viotransport.h"
+#include "transport.h"
+#include "allocator.h"
 #include "lprintf.h"
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
@@ -104,29 +105,31 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 static OSStatus initialize(DriverInitInfo *info) {
 	OSStatus err;
 
-	err = VTInit(&info->deviceEntry, queueSizer, NULL /*queueRecv*/, NULL /*configChanged*/);
+	err = VirtioInit(&info->deviceEntry);
 	if (err) return err;
 
-	{
-		uint8_t gotversion;
-		uint32_t gotmsize;
-		uint16_t gotstrlen;
 
-		setFields(VTBuffers[0][0], "41242", 21, Tversion, 0xffff, MSIZE, 8);
-		memcpy((char *)VTBuffers[0][0] + 13, "9P2000.u", 8);
-		VTSend(0, 0);
-		while (!VTDone(0)) {}
 
-		getFields(VTBuffers[0][1], "....1..42", &gotversion, &gotmsize, &gotstrlen);
-		if (gotversion != Rversion || gotmsize != MSIZE || gotstrlen != 8 ||
-			memcmp((char *)VTBuffers[0][1] + 13, "9P2000.u", 8)) {
-			lprintf("error\n");
-			lprintf("gotversion %d gotmsize %d gotstrlen %d\n", gotversion, gotmsize, gotstrlen);
-			return paramErr;
-		}
-
-		lprintf("ok\n");
-	}
+// 	{
+// 		uint8_t gotversion;
+// 		uint32_t gotmsize;
+// 		uint16_t gotstrlen;
+//
+// 		setFields(VTBuffers[0][0], "41242", 21, Tversion, 0xffff, MSIZE, 8);
+// 		memcpy((char *)VTBuffers[0][0] + 13, "9P2000.u", 8);
+// 		VTSend(0, 0);
+// 		while (!VTDone(0)) {}
+//
+// 		getFields(VTBuffers[0][1], "....1..42", &gotversion, &gotmsize, &gotstrlen);
+// 		if (gotversion != Rversion || gotmsize != MSIZE || gotstrlen != 8 ||
+// 			memcmp((char *)VTBuffers[0][1] + 13, "9P2000.u", 8)) {
+// 			lprintf("error\n");
+// 			lprintf("gotversion %d gotmsize %d gotstrlen %d\n", gotversion, gotmsize, gotstrlen);
+// 			return paramErr;
+// 		}
+//
+// 		lprintf("ok\n");
+// 	}
 
 	return noErr;
 }

@@ -8,7 +8,7 @@
 
 #include "hardwarecursor.h"
 
-#include "viotransport.h"
+#include "transport.h"
 #include "virtio-gpu-structs.h"
 #include "lprintf.h"
 

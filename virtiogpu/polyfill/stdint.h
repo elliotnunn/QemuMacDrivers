@@ -1,7 +1,7 @@
 // Unfortunate hack
 
-#ifndef _STDINT_H_
-#define _STDINT_H_
+#ifndef STDINT_H
+#define STDINT_H
 #include <Types.h>
 typedef char int8_t;
 typedef short int16_t;

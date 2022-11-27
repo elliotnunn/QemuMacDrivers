@@ -205,6 +205,7 @@ struct virtio_gpu_resource_attach_backing {
 	struct virtio_gpu_ctrl_hdr hdr;
 	uint32_t le32_resource_id;
 	uint32_t le32_nr_entries;
+	struct virtio_gpu_mem_entry entries[254]; // makes a 4096-byte page
 };
 
 /* VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING */
