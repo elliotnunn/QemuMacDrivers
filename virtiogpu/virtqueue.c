@@ -155,7 +155,7 @@ static void pollAvail(void) {
 			// Free the descriptors (clear their bits in the bitmap)
 			for (;;) {
 				TestAndClear(desc_idx % 8, queues[q].bitmap + desc_idx/8);
-				if (queues[q].desc[desc_idx].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT) == 0)
+				if ((queues[q].desc[desc_idx].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
 					break;
 				desc_idx = EndianSwap16Bit(queues[q].desc[desc_idx].le_next);
 			}
