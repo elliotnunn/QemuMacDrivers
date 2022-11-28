@@ -66,14 +66,14 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 	count = 0;
 	try = 0;
 	while (count < n_out+n_in && try < queues[q].size) {
-		if (TestAndSet(try % 8, queues[q].bitmap + try/8)) {
+		if (TestAndSet(try%8, queues[q].bitmap + try/8)) {
 			buffers[count++] = try++;
 		}
 	}
 
 	// Not enough
 	if (count < n_out+n_in) {
-		for (i=0; i<count; i++) TestAndClear(i % 8, queues[q].bitmap + i/8);
+		for (i=0; i<count; i++) TestAndClear(i%8, queues[q].bitmap + i/8);
 		return false;
 	}
 
@@ -154,7 +154,7 @@ static void pollAvail(void) {
 
 			// Free the descriptors (clear their bits in the bitmap)
 			for (;;) {
-				TestAndClear(desc_idx % 8, queues[q].bitmap + desc_idx/8);
+				TestAndClear(desc_idx%8, queues[q].bitmap + desc_idx/8);
 				if ((queues[q].desc[desc_idx].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
 					break;
 				desc_idx = EndianSwap16Bit(queues[q].desc[desc_idx].le_next);
