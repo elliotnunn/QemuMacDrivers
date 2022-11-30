@@ -370,6 +370,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	if (QInit(0, 256) == 0) goto fail;
 	lprintf("Passed QInit\n");
+	QInterest(0, 1); // we need interrupts
 
 	obuf = AllocPages(1, physical_bufs);
 	ibuf = (char *)obuf + 2048;

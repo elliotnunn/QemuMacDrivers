@@ -202,6 +202,7 @@ static OSStatus configIntBottomHalf(void *arg1, void *arg2) {
 }
 
 // Workaround when interrupts (including secondary interrupts) are masked
+// Not necessarily safe to use outside of MacsBug
 void VPoll(void) {
 	uint8_t flags = *gISRStatus;
 

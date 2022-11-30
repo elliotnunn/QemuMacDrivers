@@ -21,6 +21,7 @@ enum {
 struct virtq {
 	uint16_t size;
 	uint16_t used_ctr;
+	int32_t interest;
 	struct virtq_desc *desc;
 	struct virtq_avail *avail;
 	struct virtq_used *used;
@@ -54,6 +55,9 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 	queues[q].used = (void *)((char *)pages + 0x2000);
 
 	queues[q].size = size;
+
+	// Disable notifications until QInterest
+	queues[q].avail->le_flags = 0x0100;
 
 	return size;
 }
@@ -99,10 +103,6 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 	return true;
 }
 
-void QNotify(uint16_t q) {
-	if (queues[q].used->le_flags == 0) VNotify(q);
-}
-
 static void QSendAtomicPart(void *q_voidptr, void *buf_voidptr) {
 	uint16_t q = (uint16_t)q_voidptr;
 	uint16_t buf = (uint16_t)buf_voidptr;
@@ -115,7 +115,16 @@ static void QSendAtomicPart(void *q_voidptr, void *buf_voidptr) {
 	SynchronizeIO();
 }
 
-// Called by transport to reduce chance of redundant interrupts
+void QNotify(uint16_t q) {
+	if (queues[q].used->le_flags == 0) VNotify(q);
+}
+
+void QInterest(uint16_t q, int32_t delta) {
+	int32_t interest = AddAtomic(delta, &queues[q].interest);
+	queues[q].avail->le_flags = (interest+delta > 0) ? 0 : 0x0100;
+}
+
+// Called by transport hardware interrupt to reduce chance of redundant interrupts
 void QDisarm(void) {
 	uint16_t q;
 	for (q=0; queues[q].size != 0; q++) {
@@ -132,7 +141,7 @@ void QNotified(void) {
 
 	VRearm();
 	for (q=0; queues[q].size != 0; q++) {
-		queues[q].avail->le_flags = 0;
+		queues[q].avail->le_flags = (queues[q].interest > 0) ? 0 : 0x0100;
 	}
 	SynchronizeIO();
 

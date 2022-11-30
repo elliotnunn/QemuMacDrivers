@@ -17,6 +17,10 @@ bool QSend(
 // Call after one or more QSend()s
 void QNotify(uint16_t q);
 
+// Call to increment or decrement the queue interest counter,
+// which if >0 will cause movement on the queue to trigger an interrupt.
+void QInterest(uint16_t q, int32_t delta);
+
 // Called by transport to reduce chance of redundant interrupts
 void QDisarm(void);
 
