@@ -1024,6 +1024,8 @@ static OSStatus DirectSetEntries(VDSetEntryRecord *rec) {
 		reCLUT(dst);
 	}
 
+	updateScreen(0, 0, H, W);
+
 	return noErr;
 }
 
@@ -1103,6 +1105,11 @@ static OSStatus SetGamma(VDGammaRecord *rec) {
 	}
 
 	memcpy(publicGamma, tbl, totalSize);
+
+	// SetGamma guaranteed to be followed by SetEntries, which will updateScreen;
+	// but this can't apply to direct modes
+	if (mode >= k16bit) updateScreen(0, 0, H, W);
+
 	return noErr;
 }
 
@@ -1340,7 +1347,6 @@ static OSStatus SetMode(VDPageInfo *rec) {
 	}
 
 	setDepth(rec->csMode);
-	updateScreen(0, 0, W, H);
 	rec->csBaseAddr = backbuf;
 	return noErr;
 }
@@ -1355,7 +1361,6 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 	}
 
 	setDepth(rec->csMode);
-	updateScreen(0, 0, W, H);
 	rec->csBaseAddr = backbuf;
 	return noErr;
 }
