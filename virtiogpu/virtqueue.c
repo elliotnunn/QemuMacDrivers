@@ -152,23 +152,24 @@ void QNotified(void) {
 	}
 }
 
-static void QPoll(uint16_t q) {
-	while (queues[q].used_ctr != EndianSwap16Bit(queues[q].used->le_idx)) {
-		uint16_t used_idx, desc_idx;
-		size_t len;
+void QPoll(uint16_t q) {
+	uint16_t i = queues[q].used_ctr;
+	uint16_t mask = queues[q].size - 1;
+	uint16_t end = EndianSwap16Bit(queues[q].used->le_idx);
+	queues[q].used_ctr = end;
 
-		used_idx = queues[q].used_ctr++ & (queues[q].size - 1);
-		desc_idx = EndianSwap16Bit(queues[q].used->ring[used_idx].le_id);
-		len = EndianSwap32Bit(queues[q].used->ring[used_idx].le_len);
+	for (; i != end; i++) {
+		uint16_t desc = EndianSwap16Bit(queues[q].used->ring[i&mask].le_id);
+		size_t len = EndianSwap32Bit(queues[q].used->ring[i&mask].le_len);
 
-		DNotified(q, len, queues[q].tag[desc_idx]);
+		DNotified(q, len, queues[q].tag[desc]);
 
 		// Free the descriptors (clear their bits in the bitmap)
 		for (;;) {
-			TestAndClear(desc_idx%8, queues[q].bitmap + desc_idx/8);
-			if ((queues[q].desc[desc_idx].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
+			TestAndClear(desc%8, queues[q].bitmap + desc/8);
+			if ((queues[q].desc[desc].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
 				break;
-			desc_idx = EndianSwap16Bit(queues[q].desc[desc_idx].le_next);
+			desc = EndianSwap16Bit(queues[q].desc[desc].le_next);
 		}
 	}
 }
