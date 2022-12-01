@@ -540,7 +540,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	time = AddDurationToAbsolute(FAST_REFRESH, UpTime());
 	SetInterruptTimer(&time, VBL, NULL, &timerID);
 
-	//InstallDirtyRectPatch(qdScreenUpdated);
+	InstallDirtyRectPatch();
 	//InstallDebugPollPatch(updateWholeScreen);
 
 	// With copying:
@@ -619,7 +619,7 @@ static void updateWholeScreen(void) {
 	updateScreen(0, 0, H, W);
 }
 
-static void qdScreenUpdated(short top, short left, short bottom, short right) {
+void DirtyRectCallback(short top, short left, short bottom, short right) {
 	qdUpdatesWorking = 1;
 
 	top = MAX(MIN(top, H), 0);
