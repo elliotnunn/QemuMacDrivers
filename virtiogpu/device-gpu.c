@@ -22,19 +22,17 @@
 
 #include "device.h"
 
-#define MAXEDGE 1024
-#define TRACECALLS 0
-#define SCREEN_RESOURCE 99
-
-// Before QuickDraw calls can be captured, microsec, 60.15 Hz
-#define FAST_REFRESH -16626
-
-// When QuickDraw calls are being captured, millisec, 4 Hz
-#define SLOW_REFRESH 1000
-
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
+
+enum {
+	TRACECALLS = 0,
+	MAXEDGE = 1024,
+	SCREEN_RESOURCE = 99,
+	FAST_REFRESH = -16626, // before QD callbacks work, microsec, 60.15 Hz
+	SLOW_REFRESH = 1000, // after QD callbacks work, millisec, 4 Hz
+};
 
 enum {
 	k1bit = kDepthMode1,
@@ -46,32 +44,33 @@ enum {
 	kDepthModeMax = kDepthMode6
 };
 
-volatile void *last_tag;
-
-static int interruptsOn = 1;
-static InterruptServiceIDType interruptService;
-static void *backbuf, *frontbuf;
-static uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
-
+// Allocate one 4096-byte page for all our virtio buffers
+// 16 is the maximum number of 192-byte chunks fitting in a page
 static void *lpage;
 static uint32_t ppage;
-
-// 16 is the maximum number of 192-byte chunks fitting in a page
 static int maxinflight = 16;
 static uint16_t freebufs;
 
-static AbsoluteTime time;
-static TimerID timerID;
+// Allocate two large framebuffers
+static void *backbuf, *frontbuf;
+static uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
+static short W, H, rowbytes;
+static int mode;
+static ColorSpec publicCLUT[256];
+static uint32_t privateCLUT[256];
 
-int W, H, rowBytes;
-int mode;
-int qdUpdatesWorking;
-ColorSpec publicCLUT[256];
-uint32_t privateCLUT[256];
+// init routine polls this after sending a buffer
+static volatile void *last_tag;
+
+// Fake vertical blanking interrupts
+static InterruptServiceIDType vblservice;
+static AbsoluteTime vbltime;
+static TimerID vbltimer;
+static bool vblon = true;
+static bool qdworks;
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
-
 static OSStatus initialize(DriverInitInfo *info);
 static void updateScreen(short top, short left, short bottom, short right);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
@@ -80,7 +79,7 @@ static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
 static void setDepth(int relativeDepth);
-static long rowBytesFor(int relativeDepth, long width);
+static long rowbytesFor(int relativeDepth, long width);
 static void reCLUT(int index);
 static OSStatus GetBaseAddr(VDPageInfo *rec);
 static OSStatus MySetEntries(VDSetEntryRecord *rec);
@@ -531,9 +530,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 		}
 	}
 
-	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &interruptService);
-	time = AddDurationToAbsolute(FAST_REFRESH, UpTime());
-	SetInterruptTimer(&time, VBL, NULL, &timerID);
+	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &vblservice);
+	vbltime = AddDurationToAbsolute(FAST_REFRESH, UpTime());
+	SetInterruptTimer(&vbltime, VBL, NULL, &vbltimer);
 
 	InstallDirtyRectPatch();
 	InstallDebugPollPatch();
@@ -604,7 +603,7 @@ void DebugPollCallback(void) {
 }
 
 void DirtyRectCallback(short top, short left, short bottom, short right) {
-	qdUpdatesWorking = 1;
+	qdworks = true;
 
 	top = MAX(MIN(top, H), 0);
 	bottom = MAX(MIN(bottom, H), 0);
@@ -627,7 +626,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		int leftBytes = (left / 8) & ~3;
 		int rightBytes = ((right + 31) / 8) & ~3;
 		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowBytes + leftBytes);
+			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + leftBytes);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~31) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
@@ -669,7 +668,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		int leftBytes = (left / 4) & ~3;
 		int rightBytes = ((right + 15) / 4) & ~3;
 		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowBytes + leftBytes);
+			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + leftBytes);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~15) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
@@ -695,7 +694,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		int leftBytes = (left / 2) & ~3;
 		int rightBytes = ((right + 7) / 2) & ~3;
 		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowBytes + leftBytes);
+			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + leftBytes);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~7) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
@@ -711,7 +710,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		}
 	} else if (mode == k8bit) {
 		for (y=top; y<bottom; y++) {
-			uint8_t *src = (void *)((char *)backbuf + y * rowBytes + left);
+			uint8_t *src = (void *)((char *)backbuf + y * rowbytes + left);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
 			for (x=left; x<right; x++) {
 				*dest++ = privateCLUT[*src++];
@@ -719,7 +718,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		}
 	} else if (mode == k16bit) {
 		for (y=top; y<bottom; y++) {
-			uint16_t *src = (void *)((char *)backbuf + y * rowBytes + left * 2);
+			uint16_t *src = (void *)((char *)backbuf + y * rowbytes + left * 2);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
 			for (x=left; x<right; x++) {
 				uint16_t s = *src++;
@@ -731,7 +730,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		}
 	} else if (mode == k32bit) {
 		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowBytes + left * 4);
+			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + left * 4);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
 			for (x=left; x<right; x++) {
 				uint32_t s = *src++;
@@ -866,15 +865,15 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 }
 
 static OSStatus VBL(void *p1, void *p2) {
-	if (interruptsOn) {
+	if (vblon) {
 		//if (*(signed char *)0x910 >= 0) Debugger();
-		VSLDoInterruptService(interruptService);
+		VSLDoInterruptService(vblservice);
 	}
 
 	updateScreen(0, 0, H, W);
 
-	time = AddDurationToAbsolute(qdUpdatesWorking ? SLOW_REFRESH : FAST_REFRESH, time);
-	SetInterruptTimer(&time, VBL, NULL, &timerID);
+	vbltime = AddDurationToAbsolute(qdworks ? SLOW_REFRESH : FAST_REFRESH, vbltime);
+	SetInterruptTimer(&vbltime, VBL, NULL, &vbltimer);
 
 	return noErr;
 }
@@ -932,12 +931,12 @@ static OSStatus status(short csCode, void *param) {
 // Should also call this if the resolution is changed
 static void setDepth(int relativeDepth) {
 	mode = relativeDepth;
-	rowBytes = rowBytesFor(mode, W);
+	rowbytes = rowbytesFor(mode, W);
 
 	updateScreen(0, 0, H, W);
 }
 
-static long rowBytesFor(int relativeDepth, long width) {
+static long rowbytesFor(int relativeDepth, long width) {
 	long ret;
 
 	if (relativeDepth == k1bit) {
@@ -1214,7 +1213,7 @@ static OSStatus GetPages(VDPageInfo *rec) {
 // pass a csMode value of 1.
 // --> csMode      Enable or disable interrupts
 static OSStatus SetInterrupt(VDFlagRecord *rec) {
-	interruptsOn = !rec->csMode;
+	vblon = !rec->csMode;
 	return noErr;
 }
 
@@ -1222,7 +1221,7 @@ static OSStatus SetInterrupt(VDFlagRecord *rec) {
 // VBL interrupts are disabled.
 // <-- csMode      Interrupts enabled or disabled
 static OSStatus GetInterrupt(VDFlagRecord *rec) {
-	rec->csMode = !interruptsOn;
+	rec->csMode = !vblon;
 	return noErr;
 }
 
@@ -1386,7 +1385,7 @@ static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
 	rec->csVPBlockPtr->vpBounds.right = W;
 
 	// This does change per mode, but we have a function to calculate it
-	rec->csVPBlockPtr->vpRowBytes = rowBytesFor(rec->csDepthMode, W);
+	rec->csVPBlockPtr->vpRowBytes = rowbytesFor(rec->csDepthMode, W);
 
 	switch (rec->csDepthMode) {
 	case k1bit:
