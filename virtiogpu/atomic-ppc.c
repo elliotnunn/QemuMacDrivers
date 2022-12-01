@@ -8,6 +8,10 @@
 
 #include "atomic.h"
 
+void Atomic(void (*func)(void)) {
+	CallSecondaryInterruptHandler2((void *)func, NULL, NULL, NULL);
+}
+
 void Atomic1(void (*func)(void *), void *arg) {
 	CallSecondaryInterruptHandler2((void *)func, NULL, arg, NULL);
 }
