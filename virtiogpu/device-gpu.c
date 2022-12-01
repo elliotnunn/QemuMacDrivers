@@ -595,8 +595,9 @@ fail:
 void DConfigChange(void) {
 }
 
-void DNotified(uint16_t q, size_t len, void *tag) {
+void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 	last_tag = tag;
+	QFree(q, buf);
 	if ((unsigned long)tag < 256) {
 		freebufs |= 1 << (char)tag;
 		sendPixels((void *)0x7fff7fff, (void *)0x00000000);

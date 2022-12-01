@@ -152,6 +152,7 @@ void QNotified(void) {
 	}
 }
 
+// Call DNotified for each buffer in the used ring
 void QPoll(uint16_t q) {
 	uint16_t i = queues[q].used_ctr;
 	uint16_t mask = queues[q].size - 1;
@@ -162,14 +163,16 @@ void QPoll(uint16_t q) {
 		uint16_t desc = EndianSwap16Bit(queues[q].used->ring[i&mask].le_id);
 		size_t len = EndianSwap32Bit(queues[q].used->ring[i&mask].le_len);
 
-		DNotified(q, len, queues[q].tag[desc]);
+		DNotified(q, desc, len, queues[q].tag[desc]);
+	}
+}
 
-		// Free the descriptors (clear their bits in the bitmap)
-		for (;;) {
-			TestAndClear(desc%8, queues[q].bitmap + desc/8);
-			if ((queues[q].desc[desc].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
-				break;
-			desc = EndianSwap16Bit(queues[q].desc[desc].le_next);
-		}
+// Called by DNotified to return descriptors to the pool usable by QSend
+void QFree(uint16_t q, uint16_t buf) {
+	for (;;) {
+		TestAndClear(buf%8, queues[q].bitmap + buf/8);
+		if ((queues[q].desc[buf].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
+			break;
+		buf = EndianSwap16Bit(queues[q].desc[buf].le_next);
 	}
 }

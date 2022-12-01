@@ -27,7 +27,10 @@ void QDisarm(void);
 // Called by transport about a change to the used ring
 void QNotified(void);
 
-// Workaround when interrupts are masked
+// Call DNotified for each buffer in the used ring
 void QPoll(uint16_t q);
+
+// Called by DNotified to return descriptors to the pool usable by QSend
+void QFree(uint16_t q, uint16_t buf);
 
 #endif
