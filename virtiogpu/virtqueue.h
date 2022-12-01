@@ -27,4 +27,7 @@ void QDisarm(void);
 // Called by transport about a change to the used ring
 void QNotified(void);
 
+// Workaround when interrupts are masked
+void QPoll(uint16_t q);
+
 #endif

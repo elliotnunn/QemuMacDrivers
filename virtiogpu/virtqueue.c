@@ -31,7 +31,6 @@ struct virtq {
 
 static struct virtq queues[MAX_VQ];
 static void QSendAtomicPart(void *q, void *buf);
-static void pollAvail(void);
 
 uint16_t QInit(uint16_t q, uint16_t max_size) {
 	void *pages;
@@ -137,7 +136,9 @@ void QDisarm(void) {
 void QNotified(void) {
 	uint16_t q;
 
-	pollAvail();
+	for (q=0; queues[q].size != 0; q++) {
+		QPoll(q);
+	}
 
 	VRearm();
 	for (q=0; queues[q].size != 0; q++) {
@@ -145,29 +146,28 @@ void QNotified(void) {
 	}
 	SynchronizeIO();
 
-	pollAvail();
+	for (q=0; queues[q].size != 0; q++) {
+		QPoll(q);
+	}
 }
 
-static void pollAvail(void) {
-	uint16_t q;
-	for (q=0; queues[q].size != 0; q++) {
-		while (queues[q].used_ctr != EndianSwap16Bit(queues[q].used->le_idx)) {
-			uint16_t used_idx, desc_idx;
-			size_t len;
+static void QPoll(uint16_t q) {
+	while (queues[q].used_ctr != EndianSwap16Bit(queues[q].used->le_idx)) {
+		uint16_t used_idx, desc_idx;
+		size_t len;
 
-			used_idx = queues[q].used_ctr++ & (queues[q].size - 1);
-			desc_idx = EndianSwap16Bit(queues[q].used->ring[used_idx].le_id);
-			len = EndianSwap32Bit(queues[q].used->ring[used_idx].le_len);
+		used_idx = queues[q].used_ctr++ & (queues[q].size - 1);
+		desc_idx = EndianSwap16Bit(queues[q].used->ring[used_idx].le_id);
+		len = EndianSwap32Bit(queues[q].used->ring[used_idx].le_len);
 
-			DNotified(q, len, queues[q].tag[desc_idx]);
+		DNotified(q, len, queues[q].tag[desc_idx]);
 
-			// Free the descriptors (clear their bits in the bitmap)
-			for (;;) {
-				TestAndClear(desc_idx%8, queues[q].bitmap + desc_idx/8);
-				if ((queues[q].desc[desc_idx].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
-					break;
-				desc_idx = EndianSwap16Bit(queues[q].desc[desc_idx].le_next);
-			}
+		// Free the descriptors (clear their bits in the bitmap)
+		for (;;) {
+			TestAndClear(desc_idx%8, queues[q].bitmap + desc_idx/8);
+			if ((queues[q].desc[desc_idx].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
+				break;
+			desc_idx = EndianSwap16Bit(queues[q].desc[desc_idx].le_next);
 		}
 	}
 }

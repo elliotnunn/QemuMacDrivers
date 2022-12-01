@@ -32,7 +32,4 @@ void VNotify(uint16_t queue);
 // Interrupts need to be explicitly reenabled after a notification
 void VRearm(void);
 
-// Workaround when interrupts (including secondary interrupts) are masked
-void VPoll(void);
-
 #endif

@@ -201,22 +201,6 @@ static OSStatus configIntBottomHalf(void *arg1, void *arg2) {
 	return noErr;
 }
 
-// Workaround when interrupts (including secondary interrupts) are masked
-// Not necessarily safe to use outside of MacsBug
-void VPoll(void) {
-	uint8_t flags = *gISRStatus;
-
-	if ((flags & 1) && !gSuppressNotification) {
-		QDisarm();
-		gSuppressNotification = true;
-		QNotified();
-	}
-
-	if (flags & 2) {
-		DConfigChange();
-	}
-}
-
 // Open Firmware and Mac OS have already assigned and mapped the BARs
 // Just need to find where
 static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]) {
