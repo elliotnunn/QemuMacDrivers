@@ -73,14 +73,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
 
 static OSStatus initialize(DriverInitInfo *info);
-static OSStatus VBL(void *p1, void *p2);
-static uint32_t checksum(uint32_t pixel);
-static uint32_t checksumField(uint32_t pixel);
-static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum);
-static void updateWholeScreen(void);
-static void qdScreenUpdated(short top, short left, short bottom, short right);
 static void updateScreen(short top, short left, short bottom, short right);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
+static OSStatus VBL(void *p1, void *p2);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
@@ -94,13 +89,13 @@ static OSStatus GetEntries(VDSetEntryRecord *rec);
 static OSStatus GetClutBehavior(VDClutBehavior *rec);
 static OSStatus SetClutBehavior(VDClutBehavior *rec);
 static OSStatus SetGamma(VDGammaRecord *rec);
+static OSStatus GetGamma(VDGammaRecord *rec);
 static OSStatus GetGammaInfoList(VDGetGammaListRec *rec);
 static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec);
-static OSStatus GetGamma(VDGammaRecord *rec);
 static OSStatus GrayPage(VDPageInfo *rec);
 static OSStatus SetGray(VDGrayRecord *rec);
-static OSStatus GetPages(VDPageInfo *rec);
 static OSStatus GetGray(VDGrayRecord *rec);
+static OSStatus GetPages(VDPageInfo *rec);
 static OSStatus SetInterrupt(VDFlagRecord *rec);
 static OSStatus GetInterrupt(VDFlagRecord *rec);
 static OSStatus SetSync(VDSyncInfoRec *rec);
@@ -602,18 +597,6 @@ void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 		freebufs |= 1 << (char)tag;
 		sendPixels((void *)0x7fff7fff, (void *)0x00000000);
 	}
-}
-
-static uint32_t checksum(uint32_t pixel) {
-	return (pixel << 8) ^ ((pixel + 1) << 16) ^ (pixel << 24) ^ ((uint32_t)'E' << 24);
-}
-
-static uint32_t checksumField(uint32_t pixel) {
-	return pixel & 0xff000000;
-}
-
-static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum) {
-	return (checksum & 0xff000000) | (pixel & 0x00ffffff);
 }
 
 void DebugPollCallback(void) {
