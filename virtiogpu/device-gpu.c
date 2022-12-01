@@ -768,6 +768,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 // MacsBug time might be an exception
 // Kick at interrupt time: sendPixels((void *)0x7fff7fff, (void *)0x00000000);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
+	static bool reentered;
 	static bool interest;
 
 	static int n;
@@ -796,13 +797,14 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	uint32_t sizes2[2] = {48, 24};
 
 	// We have been reentered via QPoll and DNotified -- nothing to do
-	if (top == 0x7fff) return;
+	if (reentered) return;
 
 	// Union the pending rect and the passed-in rect
 	top = MIN(top, ptop);
 	left = MIN(left, pleft);
 	bottom = MAX(bottom, pbottom);
 	right = MAX(right, pright);
+	if (top >= bottom || left >= right) return;
 
 	// Enable queue notifications so that none are missed after QPoll
 	if (!interest) {
@@ -811,11 +813,13 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	}
 
 	// Might reenter this routine, in which case must return early (above)
+	reentered = true;
 	QPoll(0);
+	reentered = false;
 
 	// Now we are guaranteed that a free buffer won't be missed (unless we turn off rupts)
 
-	// Wait for a queue notification to serve up a free buffer
+	// No free buffer yet... return and wait for a queue notification
 	if (!freebufs) {
 		ptop = top;
 		pleft = left;
@@ -824,6 +828,11 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 		return;
 	}
 
+	// We have a free buffer, so don't need to wait for a notification to provide one
+	interest = false;
+	QInterest(0, -1);
+
+	// Pick a buffer
 	for (i=0; i<maxinflight; i++) {
 		if (freebufs & (1 << i)) {
 			freebufs &= ~(1 << i);
@@ -831,7 +840,7 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 		}
 	}
 
-	// All the buffers are within this 192-byte block
+	// The 4096-byte page is divided into 192-byte blocks for locality
 	obuf1 = (void *)((char *)lpage + 192*i);
 	ibuf1 = (void *)((char *)obuf1 + 128);
 	obuf2 = (void *)((char *)obuf1 + 64);
@@ -870,9 +879,6 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	pleft = 0x7fff;
 	pbottom = 0;
 	pright = 0;
-
-	interest = false;
-	QInterest(0, -1);
 }
 
 static OSStatus VBL(void *p1, void *p2) {
