@@ -68,9 +68,10 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 	// Find enough free buffer descriptors
 	count = 0;
 	try = 0;
-	while (count < n_out+n_in && try < queues[q].size) {
-		if (TestAndSet(try%8, queues[q].bitmap + try/8)) {
-			buffers[count++] = try++;
+	for (try=0; try<queues[q].size; try++) {
+		if (!TestAndSet(try%8, queues[q].bitmap + try/8)) {
+			buffers[count++] = try;
+			if (count == n_out+n_in) break;
 		}
 	}
 
