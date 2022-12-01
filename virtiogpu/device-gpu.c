@@ -541,7 +541,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	SetInterruptTimer(&time, VBL, NULL, &timerID);
 
 	InstallDirtyRectPatch();
-	//InstallDebugPollPatch(updateWholeScreen);
+	InstallDebugPollPatch();
 
 	// With copying:
 	// Performance test: 1x1 at 6744 Hz
@@ -615,7 +615,7 @@ static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum) {
 	return (checksum & 0xff000000) | (pixel & 0x00ffffff);
 }
 
-static void updateWholeScreen(void) {
+void DebugPollCallback(void) {
 	updateScreen(0, 0, H, W);
 }
 

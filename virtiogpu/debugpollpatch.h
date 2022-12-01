@@ -1,4 +1,10 @@
 #ifndef DEBUGPOLLPATCH_H
 #define DEBUGPOLLPATCH_H
-void InstallDebugPollPatch(void (*callback)(void));
+
+// Implemented by the callee
+void InstallDebugPollPatch(void);
+
+// Implemented by the caller
+void DebugPollCallback(void);
+
 #endif

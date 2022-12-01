@@ -17,11 +17,9 @@ static unsigned char patch[] = {
 	0x4e, 0xf9, 0xff, 0xff, 0xff, 0xff  // old: jmp     <original DebugUtil>
 };
 
-static RoutineDescriptor callbackDesc = BUILD_ROUTINE_DESCRIPTOR(0, NULL);
+static RoutineDescriptor callbackDesc = BUILD_ROUTINE_DESCRIPTOR(0, DebugPollCallback);
 
-void InstallDebugPollPatch(void (*callback)(void)) {
-	callbackDesc.routineRecords[0].procDescriptor = (void *)callback;
-
+void InstallDebugPollPatch(void) {
 	*(void **)(patch + 14) = &callbackDesc;
 	*(void **)(patch + 24) = GetOSTrapAddress(0xa08d);
 
