@@ -50,6 +50,9 @@ static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
 void *backbuf, *frontbuf;
 
+void *lpage;
+uint32_t ppage;
+
 uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
 
 int W, H, rowBytes;
@@ -361,20 +364,20 @@ static OSStatus initialize(DriverInitInfo *info) {
 	void *obuf, *ibuf;
 	uint32_t physical_bufs[2];
 
-	lprintf("Init\n");
+	lpage = AllocPages(1, &ppage);
+	if (lpage == NULL) goto fail;
+
+	obuf = lpage;
+	ibuf = (void *)((char *)lpage + 2048);
+	physical_bufs[0] = ppage;
+	physical_bufs[1] = ppage + 2048;
 
 	if (!VInit(&info->deviceEntry)) goto fail;
-	lprintf("Passed VInit\n");
 
 	if (!VFeaturesOK()) goto fail;
 
 	if (QInit(0, 256) == 0) goto fail;
-	lprintf("Passed QInit\n");
 	QInterest(0, 1); // we need interrupts
-
-	obuf = AllocPages(1, physical_bufs);
-	ibuf = (char *)obuf + 2048;
-	physical_bufs[1] = physical_bufs[0] + 2048;
 
 	// Allocate our two enormous framebuffers
 	// TODO: limit the framebuffers to a percentage of total RAM
@@ -402,7 +405,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		if (EndianSwap32Bit(reply->hdr.le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) goto fail;
 		W = EndianSwap32Bit(reply->pmodes[0].r.le32_width);
 		H = EndianSwap32Bit(reply->pmodes[0].r.le32_height);
-		if (W > MAXEDGE || H > MAXEDGE) goto fail;
+		if (W > MAXEDGE) W = MAXEDGE;
+		if (H > MAXEDGE) H = MAXEDGE;
 	}
 
 	memset(obuf, 0, 4096);
