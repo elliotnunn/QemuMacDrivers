@@ -932,8 +932,6 @@ static OSStatus status(short csCode, void *param) {
 static void setDepth(int relativeDepth) {
 	mode = relativeDepth;
 	rowbytes = rowbytesFor(mode, W);
-
-	updateScreen(0, 0, H, W);
 }
 
 static long rowbytesFor(int relativeDepth, long width) {
@@ -975,7 +973,9 @@ static void reCLUT(int index) {
 // --> csPage      Desired page
 // <-- csBaseAddr  Base address of VRAM for the desired page
 static OSStatus GetBaseAddr(VDPageInfo *rec) {
-	return statusErr;
+	if (rec->csPage != 0) return statusErr;
+	rec->csBaseAddr = backbuf;
+	return noErr;
 }
 
 // If the video card is an indexed device, the SetEntries control routine
@@ -1179,7 +1179,43 @@ static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec) {
 // --> csPage      Desired display page to gray
 // --- csBaseAddr  Unused
 static OSStatus GrayPage(VDPageInfo *rec) {
-	return controlErr;
+	short x, y;
+	uint32_t value;
+
+	if (rec->csPage != 0) return controlErr;
+
+	if (mode <= k16bit) {
+		if (mode == k1bit) {
+			value = 0x55555555;
+		} else if (mode == k2bit) {
+			value = 0x33333333;
+		} else if (mode == k4bit) {
+			value = 0x0f0f0f0f;
+		} else if (mode == k8bit) {
+			value = 0x00ff00ff;
+		} else if (mode == k16bit) {
+			value = 0x0000ffff;
+		}
+
+		for (y=0; y<H; y++) {
+			for (x=0; x<rowbytes; x+=4) {
+				*(uint32_t *)((char *)backbuf + y*rowbytes + x) = value;
+			}
+			value = ~value;
+		}
+	} else if (mode == k32bit) {
+		value = 0x00000000;
+		for (y=0; y<H; y++) {
+			for (x=0; x<rowbytes; x+=8) {
+				*(uint32_t *)((char *)backbuf + y*rowbytes + x) = value;
+				*(uint32_t *)((char *)backbuf + y*rowbytes + x + 4) = ~value;
+			}
+			value = ~value;
+		}
+	}
+
+	updateScreen(0, 0, H, W);
+	return noErr;
 }
 
 // Specify whether subsequent SetEntries calls fill a card’s CLUT with
@@ -1325,12 +1361,20 @@ static OSStatus GetModeTiming(VDTimingInfoRec *rec) {
 // --> csPage          Desired display page
 // <-- csBaseAddr      Base address of video RAM for this csMode
 static OSStatus SetMode(VDPageInfo *rec) {
-	if (rec->csPage != 0) {
-		return paramErr;
+	size_t i;
+
+	if (rec->csPage != 0) return controlErr;
+
+	for (i=0; i<256; i++) {
+		publicCLUT[i].rgb.red = 0x7fff;
+		publicCLUT[i].rgb.green = 0x7fff;
+		publicCLUT[i].rgb.blue = 0x7fff;
+		reCLUT(i);
 	}
 
 	setDepth(rec->csMode);
 	rec->csBaseAddr = backbuf;
+	updateScreen(0, 0, H, W);
 	return noErr;
 }
 
@@ -1339,12 +1383,20 @@ static OSStatus SetMode(VDPageInfo *rec) {
 // --> csPage          Video page number to switch into
 // <-- csBaseAddr      Base address of the new DisplayModeID
 static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
-	if (rec->csPage != 0) {
-		return paramErr;
+	size_t i;
+
+	if (rec->csPage != 0) return controlErr;
+
+	for (i=0; i<256; i++) {
+		publicCLUT[i].rgb.red = 0x7fff;
+		publicCLUT[i].rgb.green = 0x7fff;
+		publicCLUT[i].rgb.blue = 0x7fff;
+		reCLUT(i);
 	}
 
 	setDepth(rec->csMode);
 	rec->csBaseAddr = backbuf;
+	updateScreen(0, 0, H, W);
 	return noErr;
 }
 
