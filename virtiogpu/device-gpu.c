@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <Devices.h>
 #include <DriverServices.h>
 #include <fp.h>
@@ -9,6 +10,7 @@
 #include <VideoServices.h>
 
 #include "allocator.h"
+#include "atomic.h"
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
@@ -25,10 +27,10 @@
 #define SCREEN_RESOURCE 99
 
 // Before QuickDraw calls can be captured, microsec, 60.15 Hz
-#define FAST_REFRESH_PERIOD -16626
+#define FAST_REFRESH -16626
 
 // When QuickDraw calls are being captured, millisec, 4 Hz
-#define SLOW_REFRESH_PERIOD 250
+#define SLOW_REFRESH 1000
 
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -48,12 +50,18 @@ volatile void *last_tag;
 
 static int interruptsOn = 1;
 static InterruptServiceIDType interruptService;
-void *backbuf, *frontbuf;
+static void *backbuf, *frontbuf;
+static uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
 
-void *lpage;
-uint32_t ppage;
+static void *lpage;
+static uint32_t ppage;
 
-uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
+// 16 is the maximum number of 192-byte chunks fitting in a page
+static int maxinflight = 16;
+static uint16_t freebufs;
+
+static AbsoluteTime time;
+static TimerID timerID;
 
 int W, H, rowBytes;
 int mode;
@@ -65,14 +73,14 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
 
 static OSStatus initialize(DriverInitInfo *info);
-static void setVBL(void);
-static OSStatus VBLBH(void *p1, void *p2);
+static OSStatus VBL(void *p1, void *p2);
 static uint32_t checksum(uint32_t pixel);
 static uint32_t checksumField(uint32_t pixel);
 static uint32_t setChecksumField(uint32_t pixel, uint32_t checksum);
 static void updateWholeScreen(void);
 static void qdScreenUpdated(short top, short left, short bottom, short right);
 static void updateScreen(short top, short left, short bottom, short right);
+static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
@@ -376,7 +384,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	if (!VFeaturesOK()) goto fail;
 
-	if (QInit(0, 256) == 0) goto fail;
+	maxinflight = QInit(0, 4*maxinflight) / 4;
+	if (maxinflight < 1) goto fail;
+
+	freebufs = (1 << maxinflight) - 1;
+
 	QInterest(0, 1); // we need interrupts
 
 	// Allocate our two enormous framebuffers
@@ -462,7 +474,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		req->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
 		req->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
 		req->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
-		req->le32_nr_entries = EndianSwap32Bit(extent);
+		req->le32_nr_entries = EndianSwap32Bit(extent + 1);
 
 		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini3');
 		QNotify(0);
@@ -496,6 +508,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		if (EndianSwap32Bit(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
 	}
 
+	QInterest(0, -1);
+
 	setDepth(k32bit);
 	memcpy(publicGamma, &builtinGamma[0].table, sizeof(builtinGamma[0].table));
 
@@ -523,10 +537,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &interruptService);
-	setVBL();
+	time = AddDurationToAbsolute(FAST_REFRESH, UpTime());
+	SetInterruptTimer(&time, VBL, NULL, &timerID);
 
-	InstallDirtyRectPatch(qdScreenUpdated);
-	InstallDebugPollPatch(updateWholeScreen);
+	//InstallDirtyRectPatch(qdScreenUpdated);
+	//InstallDebugPollPatch(updateWholeScreen);
 
 	// With copying:
 	// Performance test: 1x1 at 6744 Hz
@@ -582,6 +597,10 @@ void DConfigChange(void) {
 
 void DNotified(uint16_t q, size_t len, void *tag) {
 	last_tag = tag;
+	if ((unsigned long)tag < 256) {
+		freebufs |= 1 << (char)tag;
+		sendPixels((void *)0x7fff7fff, (void *)0x00000000);
+	}
 }
 
 static uint32_t checksum(uint32_t pixel) {
@@ -740,62 +759,133 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		}
 	}
 
-// 	// Use VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D to update the host resource from guest memory.
-// 	{
-// 		struct virtio_gpu_transfer_to_host_2d *buf = (void *)VTBuffers[0][0];
-// 		memset(buf, 0, sizeof(*buf));
-// 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
-// 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-//
-// 		buf->r.le32_x = EndianSwap32Bit(left);
-// 		buf->r.le32_y = EndianSwap32Bit(top);
-// 		buf->r.le32_width = EndianSwap32Bit(right - left);
-// 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
-//
-// 		buf->le32_offset = EndianSwap32Bit(top*W*4 + left*4);
-//
-// 		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
-//
-// 		VTSend(0, 0);
-// 	}
-//
-// 	// Use VIRTIO_GPU_CMD_RESOURCE_FLUSH to flush the updated resource to the display.
-// 	{
-// 		struct virtio_gpu_resource_flush *buf = (void *)VTBuffers[0][2];
-// 		memset(buf, 0, sizeof(*buf));
-// 		buf->hdr.le32_type = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_FLUSH);
-// 		buf->hdr.le32_flags = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
-//
-// 		buf->r.le32_x = EndianSwap32Bit(left);
-// 		buf->r.le32_y = EndianSwap32Bit(top);
-// 		buf->r.le32_width = EndianSwap32Bit(right - left);
-// 		buf->r.le32_height = EndianSwap32Bit(bottom - top);
-//
-// 		buf->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
-//
-// 		VTSend(0, 2);
-// 	}
-//
-// 	while (!VTDone(0)) {}
+	Atomic2(sendPixels,
+		(void *)(((unsigned long)top << 16) | left),
+		(void *)(((unsigned long)bottom << 16) | right));
 }
 
-static void setVBL(void) {
-	AbsoluteTime time = AddDurationToAbsolute(1000, UpTime());
-	TimerID id;
-	SetInterruptTimer(&time, VBLBH, NULL, &id);
+// Non-reentrant, must be called atomically
+// MacsBug time might be an exception
+// Kick at interrupt time: sendPixels((void *)0x7fff7fff, (void *)0x00000000);
+static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
+	static bool interest;
+
+	static int n;
+
+	// Stored pending rect
+	static short ptop = 0x7fff;
+	static short pleft = 0x7fff;
+	static short pbottom = 0;
+	static short pright = 0;
+
+	short top = (unsigned long)topleft_voidptr >> 16;
+	short left = (short)topleft_voidptr;
+	short bottom = (unsigned long)botright_voidptr >> 16;
+	short right = (short)botright_voidptr;
+
+	int i;
+
+	struct virtio_gpu_transfer_to_host_2d *obuf1; // 56 bytes
+	struct virtio_gpu_ctrl_hdr *ibuf1;            // 24 bytes
+	uint32_t physicals1[2];
+	uint32_t sizes1[2] = {56, 24};
+
+	struct virtio_gpu_resource_flush *obuf2;      // 48 bytes
+	struct virtio_gpu_ctrl_hdr *ibuf2;            // 24 bytes
+	uint32_t physicals2[2];
+	uint32_t sizes2[2] = {48, 24};
+
+	// We have been reentered via QPoll and DNotified -- nothing to do
+	if (top == 0x7fff) return;
+
+	// Union the pending rect and the passed-in rect
+	top = MIN(top, ptop);
+	left = MIN(left, pleft);
+	bottom = MAX(bottom, pbottom);
+	right = MAX(right, pright);
+
+	// Enable queue notifications so that none are missed after QPoll
+	if (!interest) {
+		interest = true;
+		QInterest(0, 1);
+	}
+
+	// Might reenter this routine, in which case must return early (above)
+	QPoll(0);
+
+	// Now we are guaranteed that a free buffer won't be missed (unless we turn off rupts)
+
+	// Wait for a queue notification to serve up a free buffer
+	if (!freebufs) {
+		ptop = top;
+		pleft = left;
+		pbottom = bottom;
+		pright = right;
+		return;
+	}
+
+	for (i=0; i<maxinflight; i++) {
+		if (freebufs & (1 << i)) {
+			freebufs &= ~(1 << i);
+			break;
+		}
+	}
+
+	// All the buffers are within this 192-byte block
+	obuf1 = (void *)((char *)lpage + 192*i);
+	ibuf1 = (void *)((char *)obuf1 + 128);
+	obuf2 = (void *)((char *)obuf1 + 64);
+	ibuf2 = (void *)((char *)obuf1 + 160);
+
+	physicals1[0] = ppage + 192*i;
+	physicals1[1] = physicals1[0] + 128;
+	physicals2[0] = physicals1[0] + 64;
+	physicals2[1] = physicals1[0] + 160;
+
+	// Update the host resource from guest memory.
+	obuf1->hdr.le32_type    = EndianSwap32Bit(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
+	obuf1->hdr.le32_flags   = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
+	obuf1->r.le32_x         = EndianSwap32Bit(left);
+	obuf1->r.le32_y         = EndianSwap32Bit(top);
+	obuf1->r.le32_width     = EndianSwap32Bit(right - left);
+	obuf1->r.le32_height    = EndianSwap32Bit(bottom - top);
+	obuf1->le32_offset      = EndianSwap32Bit(top*W*4 + left*4);
+	obuf1->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
+
+	QSend(0, 1, 1, physicals1, sizes1, (void *)'tfer');
+
+	// Flush the updated resource to the display.
+	obuf2->hdr.le32_type    = EndianSwap32Bit(VIRTIO_GPU_CMD_RESOURCE_FLUSH);
+	obuf2->hdr.le32_flags   = EndianSwap32Bit(VIRTIO_GPU_FLAG_FENCE);
+	obuf2->r.le32_x         = EndianSwap32Bit(left);
+	obuf2->r.le32_y         = EndianSwap32Bit(top);
+	obuf2->r.le32_width     = EndianSwap32Bit(right - left);
+	obuf2->r.le32_height    = EndianSwap32Bit(bottom - top);
+	obuf2->le32_resource_id = EndianSwap32Bit(SCREEN_RESOURCE);
+
+	QSend(0, 1, 1, physicals2, sizes2, (void *)i);
+	QNotify(0);
+
+	ptop = 0x7fff;
+	pleft = 0x7fff;
+	pbottom = 0;
+	pright = 0;
+
+	interest = false;
+	QInterest(0, -1);
 }
 
-static OSStatus VBLBH(void *p1, void *p2) {
+static OSStatus VBL(void *p1, void *p2) {
 	if (interruptsOn) {
 		//if (*(signed char *)0x910 >= 0) Debugger();
 		VSLDoInterruptService(interruptService);
 	}
 
-	if (!qdUpdatesWorking) {
-		updateScreen(0, 0, H, W);
-	}
+	updateScreen(0, 0, H, W);
 
-	setVBL();
+	time = AddDurationToAbsolute(qdUpdatesWorking ? SLOW_REFRESH : FAST_REFRESH, time);
+	SetInterruptTimer(&time, VBL, NULL, &timerID);
+
 	return noErr;
 }
 
@@ -851,8 +941,6 @@ static OSStatus status(short csCode, void *param) {
 
 // Should also call this if the resolution is changed
 static void setDepth(int relativeDepth) {
-	lprintf("SetDepth to %d\n", relativeDepth);
-
 	mode = relativeDepth;
 	rowBytes = rowBytesFor(mode, W);
 
