@@ -46,7 +46,7 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 	if (pages == NULL) return 0;
 
 	// Underlying transport needs the physical addresses of the rings
-	VQueueSet(q, phys[0], phys[1], phys[2]);
+	VQueueSet(q, size, phys[0], phys[1], phys[2]);
 
 	// But we only need to keep the logical pointers
 	queues[q].desc = pages;

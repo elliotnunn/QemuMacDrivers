@@ -24,7 +24,7 @@ void VFail(void);
 
 // Tell the device where to find the three (split) virtqueue rings
 uint16_t VQueueMaxSize(uint16_t q);
-void VQueueSet(uint16_t q, uint32_t desc, uint32_t avail, uint32_t used);
+void VQueueSet(uint16_t q, uint16_t size, uint32_t desc, uint32_t avail, uint32_t used);
 
 // Tell the device about a change to the avail ring
 void VNotify(uint16_t queue);

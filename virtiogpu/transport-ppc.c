@@ -151,9 +151,10 @@ uint16_t VQueueMaxSize(uint16_t q) {
 	return EndianSwap16Bit(gCommonConfig->le_queue_size);
 }
 
-void VQueueSet(uint16_t q, uint32_t desc, uint32_t avail, uint32_t used) {
+void VQueueSet(uint16_t q, uint16_t size, uint32_t desc, uint32_t avail, uint32_t used) {
 	gCommonConfig->le_queue_select = EndianSwap16Bit(q);
 	SynchronizeIO();
+	gCommonConfig->le_queue_size = EndianSwap16Bit(size);
 	gCommonConfig->le_queue_desc = EndianSwap32Bit(desc);
 	gCommonConfig->le_queue_driver = EndianSwap32Bit(avail);
 	gCommonConfig->le_queue_device = EndianSwap32Bit(used);
