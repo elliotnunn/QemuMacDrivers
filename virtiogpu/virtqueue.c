@@ -56,7 +56,7 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 	queues[q].size = size;
 
 	// Disable notifications until QInterest
-	queues[q].avail->le_flags = 0x0100;
+	SETLE16(queues[q].avail->le_flags, 1);
 
 	return size;
 }
@@ -121,7 +121,7 @@ void QNotify(uint16_t q) {
 
 void QInterest(uint16_t q, int32_t delta) {
 	int32_t interest = AddAtomic(delta, &queues[q].interest);
-	queues[q].avail->le_flags = (interest+delta > 0) ? 0 : 0x0100;
+	SETLE16(queues[q].avail->le_flags, queues[q].interest == 0);
 }
 
 // Called by transport hardware interrupt to reduce chance of redundant interrupts
@@ -143,7 +143,7 @@ void QNotified(void) {
 
 	VRearm();
 	for (q=0; queues[q].size != 0; q++) {
-		queues[q].avail->le_flags = (queues[q].interest > 0) ? 0 : 0x0100;
+		SETLE16(queues[q].avail->le_flags, queues[q].interest == 0);
 	}
 	SynchronizeIO();
 

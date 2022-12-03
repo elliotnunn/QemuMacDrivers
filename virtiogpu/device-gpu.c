@@ -488,8 +488,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 		SETLE32(req->hdr.le32_type, VIRTIO_GPU_CMD_SET_SCANOUT);
 		SETLE32(req->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		req->r.le32_x = 0;
-		req->r.le32_y = 0;
+		SETLE32(req->r.le32_x, 0);
+		SETLE32(req->r.le32_y, 0);
 		SETLE32(req->r.le32_width, W);
 		SETLE32(req->r.le32_height, H);
 		SETLE32(req->le32_scanout_id, 0); // index, 0-15
