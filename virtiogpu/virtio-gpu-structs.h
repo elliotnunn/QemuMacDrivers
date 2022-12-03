@@ -321,11 +321,11 @@ struct virtio_gpu_resource_create_blob {
 	uint32_t le32_blob_mem;
 	uint32_t le32_blob_flags;
 	uint32_t le32_nr_entries;
-	uint32_t le32_blob_id;
-	uint32_t le32_size;
-	/*
-	 * sizeof(nr_entries * virtio_gpu_mem_entry) bytes follow
-	 */
+	uint32_t le32_blob_id_lo;
+	uint32_t le32_blob_id_hi;
+	uint32_t le32_size_lo;
+	uint32_t le32_size_hi;
+	struct virtio_gpu_mem_entry entries[252]; // makes a 4096-byte page
 };
 
 /* VIRTIO_GPU_CMD_SET_SCANOUT_BLOB */
