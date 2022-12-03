@@ -143,6 +143,11 @@ bool VFeaturesOK(void) {
 	return (gCommonConfig->device_status & 8) != 0;
 }
 
+void VDriverOK(void) {
+	gCommonConfig->device_status = 1 | 2 | 4 | 8;
+	SynchronizeIO();
+}
+
 void VFail(void) {
 	gCommonConfig->device_status = 0x80;
 	SynchronizeIO();

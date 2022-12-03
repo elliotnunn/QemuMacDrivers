@@ -383,8 +383,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	freebufs = (1 << maxinflight) - 1;
 
-	QInterest(0, 1); // we need interrupts
-
 	// Allocate our two enormous framebuffers
 	// TODO: limit the framebuffers to a percentage of total RAM
 	backbuf = PoolAllocateResident(MAXEDGE*MAXEDGE*4, true);
@@ -393,6 +391,10 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Need the physical page addresses of the front buffer
 	frontbuf = AllocPages(MAXEDGE*MAXEDGE*4/4096, fbpages);
 	if (frontbuf == NULL) goto fail;
+
+	VDriverOK();
+
+	QInterest(0, 1); // we need interrupts
 
 	// Get a list of displays ("scanouts") and their sizes
 	// (for now, only the first display)
