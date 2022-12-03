@@ -38,12 +38,12 @@ void InitHardwareCursor(void) {
 	{
 		struct virtio_gpu_resource_create_2d *buf = (void *)VTBuffers[0][0];
 		memset(buf, 0, sizeof(*buf));
-		SETLE32(buf->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
-		SETLE32(buf->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(buf->le32_resource_id, CURSOR_RESOURCE);
-		SETLE32(buf->le32_format, VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM);
-		SETLE32(buf->le32_width, 64);
-		SETLE32(buf->le32_height, 64);
+		SETLE32(&buf->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
+		SETLE32(&buf->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&buf->le32_resource_id, CURSOR_RESOURCE);
+		SETLE32(&buf->le32_format, VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM);
+		SETLE32(&buf->le32_width, 64);
+		SETLE32(&buf->le32_height, 64);
 
 		VTSend(0, 0);
 		while (!VTDone(0)) {}
@@ -54,13 +54,13 @@ void InitHardwareCursor(void) {
 		struct virtio_gpu_resource_attach_backing *buf = (void *)VTBuffers[0][0];
 		struct virtio_gpu_mem_entry *buf2 = (void *)((char *)buf + sizeof(*buf));
 		memset(buf, 0, sizeof(*buf) + sizeof(*buf2));
-		SETLE32(buf->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
-		SETLE32(buf->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(buf->le32_resource_id, CURSOR_RESOURCE);
-		SETLE32(buf->le32_nr_entries, 1);
+		SETLE32(&buf->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
+		SETLE32(&buf->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&buf->le32_resource_id, CURSOR_RESOURCE);
+		SETLE32(&buf->le32_nr_entries, 1);
 
-		SETLE32(buf2->le32_addr, (uint32_t)cursorPic + 0x4000);
-		SETLE32(buf2->le32_length, 64*1024*1024);
+		SETLE32(&buf2->le32_addr, (uint32_t)cursorPic + 0x4000);
+		SETLE32(&buf2->le32_length, 64*1024*1024);
 
 		VTSend(0, 0);
 		while (!VTDone(0)) {}
@@ -168,15 +168,15 @@ OSStatus SetHardwareCursor(VDSetHardwareCursorRec *rec) {
 		struct virtio_gpu_transfer_to_host_2d *buf = (void *)VTBuffers[0][0];
 		memset(buf, 0, sizeof(*buf));
 		//memset(VTBuffers[1][1], 0x88, sizeof(*buf));
-		SETLE32(buf->hdr.le32_type, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
-		SETLE32(buf->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&buf->hdr.le32_type, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
+		SETLE32(&buf->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
 
 		buf->r.le32_x = 0;
 		buf->r.le32_y = 0;
 		buf->r.le32_width = 0x40000000; // 64, swapped
 		buf->r.le32_height = 0x40000000;
 
-		SETLE32(buf->le32_resource_id, CURSOR_RESOURCE);
+		SETLE32(&buf->le32_resource_id, CURSOR_RESOURCE);
 
 		VTSend(0, 0);
  		while (!VTDone(0)) {}
@@ -214,18 +214,18 @@ OSStatus DrawHardwareCursor(VDDrawHardwareCursorRec *rec) {
 	if (!cursorSet) return controlErr;
 
 	memset(obuf, 0, sizeof(*obuf));
-	SETLE32(obuf->hdr.le32_type, VIRTIO_GPU_CMD_MOVE_CURSOR);
-	SETLE32(obuf->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+	SETLE32(&obuf->hdr.le32_type, VIRTIO_GPU_CMD_MOVE_CURSOR);
+	SETLE32(&obuf->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
 	obuf->pos.le32_scanout_id = 0;
-	SETLE32(obuf->pos.le32_x, cursorX + hotX);
-	SETLE32(obuf->pos.le32_y, cursorY + hotY);
+	SETLE32(&obuf->pos.le32_x, cursorX + hotX);
+	SETLE32(&obuf->pos.le32_y, cursorY + hotY);
 
-	SETLE32(obuf->le32_resource_id, cursorVisible ? CURSOR_RESOURCE : 0);
+	SETLE32(&obuf->le32_resource_id, cursorVisible ? CURSOR_RESOURCE : 0);
 
 	if (rec->csCursorVisible != cursorVisible) {
-		SETLE32(obuf->hdr.le32_type, VIRTIO_GPU_CMD_UPDATE_CURSOR);
-		SETLE32(obuf->le32_hot_x, hotX);
-		SETLE32(obuf->le32_hot_y, hotY);
+		SETLE32(&obuf->hdr.le32_type, VIRTIO_GPU_CMD_UPDATE_CURSOR);
+		SETLE32(&obuf->le32_hot_x, hotX);
+		SETLE32(&obuf->le32_hot_y, hotY);
 	}
 
 	// We are the only user of the cursorq, so return before checking it was done

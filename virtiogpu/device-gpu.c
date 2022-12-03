@@ -401,16 +401,16 @@ static OSStatus initialize(DriverInitInfo *info) {
 		struct virtio_gpu_resp_display_info *reply = ibuf;
 		uint32_t sizes[2] = {sizeof(*req), sizeof(*reply)};
 
-		SETLE32(req->le32_type, VIRTIO_GPU_CMD_GET_DISPLAY_INFO);
-		SETLE32(req->le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&req->le32_type, VIRTIO_GPU_CMD_GET_DISPLAY_INFO);
+		SETLE32(&req->le32_flags, VIRTIO_GPU_FLAG_FENCE);
 
 		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini1');
 		QNotify(0);
 		while (last_tag != (void *)'ini1') WaitForInterrupt();
 
-		if (GETLE32(reply->hdr.le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) goto fail;
-		W = GETLE32(reply->pmodes[0].r.le32_width);
-		H = GETLE32(reply->pmodes[0].r.le32_height);
+		if (GETLE32(&reply->hdr.le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) goto fail;
+		W = GETLE32(&reply->pmodes[0].r.le32_width);
+		H = GETLE32(&reply->pmodes[0].r.le32_height);
 		if (W > MAXEDGE) W = MAXEDGE;
 		if (H > MAXEDGE) H = MAXEDGE;
 	}
@@ -423,18 +423,18 @@ static OSStatus initialize(DriverInitInfo *info) {
 		struct virtio_gpu_ctrl_hdr *reply = ibuf;
 		uint32_t sizes[2] = {sizeof(*req), sizeof(*reply)};
 
-		SETLE32(req->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
-		SETLE32(req->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(req->le32_resource_id, SCREEN_RESOURCE);
-		SETLE32(req->le32_format, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
-		SETLE32(req->le32_width, W);
-		SETLE32(req->le32_height, H);
+		SETLE32(&req->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
+		SETLE32(&req->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&req->le32_resource_id, SCREEN_RESOURCE);
+		SETLE32(&req->le32_format, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
+		SETLE32(&req->le32_width, W);
+		SETLE32(&req->le32_height, H);
 
 		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini2');
 		QNotify(0);
 		while (last_tag != (void *)'ini2') WaitForInterrupt();
 
-		if (GETLE32(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
+		if (GETLE32(&reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
 	}
 
 	memset(obuf, 0, 4096);
@@ -455,26 +455,26 @@ static OSStatus initialize(DriverInitInfo *info) {
 				extent++;
 				if (extent > sizeof(req->entries)/sizeof(*req->entries)) goto fail;
 
-				SETLE32(req->entries[extent].le32_addr, fbpages[i]);
+				SETLE32(&req->entries[extent].le32_addr, fbpages[i]);
 				extent_base = fbpages[i];
 				extent_len = 4096;
 			} else {
 				extent_len += 4096;
 			}
 
-			SETLE32(req->entries[extent].le32_length, extent_len);
+			SETLE32(&req->entries[extent].le32_length, extent_len);
 		}
 
-		SETLE32(req->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
-		SETLE32(req->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(req->le32_resource_id, SCREEN_RESOURCE);
-		SETLE32(req->le32_nr_entries, extent + 1);
+		SETLE32(&req->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
+		SETLE32(&req->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&req->le32_resource_id, SCREEN_RESOURCE);
+		SETLE32(&req->le32_nr_entries, extent + 1);
 
 		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini3');
 		QNotify(0);
 		while (last_tag != (void *)'ini3') WaitForInterrupt();
 
-		if (GETLE32(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
+		if (GETLE32(&reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
 	}
 
 	memset(obuf, 0, 4096);
@@ -486,20 +486,20 @@ static OSStatus initialize(DriverInitInfo *info) {
 		struct virtio_gpu_ctrl_hdr *reply = ibuf;
 		uint32_t sizes[2] = {sizeof(*req), sizeof(*reply)};
 
-		SETLE32(req->hdr.le32_type, VIRTIO_GPU_CMD_SET_SCANOUT);
-		SETLE32(req->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(req->r.le32_x, 0);
-		SETLE32(req->r.le32_y, 0);
-		SETLE32(req->r.le32_width, W);
-		SETLE32(req->r.le32_height, H);
-		SETLE32(req->le32_scanout_id, 0); // index, 0-15
-		SETLE32(req->le32_resource_id, SCREEN_RESOURCE);
+		SETLE32(&req->hdr.le32_type, VIRTIO_GPU_CMD_SET_SCANOUT);
+		SETLE32(&req->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&req->r.le32_x, 0);
+		SETLE32(&req->r.le32_y, 0);
+		SETLE32(&req->r.le32_width, W);
+		SETLE32(&req->r.le32_height, H);
+		SETLE32(&req->le32_scanout_id, 0); // index, 0-15
+		SETLE32(&req->le32_resource_id, SCREEN_RESOURCE);
 
 		QSend(0, 1, 1, physical_bufs, sizes, (void *)'ini4');
 		QNotify(0);
 		while (last_tag != (void *)'ini4') WaitForInterrupt();
 
-		if (GETLE32(reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
+		if (GETLE32(&reply->le32_type) != VIRTIO_GPU_RESP_OK_NODATA) goto fail;
 	}
 
 	QInterest(0, -1);
@@ -835,25 +835,25 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	physicals2[1] = physicals1[0] + 160;
 
 	// Update the host resource from guest memory.
-	SETLE32(obuf1->hdr.le32_type, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
-	SETLE32(obuf1->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-	SETLE32(obuf1->r.le32_x, left);
-	SETLE32(obuf1->r.le32_y, top);
-	SETLE32(obuf1->r.le32_width, right - left);
-	SETLE32(obuf1->r.le32_height, bottom - top);
-	SETLE32(obuf1->le32_offset, top*W*4 + left*4);
-	SETLE32(obuf1->le32_resource_id, SCREEN_RESOURCE);
+	SETLE32(&obuf1->hdr.le32_type, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
+	SETLE32(&obuf1->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+	SETLE32(&obuf1->r.le32_x, left);
+	SETLE32(&obuf1->r.le32_y, top);
+	SETLE32(&obuf1->r.le32_width, right - left);
+	SETLE32(&obuf1->r.le32_height, bottom - top);
+	SETLE32(&obuf1->le32_offset, top*W*4 + left*4);
+	SETLE32(&obuf1->le32_resource_id, SCREEN_RESOURCE);
 
 	QSend(0, 1, 1, physicals1, sizes1, (void *)'tfer');
 
 	// Flush the updated resource to the display.
-	SETLE32(obuf2->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_FLUSH);
-	SETLE32(obuf2->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-	SETLE32(obuf2->r.le32_x, left);
-	SETLE32(obuf2->r.le32_y, top);
-	SETLE32(obuf2->r.le32_width, right - left);
-	SETLE32(obuf2->r.le32_height, bottom - top);
-	SETLE32(obuf2->le32_resource_id, SCREEN_RESOURCE);
+	SETLE32(&obuf2->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_FLUSH);
+	SETLE32(&obuf2->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+	SETLE32(&obuf2->r.le32_x, left);
+	SETLE32(&obuf2->r.le32_y, top);
+	SETLE32(&obuf2->r.le32_width, right - left);
+	SETLE32(&obuf2->r.le32_height, bottom - top);
+	SETLE32(&obuf2->le32_resource_id, SCREEN_RESOURCE);
 
 	QSend(0, 1, 1, physicals2, sizes2, (void *)i);
 	QNotify(0);
