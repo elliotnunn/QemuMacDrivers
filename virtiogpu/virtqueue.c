@@ -2,11 +2,11 @@
 #include <stdint.h>
 
 #include <DriverSynchronization.h>
-#include <PCI.h>
 
 #include "allocator.h"
 #include "atomic.h"
 #include "allocator.h"
+#include "byteswap.h"
 #include "device.h"
 #include "transport.h"
 #include "virtqueue-structs.h"
@@ -91,10 +91,10 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 			((i<n_out+n_in-1) ? VIRTQ_DESC_F_NEXT : 0) |
 			((i>=n_out) ? VIRTQ_DESC_F_WRITE : 0);
 
-		queues[q].desc[buf].le_addr = EndianSwap32Bit(addrs[i]);
-		queues[q].desc[buf].le_len = EndianSwap32Bit(sizes[i]);
-		queues[q].desc[buf].le_flags = EndianSwap16Bit(flags);
-		queues[q].desc[buf].le_next = EndianSwap16Bit(next);
+		SETLE32(queues[q].desc[buf].le_addr, addrs[i]);
+		SETLE32(queues[q].desc[buf].le_len, sizes[i]);
+		SETLE16(queues[q].desc[buf].le_flags, flags);
+		SETLE16(queues[q].desc[buf].le_next, next);
 	}
 
 	// Put a pointer to the "head" descriptor in the avail queue
@@ -108,10 +108,10 @@ static void QSendAtomicPart(void *q_voidptr, void *buf_voidptr) {
 	uint16_t buf = (uint16_t)buf_voidptr;
 	uint16_t idx;
 
-	idx = EndianSwap16Bit(queues[q].avail->le_idx);
-	queues[q].avail->le_ring[idx & (queues[q].size - 1)] = EndianSwap16Bit(buf);
+	idx = GETLE16(queues[q].avail->le_idx);
+	SETLE16(queues[q].avail->le_ring[idx & (queues[q].size - 1)], buf);
 	SynchronizeIO();
-	queues[q].avail->le_idx = EndianSwap16Bit(idx + 1);
+	SETLE16(queues[q].avail->le_idx, idx + 1);
 	SynchronizeIO();
 }
 
@@ -128,7 +128,7 @@ void QInterest(uint16_t q, int32_t delta) {
 void QDisarm(void) {
 	uint16_t q;
 	for (q=0; queues[q].size != 0; q++) {
-		queues[q].avail->le_flags = 0x0100; // EndianSwap16Bit(1);
+		SETLE16(queues[q].avail->le_flags, 1);
 	}
 	SynchronizeIO();
 }
@@ -156,12 +156,12 @@ void QNotified(void) {
 void QPoll(uint16_t q) {
 	uint16_t i = queues[q].used_ctr;
 	uint16_t mask = queues[q].size - 1;
-	uint16_t end = EndianSwap16Bit(queues[q].used->le_idx);
+	uint16_t end = GETLE16(queues[q].used->le_idx);
 	queues[q].used_ctr = end;
 
 	for (; i != end; i++) {
-		uint16_t desc = EndianSwap16Bit(queues[q].used->ring[i&mask].le_id);
-		size_t len = EndianSwap32Bit(queues[q].used->ring[i&mask].le_len);
+		uint16_t desc = GETLE16(queues[q].used->ring[i&mask].le_id);
+		size_t len = GETLE32(queues[q].used->ring[i&mask].le_len);
 
 		DNotified(q, desc, len, queues[q].tag[desc]);
 	}
@@ -171,8 +171,8 @@ void QPoll(uint16_t q) {
 void QFree(uint16_t q, uint16_t buf) {
 	for (;;) {
 		TestAndClear(buf%8, queues[q].bitmap + buf/8);
-		if ((queues[q].desc[buf].le_flags & EndianSwap16Bit(VIRTQ_DESC_F_NEXT)) == 0)
+		if ((GETLE16(queues[q].desc[buf].le_flags) & VIRTQ_DESC_F_NEXT) == 0)
 			break;
-		buf = EndianSwap16Bit(queues[q].desc[buf].le_next);
+		buf = GETLE16(queues[q].desc[buf].le_next);
 	}
 }

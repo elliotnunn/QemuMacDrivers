@@ -8,6 +8,7 @@
 #include <PCI.h>
 
 #include "allocator.h"
+#include "byteswap.h"
 #include "device.h"
 #include "pci-structs.h"
 #include "virtqueue.h"
@@ -77,7 +78,7 @@ bool VInit(void *dev) {
 	pci_status |= 2;
 	ExpMgrConfigWriteWord(dev, (LogicalAddress)4, pci_status);
 
-	VMaxQueues = EndianSwap16Bit(gCommonConfig->le_num_queues);
+	VMaxQueues = GETLE16(gCommonConfig->le_num_queues);
 
 	// 1. Reset the device.
 	gCommonConfig->device_status = 0;
@@ -112,21 +113,23 @@ bool VInit(void *dev) {
 }
 
 bool VGetDevFeature(uint32_t number) {
-	gCommonConfig->le_device_feature_select = EndianSwap32Bit(number / 32);
+	SETLE32(gCommonConfig->le_device_feature_select, number / 32);
 	SynchronizeIO();
 
-	return (EndianSwap32Bit(gCommonConfig->le_device_feature) >> (number % 32)) & 1;
+	return (GETLE32(gCommonConfig->le_device_feature) >> (number % 32)) & 1;
 }
 
 void VSetFeature(uint32_t number, bool val) {
-	uint32_t le_mask = EndianSwap32Bit(1 << (number % 32));
+	uint32_t mask = 1 << (number % 32);
+	uint32_t bits;
 
-	gCommonConfig->le_driver_feature_select = EndianSwap32Bit(number / 32);
+	SETLE32(gCommonConfig->le_driver_feature_select, number / 32);
 	SynchronizeIO();
-	if (val)
-		gCommonConfig->le_driver_feature |= le_mask;
-	else
-		gCommonConfig->le_driver_feature &= ~le_mask;
+
+	bits = GETLE32(gCommonConfig->le_driver_feature);
+	bits = val ? (bits|mask) : (bits&~mask);
+	SETLE32(gCommonConfig->le_driver_feature, bits);
+
 	SynchronizeIO();
 }
 
@@ -146,25 +149,25 @@ void VFail(void) {
 }
 
 uint16_t VQueueMaxSize(uint16_t q) {
-	gCommonConfig->le_queue_select = EndianSwap16Bit(q);
+	SETLE16(gCommonConfig->le_queue_select, q);
 	SynchronizeIO();
-	return EndianSwap16Bit(gCommonConfig->le_queue_size);
+	return GETLE16(gCommonConfig->le_queue_size);
 }
 
 void VQueueSet(uint16_t q, uint16_t size, uint32_t desc, uint32_t avail, uint32_t used) {
-	gCommonConfig->le_queue_select = EndianSwap16Bit(q);
+	SETLE16(gCommonConfig->le_queue_select, q);
 	SynchronizeIO();
-	gCommonConfig->le_queue_size = EndianSwap16Bit(size);
-	gCommonConfig->le_queue_desc = EndianSwap32Bit(desc);
-	gCommonConfig->le_queue_driver = EndianSwap32Bit(avail);
-	gCommonConfig->le_queue_device = EndianSwap32Bit(used);
+	SETLE16(gCommonConfig->le_queue_size, size);
+	SETLE32(gCommonConfig->le_queue_desc, desc);
+	SETLE32(gCommonConfig->le_queue_driver, avail);
+	SETLE32(gCommonConfig->le_queue_device, used);
 	SynchronizeIO();
-	gCommonConfig->le_queue_enable = EndianSwap16Bit(1);
+	SETLE16(gCommonConfig->le_queue_enable, 1);
 	SynchronizeIO();
 }
 
 void VNotify(uint16_t queue) {
-	gNotify[gNotifyMultiplier * queue / 2] = EndianSwap16Bit(queue);
+	SETLE16(gNotify[gNotifyMultiplier * queue / 2], queue);
 	SynchronizeIO();
 }
 
