@@ -32,7 +32,7 @@ enum {
 	MAXEDGE = 1024,
 	SCREEN_RESOURCE = 99,
 	FAST_REFRESH = -16626, // before QD callbacks work, microsec, 60.15 Hz
-	SLOW_REFRESH = 1000, // after QD callbacks work, millisec, 4 Hz
+	SLOW_REFRESH = 1000, // after QD callbacks work, millisec, 1 Hz
 };
 
 enum {
