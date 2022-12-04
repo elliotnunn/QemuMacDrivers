@@ -252,49 +252,10 @@ PATCH_LIST
 #undef X
 
 // Other globals and prototypes
-static void secondStage(void);
 static GrafPort *deferringPort;
 static void drawPort(GrafPort *port);
 
 void InstallDirtyRectPatch(void) {
-	static char patch[] = {
-		0x48, 0xe7, 0xe0, 0xe0,             //      movem.l d0-d2/a0-a2,-(sp)
-		0x4e, 0xb9, 0xff, 0xff, 0xff, 0xff, //      jsr     <callback>
-		0x4c, 0xdf, 0x07, 0x07,             //      movem.l (sp)+,d0-d2/a0-a2
-		0x4e, 0xf9, 0xff, 0xff, 0xff, 0xff  // old: jmp     <original>
-	};
-
-	static RoutineDescriptor desc = BUILD_ROUTINE_DESCRIPTOR(0, secondStage);
-
-	*(void **)(patch + 6) = &desc;
-	*(void **)(patch + 16) = GetOSTrapAddress(_InitEvents);
-
-	// Clear 68k emulator's instruction cache
-	BlockMove(patch, patch, sizeof(patch));
-	BlockMove(&desc, &desc, sizeof(desc));
-
-	SetOSTrapAddress((void *)patch, _InitEvents);
-}
-
-static void secondStage(void) {
-	static int done = 0;
-	if (done) return;
-
-	// If CurApName is set then we missed our chance
-	if (*(signed char *)0x910 >= 0) {
-		done = 1;
-		return;
-	}
-
-	if (*(unsigned short *)GetToolTrapAddress(0xa8a0) != 0xaafe) return;
-
-// 	#define X(trap, StdName, args, procInfo) \
-// 		if (*(unsigned short *)GetToolTrapAddress(trap) != 0xaafe) return;
-// 	PATCH_LIST
-// 	#undef X
-
-	done = 1;
-
 	// Install our patches, saving the old traps
 	#define X(trap, StdName, args, procInfo) \
 		if (trap >= 0xa800) { \
@@ -313,8 +274,6 @@ static void secondStage(void) {
 		}
 	PATCH_LIST
 	#undef X
-
-	DirtyRectCallback(0, 0, 0x7fff, 0x7fff);
 }
 
 static void myBeginUpdate(GrafPort *theWindow) {

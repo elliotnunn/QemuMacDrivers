@@ -14,6 +14,7 @@
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
+#include "lateboothook.h"
 #include "lprintf.h"
 #include "transport.h"
 #include "virtio-gpu-structs.h"
@@ -536,8 +537,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	vbltime = AddDurationToAbsolute(FAST_REFRESH, UpTime());
 	SetInterruptTimer(&vbltime, VBL, NULL, &vbltimer);
 
-	InstallDirtyRectPatch();
 	InstallDebugPollPatch();
+	InstallLateBootHook();
 
 	// With copying:
 	// Performance test: 1x1 at 6744 Hz
@@ -602,6 +603,11 @@ void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 
 void DebugPollCallback(void) {
 	updateScreen(0, 0, H, W);
+}
+
+void LateBootHook(void) {
+	updateScreen(0, 0, H, W);
+	InstallDirtyRectPatch();
 }
 
 void DirtyRectCallback(short top, short left, short bottom, short right) {

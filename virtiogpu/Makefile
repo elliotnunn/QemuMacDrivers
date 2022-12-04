@@ -9,6 +9,7 @@ PPCCOptions = {COptions}
                          debugpollpatch.c.x ∂
                          dirtyrectpatch.c.x ∂
                          gammatables.c.x ∂
+                         lateboothook.c.x ∂
                          lprintf.s.x ∂
                          transport-ppc.c.x ∂
                          virtqueue.c.x ∂
