@@ -540,15 +540,16 @@ static OSStatus initialize(DriverInitInfo *info) {
 	InstallDebugPollPatch();
 	InstallLateBootHook();
 
-	// Performance test: 2x2 at 60223 Hz
-	// Performance test: 4x4 at 69397 Hz
-	// Performance test: 8x8 at 77653 Hz
-	// Performance test: 16x16 at 56040 Hz
-	// Performance test: 32x32 at 36779 Hz
-	// Performance test: 64x64 at 16963 Hz
-	// Performance test: 128x128 at 5659 Hz
-	// Performance test: 256x256 at 1562 Hz
-	// Performance test: 512x512 at 426 Hz
+	// Performance test: 1x1 at 94096 Hz
+	// Performance test: 2x2 at 105520 Hz
+	// Performance test: 4x4 at 101329 Hz
+	// Performance test: 8x8 at 108689 Hz
+	// Performance test: 16x16 at 72277 Hz
+	// Performance test: 32x32 at 39755 Hz
+	// Performance test: 64x64 at 17770 Hz
+	// Performance test: 128x128 at 5726 Hz
+	// Performance test: 256x256 at 1585 Hz
+	// Performance test: 512x512 at 428 Hz
 	//{
 	//	int size;
 	//	long t;
@@ -828,7 +829,7 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 
 	// Update the host resource from guest memory.
 	SETLE32(&obuf1->hdr.le32_type, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
-	SETLE32(&obuf1->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+	SETLE32(&obuf1->hdr.le32_flags, 0);
 	SETLE32(&obuf1->r.le32_x, left);
 	SETLE32(&obuf1->r.le32_y, top);
 	SETLE32(&obuf1->r.le32_width, right - left);
@@ -840,7 +841,7 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 
 	// Flush the updated resource to the display.
 	SETLE32(&obuf2->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_FLUSH);
-	SETLE32(&obuf2->hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+	SETLE32(&obuf2->hdr.le32_flags, 0);
 	SETLE32(&obuf2->r.le32_x, left);
 	SETLE32(&obuf2->r.le32_y, top);
 	SETLE32(&obuf2->r.le32_width, right - left);
