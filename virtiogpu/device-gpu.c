@@ -540,31 +540,15 @@ static OSStatus initialize(DriverInitInfo *info) {
 	InstallDebugPollPatch();
 	InstallLateBootHook();
 
-	// With copying:
-	// Performance test: 1x1 at 6744 Hz
-	// Performance test: 2x2 at 6819 Hz
-	// Performance test: 4x4 at 6786 Hz
-	// Performance test: 8x8 at 6827 Hz
-	// Performance test: 16x16 at 6560 Hz
-	// Performance test: 32x32 at 5719 Hz
-	// Performance test: 64x64 at 3333 Hz
-	// Performance test: 128x128 at 1313 Hz
-	// Performance test: 256x256 at 400 Hz
-	// Performance test: 512x512 at 103 Hz
-	// (removing gamma lookup makes minimal difference)
-	// (rewriting in assembly also makes minimal difference)
-
-	// Without copying:
-	// Performance test: 1x1 at 12445 Hz
-	// Performance test: 2x2 at 12479 Hz
-	// Performance test: 4x4 at 12546 Hz
-	// Performance test: 8x8 at 12675 Hz
-	// Performance test: 16x16 at 12656 Hz
-	// Performance test: 32x32 at 12643 Hz
-	// Performance test: 64x64 at 12532 Hz
-	// Performance test: 128x128 at 12376 Hz
-	// Performance test: 256x256 at 10937 Hz
-	// Performance test: 512x512 at 7667 Hz
+	// Performance test: 2x2 at 60223 Hz
+	// Performance test: 4x4 at 69397 Hz
+	// Performance test: 8x8 at 77653 Hz
+	// Performance test: 16x16 at 56040 Hz
+	// Performance test: 32x32 at 36779 Hz
+	// Performance test: 64x64 at 16963 Hz
+	// Performance test: 128x128 at 5659 Hz
+	// Performance test: 256x256 at 1562 Hz
+	// Performance test: 512x512 at 426 Hz
 	//{
 	//	int size;
 	//	long t;
