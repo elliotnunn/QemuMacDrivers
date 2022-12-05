@@ -12,20 +12,6 @@
 // X(trap, StdName, arguments, procInfo)
 #define PATCH_LIST \
 	X( \
-		0xa922, \
-		BeginUpdate, \
-		(GrafPort *window), \
-		kPascalStackBased \
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
-	) \
-	X( \
-		0xa923, \
-		EndUpdate, \
-		(GrafPort *window), \
-		kPascalStackBased \
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
-	) \
-	X( \
 		0xa882, \
 		StdText, \
 		(short count, const void *textAddr, Point numer, Point denom), \
@@ -251,10 +237,6 @@ PATCH_LIST
 PATCH_LIST
 #undef X
 
-// Other globals and prototypes
-static GrafPort *deferringPort;
-static void drawPort(GrafPort *port);
-
 void InstallDirtyRectPatch(void) {
 	// Install our patches, saving the old traps
 	#define X(trap, StdName, args, procInfo) \
@@ -276,39 +258,6 @@ void InstallDirtyRectPatch(void) {
 	#undef X
 }
 
-static void myBeginUpdate(GrafPort *theWindow) {
-	if (deferringPort != NULL) {
-		drawPort(deferringPort);
-	}
-
-	deferringPort = theWindow;
-	CallUniversalProc(theirBeginUpdate, kBeginUpdateProcInfo, theWindow);
-}
-
-static void myEndUpdate(GrafPort *theWindow) {
-	if (deferringPort) drawPort(deferringPort);
-	if (theWindow != deferringPort) drawPort(theWindow);
-
-	deferringPort = NULL;
-	CallUniversalProc(theirEndUpdate, kEndUpdateProcInfo, theWindow);
-}
-
-static void drawPort(GrafPort *port) {
-	int t, l, b, r;
-	Region *rgn;
-
-	rgn = *port->visRgn;
-	t = rgn->rgnBBox.top;
-	l = rgn->rgnBBox.left;
-	b = rgn->rgnBBox.bottom;
-	r = rgn->rgnBBox.right;
-
-	rgn = *port->clipRgn;
-	CLIP(&rgn->rgnBBox, t, l, b, r);
-	LOCALTOGLOBAL(&port->portBits, t, l, b, r);
-	DirtyRectCallback(t, l, b, r);
-}
-
 static void myStdText(short count, const void *textAddr, Point numer, Point denom) {
 	int t, l, b, r;
 
@@ -319,7 +268,7 @@ static void myStdText(short count, const void *textAddr, Point numer, Point deno
 	CallUniversalProc(theirStdText, kStdTextProcInfo, count, textAddr, numer, denom);
 	r = port->pnLoc.h + 1;
 
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	if (numer.v == 1 && denom.v == 1 && port->txSize != 0) {
 		// Avoid calling StdTxMeas in the simple case,
@@ -351,7 +300,7 @@ static void myStdLine(Point newPt) {
 	r = newPt.h;
 
 	CallUniversalProc(theirStdLine, kStdLineProcInfo, newPt);
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	if (t > b) {
 		int swap = t;
@@ -381,7 +330,7 @@ static void myStdRect(GrafVerb verb, const Rect *rect) {
 	CallUniversalProc(theirStdRect, kStdRectProcInfo, verb, rect);
 
 	GetPort(&port);
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -401,7 +350,7 @@ static void myStdRRect(GrafVerb verb, const Rect *rect, short ovalWidth, short o
 	CallUniversalProc(theirStdRRect, kStdRRectProcInfo, verb, rect, ovalWidth, ovalHeight);
 
 	GetPort(&port);
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -421,7 +370,7 @@ static void myStdOval(GrafVerb verb, const Rect *rect) {
 	CallUniversalProc(theirStdOval, kStdOvalProcInfo, verb, rect);
 
 	GetPort(&port);
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -441,7 +390,7 @@ static void myStdArc(GrafVerb verb, const Rect *rect, short startAngle, short ar
 	CallUniversalProc(theirStdArc, kStdArcProcInfo, verb, rect, startAngle, arcAngle);
 
 	GetPort(&port);
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = rect->top;
 	l = rect->left;
@@ -462,7 +411,7 @@ static void myStdPoly(GrafVerb verb, PolyHandle poly) {
 	CallUniversalProc(theirStdPoly, kStdPolyProcInfo, verb, poly);
 
 	GetPort(&port);
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	rect = &(**poly).polyBBox;
 	t = rect->top;
@@ -484,7 +433,7 @@ static void myStdRgn(GrafVerb verb, RgnHandle rgn) {
 	CallUniversalProc(theirStdRgn, kStdRgnProcInfo, verb, rgn);
 
 	GetPort(&port);
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	rect = &(**rgn).rgnBBox;
 	t = rect->top;
@@ -505,7 +454,7 @@ static void myStdBits(const BitMap *srcBits, const Rect *srcRect, const Rect *ds
 	CallUniversalProc(theirStdBits, kStdBitsProcInfo, srcBits, srcRect, dstRect, mode, maskRgn);
 
 	GetPort(&port);
-	if (port == deferringPort || port->picSave || !ISSCREEN(&port->portBits)) return;
+	if (port->picSave || !ISSCREEN(&port->portBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
@@ -524,7 +473,7 @@ static void myCopyBits(const BitMap *srcBits, const BitMap *dstBits, const Rect 
 
 	CallUniversalProc(theirCopyBits, kCopyBitsProcInfo, srcBits, dstBits, srcRect, dstRect, mode, maskRgn);
 
-	if (dstBits == &deferringPort->portBits || !ISSCREEN(dstBits)) return;
+	if (!ISSCREEN(dstBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
@@ -547,7 +496,7 @@ static void myCopyMask(const BitMap *srcBits, const BitMap *maskBits, const BitM
 
 	CallUniversalProc(theirCopyMask, kCopyMaskProcInfo, srcBits, maskBits, dstBits, srcRect, maskRect, dstRect);
 
-	if (dstBits == &deferringPort->portBits || !ISSCREEN(dstBits)) return;
+	if (!ISSCREEN(dstBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
@@ -570,7 +519,7 @@ static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const 
 
 	CallUniversalProc(theirCopyDeepMask, kCopyDeepMaskProcInfo, srcBits, maskBits, dstBits, srcRect, maskRect, dstRect, mode, maskRgn);
 
-	if (dstBits == &deferringPort->portBits || !ISSCREEN(dstBits)) return;
+	if (!ISSCREEN(dstBits)) return;
 
 	t = dstRect->top;
 	l = dstRect->left;
