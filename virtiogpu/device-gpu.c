@@ -46,35 +46,6 @@ enum {
 	kDepthModeMax = kDepthMode6
 };
 
-static uint32_t screen_resource = 100;
-
-// Allocate one 4096-byte page for all our virtio buffers
-// 16 is the maximum number of 192-byte chunks fitting in a page
-static void *lpage;
-static uint32_t ppage;
-static int maxinflight = 16;
-static uint16_t freebufs;
-
-// Allocate two large framebuffers
-static void *backbuf, *frontbuf;
-static uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
-static short W, H, rowbytes;
-static int mode;
-static ColorSpec publicCLUT[256];
-static uint32_t privateCLUT[256];
-
-// init routine polls this after sending a buffer
-static volatile void *last_tag;
-
-// Fake vertical blanking interrupts
-static InterruptServiceIDType vblservice;
-static AbsoluteTime vbltime;
-static TimerID vbltimer;
-static bool vblon = true;
-static bool qdworks;
-
-static bool new_config;
-
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
 static OSStatus initialize(DriverInitInfo *info);
@@ -119,6 +90,34 @@ static OSStatus SetMode(VDPageInfo *rec);
 static OSStatus SwitchMode(VDSwitchInfoRec *rec);
 static OSStatus GetNextResolution(VDResolutionInfoRec *rec);
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec);
+
+// Allocate one 4096-byte page for all our virtio buffers
+// 16 is the maximum number of 192-byte chunks fitting in a page
+static void *lpage;
+static uint32_t ppage;
+static int maxinflight = 16;
+static uint16_t freebufs;
+static uint32_t screen_resource = 100;
+
+// Allocate two large framebuffers
+static void *backbuf, *frontbuf;
+static uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
+static short W, H, rowbytes;
+static int mode;
+static ColorSpec publicCLUT[256];
+static uint32_t privateCLUT[256];
+
+// init routine polls this after sending a buffer
+static volatile void *last_tag;
+
+// Fake vertical blanking interrupts
+static InterruptServiceIDType vblservice;
+static AbsoluteTime vbltime;
+static TimerID vbltimer;
+static bool vblon = true;
+static bool qdworks;
+
+static bool new_config;
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
