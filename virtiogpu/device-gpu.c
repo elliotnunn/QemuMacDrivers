@@ -465,6 +465,7 @@ fail:
 }
 
 // Must be called atomically
+// Returns true if screen dimensions changed
 static bool setScanout(void) {
 	void *obuf, *ibuf;
 	uint32_t physical_bufs[2];
