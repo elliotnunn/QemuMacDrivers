@@ -17,7 +17,6 @@
 #include "gammatables.h"
 #include "lateboothook.h"
 #include "lprintf.h"
-#include "systaskhook.h"
 #include "transport.h"
 #include "virtio-gpu-structs.h"
 #include "virtqueue.h"
@@ -50,7 +49,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
 static OSStatus initialize(DriverInitInfo *info);
 static bool setScanout(void);
-static void sysTaskAtomic(void);
+static void notificationProc(NMRecPtr nmReqPtr);
+static void notificationAtomic(void *nmReqPtr);
 static void updateScreen(short top, short left, short bottom, short right);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
 static OSStatus VBL(void *p1, void *p2);
@@ -117,7 +117,7 @@ static TimerID vbltimer;
 static bool vblon = true;
 static bool qdworks;
 
-static bool new_config;
+static bool pending_change;
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -636,14 +636,49 @@ static bool setScanout(void) {
 	return true;
 }
 
-// Raise a flag for next accRun (or equivalent)
 void DConfigChange(void) {
+	// Post a notification to get some system task time
+	if (!pending_change) {
+		static RoutineDescriptor descriptor = BUILD_ROUTINE_DESCRIPTOR(
+			kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
+			notificationProc);
+
+		static NMRec rec = {
+			NULL, // qLink
+			8, // qType
+			0, 0, 0, // reserved fields
+			0, NULL, NULL, NULL, // nmMark, nmIcon, nmSound, nmStr
+			&descriptor
+		};
+
+		NMInstall(&rec);
+		pending_change = true;
+	}
+}
+
+// Got some system task time to access the Toolbox safely
+// TN1033 suggests using the Notification Manager
+static void notificationProc(NMRecPtr nmReqPtr) {
+	Atomic1(notificationAtomic, nmReqPtr);
+}
+
+// Now, in addition to the Toolbox being safe, interrupts are (mostly) disabled
+static void notificationAtomic(void *nmReqPtr) {
 	struct virtio_gpu_config *config = VConfig;
+	unsigned long depthMode = mode;
+
+	NMRemove(nmReqPtr);
+	pending_change = false;
 
 	if (GETLE32(&config->le32_events_read) & VIRTIO_GPU_EVENT_DISPLAY) {
 		SETLE32(&config->le32_events_clear, VIRTIO_GPU_EVENT_DISPLAY);
 		SynchronizeIO();
-		new_config = true;
+
+		// Kick the Display Manager
+		if (setScanout()) {
+			DMSetDisplayMode(DMGetFirstScreenDevice(true), 1, &depthMode, NULL, NULL);
+			updateScreen(0, 0, H, W);
+		}
 	}
 }
 
@@ -663,24 +698,7 @@ void DebugPollCallback(void) {
 void LateBootHook(void) {
 	updateScreen(0, 0, H, W);
 	InstallDirtyRectPatch();
-	InstallSysTaskHook();
-}
-
-void SysTaskHook(void) {
-	// Also check that CurApName is a real string, in case of a too-early call
-	if (new_config && *(signed char *)0x910 >= 0) {
-		new_config = false;
-		Atomic(sysTaskAtomic);
-	}
-}
-
-static void sysTaskAtomic(void) {
-	unsigned long depthMode = mode;
-
-	if (setScanout()) {
-		// Kick the display manager
-		DMSetDisplayMode(DMGetFirstScreenDevice(true), 1, &depthMode, NULL, NULL);
-	}
+	DConfigChange();
 }
 
 void DirtyRectCallback(short top, short left, short bottom, short right) {
