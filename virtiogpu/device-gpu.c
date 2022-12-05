@@ -607,6 +607,10 @@ void DebugPollCallback(void) {
 void LateBootHook(void) {
 	updateScreen(0, 0, H, W);
 	InstallDirtyRectPatch();
+	InstallSysTaskHook();
+}
+
+void SysTaskHook(void) {
 }
 
 void DirtyRectCallback(short top, short left, short bottom, short right) {

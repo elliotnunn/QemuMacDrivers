@@ -11,6 +11,7 @@ PPCCOptions = {COptions}
                          gammatables.c.x ∂
                          lateboothook.c.x ∂
                          lprintf.s.x ∂
+                         systaskhook.c.x ∂
                          transport-ppc.c.x ∂
                          virtqueue.c.x ∂
                          wait.s.x ∂
