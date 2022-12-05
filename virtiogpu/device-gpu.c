@@ -637,6 +637,7 @@ static bool setScanout(void) {
 	return true;
 }
 
+// Raise a flag for next accRun (or equivalent)
 void DConfigChange(void) {
 	struct virtio_gpu_config *config = VConfig;
 
