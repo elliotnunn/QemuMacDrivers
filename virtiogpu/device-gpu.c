@@ -103,7 +103,7 @@ static uint32_t screen_resource = 100;
 static void *backbuf, *frontbuf;
 static uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
 static short W, H, rowbytes;
-static int mode;
+static int depth;
 static ColorSpec publicCLUT[256];
 static uint32_t privateCLUT[256];
 
@@ -642,7 +642,7 @@ static void notificationProc(NMRecPtr nmReqPtr) {
 // Now, in addition to the Toolbox being safe, interrupts are (mostly) disabled
 static void notificationAtomic(void *nmReqPtr) {
 	struct virtio_gpu_config *config = VConfig;
-	unsigned long depthMode = mode;
+	unsigned long newdepth = depth;
 
 	NMRemove(nmReqPtr);
 	pending_change = false;
@@ -653,7 +653,7 @@ static void notificationAtomic(void *nmReqPtr) {
 
 		// Kick the Display Manager
 		if (setScanout()) {
-			DMSetDisplayMode(DMGetFirstScreenDevice(true), 1, &depthMode, NULL, NULL);
+			DMSetDisplayMode(DMGetFirstScreenDevice(true), 1, &newdepth, NULL, NULL);
 			updateScreen(0, 0, H, W);
 		}
 	}
@@ -697,7 +697,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 	logTime('Blit', 0);
 
 	// These blitters are not satisfactory
-	if (mode == k1bit) {
+	if (depth == k1bit) {
 		uint32_t c0 = privateCLUT[0], c1 = privateCLUT[1];
 		int leftBytes = (left / 8) & ~3;
 		int rightBytes = ((right + 31) / 8) & ~3;
@@ -740,7 +740,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 				*dest++ = (s & 0x00000001) ? c1 : c0;
 			}
 		}
-	} else if (mode == k2bit) {
+	} else if (depth == k2bit) {
 		int leftBytes = (left / 4) & ~3;
 		int rightBytes = ((right + 15) / 4) & ~3;
 		for (y=top; y<bottom; y++) {
@@ -766,7 +766,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 				*dest++ = privateCLUT[(s >> 0) & 3];
 			}
 		}
-	} else if (mode == k4bit) {
+	} else if (depth == k4bit) {
 		int leftBytes = (left / 2) & ~3;
 		int rightBytes = ((right + 7) / 2) & ~3;
 		for (y=top; y<bottom; y++) {
@@ -784,7 +784,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 				*dest++ = privateCLUT[(s >> 0) & 15];
 			}
 		}
-	} else if (mode == k8bit) {
+	} else if (depth == k8bit) {
 		for (y=top; y<bottom; y++) {
 			uint8_t *src = (void *)((char *)backbuf + y * rowbytes + left);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
@@ -792,7 +792,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 				*dest++ = privateCLUT[*src++];
 			}
 		}
-	} else if (mode == k16bit) {
+	} else if (depth == k16bit) {
 		for (y=top; y<bottom; y++) {
 			uint16_t *src = (void *)((char *)backbuf + y * rowbytes + left * 2);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
@@ -804,7 +804,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 					((uint32_t)gammaRed[((s & 0x7c00) >> 10 << 3) | ((s & 0x7c00) >> 10 << 3 >> 5)] << 8);
 			}
 		}
-	} else if (mode == k32bit) {
+	} else if (depth == k32bit) {
 		for (y=top; y<bottom; y++) {
 			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + left * 4);
 			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
@@ -1005,9 +1005,9 @@ static OSStatus status(short csCode, void *param) {
 }
 
 // Should also call this if the resolution is changed
-static void setDepth(int relativeDepth) {
-	mode = relativeDepth;
-	rowbytes = rowbytesFor(mode, W);
+static void setDepth(int newdepth) {
+	depth = newdepth;
+	rowbytes = rowbytesFor(depth, W);
 }
 
 static long rowbytesFor(int relativeDepth, long width) {
@@ -1060,7 +1060,7 @@ static OSStatus GetBaseAddr(VDPageInfo *rec) {
 // --> csStart     First entry in table
 // --> csCount     Number of entries to set
 static OSStatus MySetEntries(VDSetEntryRecord *rec) {
-	if (mode > k8bit) return controlErr;
+	if (depth > k8bit) return controlErr;
 	return DirectSetEntries(rec);
 }
 
@@ -1167,7 +1167,7 @@ static OSStatus SetGamma(VDGammaRecord *rec) {
 
 	// SetGamma guaranteed to be followed by SetEntries, which will updateScreen;
 	// but this can't apply to direct modes
-	if (mode >= k16bit) updateScreen(0, 0, H, W);
+	if (depth >= k16bit) updateScreen(0, 0, H, W);
 
 	return noErr;
 }
@@ -1260,16 +1260,16 @@ static OSStatus GrayPage(VDPageInfo *rec) {
 
 	if (rec->csPage != 0) return controlErr;
 
-	if (mode <= k16bit) {
-		if (mode == k1bit) {
+	if (depth <= k16bit) {
+		if (depth == k1bit) {
 			value = 0x55555555;
-		} else if (mode == k2bit) {
+		} else if (depth == k2bit) {
 			value = 0x33333333;
-		} else if (mode == k4bit) {
+		} else if (depth == k4bit) {
 			value = 0x0f0f0f0f;
-		} else if (mode == k8bit) {
+		} else if (depth == k8bit) {
 			value = 0x00ff00ff;
-		} else if (mode == k16bit) {
+		} else if (depth == k16bit) {
 			value = 0x0000ffff;
 		}
 
@@ -1279,7 +1279,7 @@ static OSStatus GrayPage(VDPageInfo *rec) {
 			}
 			value = ~value;
 		}
-	} else if (mode == k32bit) {
+	} else if (depth == k32bit) {
 		value = 0x00000000;
 		for (y=0; y<H; y++) {
 			for (x=0; x<rowbytes; x+=8) {
@@ -1401,7 +1401,7 @@ static OSStatus GetConnection(VDDisplayConnectInfoRec *rec) {
 // <-- csBaseAddr  Base address of video RAM for the current
 //                 DisplayModeID and relative bit depth
 static OSStatus GetMode(VDPageInfo *rec) {
-	rec->csMode = mode;
+	rec->csMode = depth;
 	rec->csPage = 0;
 	rec->csBaseAddr = backbuf;
 	return noErr;
@@ -1415,7 +1415,7 @@ static OSStatus GetMode(VDPageInfo *rec) {
 // <-- csPage      Current page
 // <-- csBaseAddr  Base address of current page
 static OSStatus GetCurMode(VDSwitchInfoRec *rec) {
-	rec->csMode = mode;
+	rec->csMode = depth;
 	rec->csData = 1;
 	rec->csPage = 0;
 	rec->csBaseAddr = backbuf;
