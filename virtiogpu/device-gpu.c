@@ -97,18 +97,20 @@ static void *lpage;
 static uint32_t ppage;
 static int maxinflight = 16;
 static uint16_t freebufs;
-static uint32_t screen_resource = 100;
 
 // Allocate two large framebuffers
 static void *backbuf, *frontbuf;
 static uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
+static uint32_t screen_resource = 100;
+
+// init routine polls this after sending a buffer
+static volatile void *last_tag;
+
+// Current dimensions, depth and color settings
 static short W, H, rowbytes;
 static int depth;
 static ColorSpec publicCLUT[256];
 static uint32_t privateCLUT[256];
-
-// init routine polls this after sending a buffer
-static volatile void *last_tag;
 
 // Fake vertical blanking interrupts
 static InterruptServiceIDType vblservice;
