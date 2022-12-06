@@ -398,29 +398,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	setDepth(k32bit);
 	memcpy(publicGamma, &builtinGamma[0].table, sizeof(builtinGamma[0].table));
 
-	// Is it really necessary for us to fill the table?
-	{
-		int i;
-		for (i=0; i<256; i++) {
-			publicCLUT[i].value = i;
-			if (i == 0) {
-				publicCLUT[i].rgb.red = 0xffff;
-				publicCLUT[i].rgb.green = 0xffff;
-				publicCLUT[i].rgb.blue = 0xffff;
-			} else if (i == 1) {
-				publicCLUT[i].rgb.red = 0;
-				publicCLUT[i].rgb.green = 0;
-				publicCLUT[i].rgb.blue = 0;
-			} else {
-				publicCLUT[i].rgb.red = (uint16_t)i << 12;
-				publicCLUT[i].rgb.green = (uint16_t)i << 12;
-				publicCLUT[i].rgb.blue = (uint16_t)i << 12;
-			}
-
-			reCLUT(i);
-		}
-	}
-
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &vblservice);
 	vbltime = AddDurationToAbsolute(FAST_REFRESH, UpTime());
 	SetInterruptTimer(&vbltime, VBL, NULL, &vbltimer);
