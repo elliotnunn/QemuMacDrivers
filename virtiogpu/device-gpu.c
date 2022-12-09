@@ -49,6 +49,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
 static OSStatus initialize(DriverInitInfo *info);
 static void transact(void *req, size_t req_size, void *reply, size_t reply_size);
+static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]);
 static bool setScanout(void);
 static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
@@ -461,28 +462,33 @@ static void transact(void *req, size_t req_size, void *reply, size_t reply_size)
 	memcpy(reply, (char *)lpage + 2048, reply_size);
 }
 
+static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]) {
+	struct virtio_gpu_ctrl_hdr request = {
+		LE32(VIRTIO_GPU_CMD_GET_DISPLAY_INFO),
+		LE32(VIRTIO_GPU_FLAG_FENCE)};
+	struct virtio_gpu_resp_display_info reply = {0};
+
+	transact(&request, sizeof(request), &reply, sizeof(reply));
+	memcpy(pmodes, reply.pmodes, sizeof(reply.pmodes));
+}
+
 // Must be called atomically
 // Returns true if screen dimensions changed
 static bool setScanout(void) {
 	static bool old_resource_exists;
 	uint32_t old_screen_resource = screen_resource;
-	uint32_t new_screen_resource = screen_resource ^ ~1;
+	uint32_t new_screen_resource = screen_resource ^ 1;
 
 	// Get a list of displays ("scanouts") and their sizes
 	// (for now, only the first display)
 	{
-		struct virtio_gpu_ctrl_hdr request;
-		struct virtio_gpu_resp_display_info reply;
+		struct virtio_gpu_display_one pmodes[16];
 		short width, height;
 
-		SETLE32(&request.le32_type, VIRTIO_GPU_CMD_GET_DISPLAY_INFO);
-		SETLE32(&request.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		getSuggestedSizes(pmodes);
 
-		transact(&request, sizeof(request), &reply, sizeof(reply));
-
-		if (GETLE32(&reply.hdr.le32_type) != VIRTIO_GPU_RESP_OK_DISPLAY_INFO) return false;
-		width = GETLE32(&reply.pmodes[0].r.le32_width);
-		height = GETLE32(&reply.pmodes[0].r.le32_height);
+		width = GETLE32(&pmodes[0].r.le32_width);
+		height = GETLE32(&pmodes[0].r.le32_height);
 		if (width == W && height == H) return true;
 		W = width;
 		H = height;
@@ -491,8 +497,8 @@ static bool setScanout(void) {
 	}
 
 	if (old_resource_exists) {
-		struct virtio_gpu_resource_detach_backing request;
-		struct virtio_gpu_ctrl_hdr reply;
+		struct virtio_gpu_resource_detach_backing request = {0};
+		struct virtio_gpu_ctrl_hdr reply = {0};
 
 		SETLE32(&request.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING);
 		SETLE32(&request.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
@@ -505,8 +511,8 @@ static bool setScanout(void) {
 
 	// Create a host resource using VIRTIO_GPU_CMD_RESOURCE_CREATE_2D.
 	{
-		struct virtio_gpu_resource_create_2d request;
-		struct virtio_gpu_ctrl_hdr reply;
+		struct virtio_gpu_resource_create_2d request = {0};
+		struct virtio_gpu_ctrl_hdr reply = {0};
 
 		SETLE32(&request.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
 		SETLE32(&request.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
@@ -523,8 +529,8 @@ static bool setScanout(void) {
 	// Attach guest allocated backing memory to the resource just created.
 	// Maximum 254 entries in the gather list, which should be plenty.
 	{
-		struct virtio_gpu_resource_attach_backing request;
-		struct virtio_gpu_ctrl_hdr reply;
+		struct virtio_gpu_resource_attach_backing request = {0};
+		struct virtio_gpu_ctrl_hdr reply = {0};
 
 		uint32_t extent_base=0, extent_len=0;
 		int extent=-1, i;
