@@ -3,6 +3,7 @@
 #include <Displays.h>
 #include <DriverServices.h>
 #include <fp.h>
+#include <Gestalt.h>
 #include <LowMem.h>
 #include <NameRegistry.h>
 #include <string.h>
@@ -30,7 +31,8 @@
 
 enum {
 	TRACECALLS = 0,
-	MAXEDGE = 4096,
+	MAXBUF = 64*1024*1024, // enough for 4096x4096
+	MINBUF = 4*1024*1024, // enough for 1024*1024
 	FAST_REFRESH = -16626, // before QD callbacks work, microsec, 60.15 Hz
 	SLOW_REFRESH = 1000, // after QD callbacks work, millisec, 1 Hz
 };
@@ -102,7 +104,8 @@ static uint16_t freebufs;
 
 // Allocate two large framebuffers
 static void *backbuf, *frontbuf;
-static uint32_t fbpages[MAXEDGE*MAXEDGE*4/4096];
+static size_t bufsize;
+static uint32_t fbpages[MAXBUF/4096];
 static uint32_t screen_resource = 100;
 
 // init routine polls this after sending a buffer
@@ -374,27 +377,39 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-	lpage = AllocPages(1, &ppage);
-	if (lpage == NULL) goto fail;
+	long ram = 0;
 
 	if (!VInit(&info->deviceEntry)) goto fail;
-
 	if (!VFeaturesOK()) goto fail;
 
-	maxinflight = QInit(0, 4*maxinflight) / 4;
+	maxinflight = QInit(0, 4*maxinflight /*n(descriptors)*/) / 4;
 	if (maxinflight < 1) goto fail;
 
 	freebufs = (1 << maxinflight) - 1;
 
-	// Allocate our two enormous framebuffers
-	// TODO: limit the framebuffers to a percentage of total RAM
-	backbuf = PoolAllocateResident(MAXEDGE*MAXEDGE*4, true);
-	if (backbuf == NULL) goto fail;
+	lpage = AllocPages(1, &ppage);
+	if (lpage == NULL) goto fail;
 
-	// Need the physical page addresses of the front buffer
-	frontbuf = AllocPages(MAXEDGE*MAXEDGE*4/4096, fbpages);
-	if (frontbuf == NULL) goto fail;
+	// Use no more than a quarter of RAM (but allow for a few KB short of a MB)
+	bufsize = MAXBUF;
+	Gestalt('ram ', &ram);
+	while (ram != 0 && bufsize > (ram+0x10000)/8) bufsize /= 2;
 
+	// Allocate the largest two framebuffers possible
+	for (;;) {
+		backbuf = PoolAllocateResident(bufsize, true);
+		frontbuf = AllocPages(bufsize/4096, fbpages);
+
+		if (backbuf != NULL && frontbuf != NULL) break;
+
+		if (backbuf == NULL) PoolDeallocate(backbuf);
+		if (frontbuf == NULL) FreePages(frontbuf);
+
+		bufsize /= 2;
+		if (bufsize < MINBUF) goto fail;
+	}
+
+	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
 	if (!setScanout()) goto fail;
@@ -439,6 +454,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	return noErr;
 
 fail:
+	if (lpage) FreePages(lpage);
 	VFail();
 	return paramErr;
 }
@@ -490,10 +506,14 @@ static bool setScanout(void) {
 		width = GETLE32(&pmodes[0].r.le32_width);
 		height = GETLE32(&pmodes[0].r.le32_height);
 		if (width == W && height == H) return true;
+		while (rowbytesFor(k32bit, width) * height > bufsize) {
+			if (width > height)
+				width -= 32;
+			else
+				height -= 32;
+		}
 		W = width;
 		H = height;
-		if (W > MAXEDGE) W = MAXEDGE;
-		if (H > MAXEDGE) H = MAXEDGE;
 	}
 
 	if (old_resource_exists) {
@@ -536,7 +556,9 @@ static bool setScanout(void) {
 		int extent=-1, i;
 
 		for (i=0; i<sizeof(fbpages)/sizeof(*fbpages); i++) {
-			if (fbpages[i] != extent_base + extent_len) {
+			if (fbpages[i] == 0) {
+				break;
+			} else if (fbpages[i] != extent_base + extent_len) {
 				// New extent
 				extent++;
 				if (extent > sizeof(request.entries)/sizeof(*request.entries)) return false;
