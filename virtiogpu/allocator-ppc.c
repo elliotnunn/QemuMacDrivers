@@ -1,7 +1,6 @@
 /*
 Bugs:
 - Memory not cache-inhibited. We assume it is coherent.
-- Can't free allocations: doesn't matter if device is not hot-swappable.
 */
 
 #include <DriverServices.h>
@@ -10,35 +9,50 @@ Bugs:
 #include "allocator.h"
 
 void *AllocPages(size_t count, uint32_t *physicalPageAddresses) {
+	struct IOPreparationTable *prep;
 	char *unaligned, *aligned;
 	OSStatus err;
 
-	struct IOPreparationTable prep = {0};
-
-	unaligned = PoolAllocateResident((count + 1) * 0x1000, true);
+	unaligned = PoolAllocateResident(count*0x1000 + 0x2000, true);
 	if (unaligned == NULL) return NULL;
 
-	aligned = (char *)(((unsigned long)unaligned + 0xfff) & ~0xfff);
+	// This address is page aligned and has a guaranteed page below
+	aligned = (char *)(((unsigned long)unaligned + 0x2000) & ~0xfff);
 
-	prep.options = kIOLogicalRanges;
-	prep.state = 0;
-	prep.preparationID = 0;
-	prep.addressSpace = kCurrentAddressSpaceID;
-	prep.granularity = 0x1000 * count; // partial preparation unacceptable
-	prep.firstPrepared = 0;
-	prep.lengthPrepared = 0;
-	prep.mappingEntryCount = count;
-	prep.logicalMapping = NULL;
-	prep.physicalMapping = (void *)physicalPageAddresses;
-	prep.rangeInfo.range.base = aligned;
-	prep.rangeInfo.range.length = 0x1000 * count;
+	// Place structures at known offsets below the returned pointer,
+	// for cleanup by FreePages
+	*(void **)(aligned - 0xf00) = unaligned;
+	prep = (void *)(aligned - 0x1000);
 
-	err = PrepareMemoryForIO(&prep);
+	prep->options = kIOLogicalRanges;
+	prep->state = 0;
+	prep->preparationID = 0;
+	prep->addressSpace = kCurrentAddressSpaceID;
+	prep->granularity = 0x1000 * count; // partial preparation unacceptable
+	prep->firstPrepared = 0;
+	prep->lengthPrepared = 0;
+	prep->mappingEntryCount = count;
+	prep->logicalMapping = NULL;
+	prep->physicalMapping = (void *)physicalPageAddresses;
+	prep->rangeInfo.range.base = aligned;
+	prep->rangeInfo.range.length = 0x1000 * count;
 
-	if (prep.state != kIOStateDone) {
+	err = PrepareMemoryForIO(prep);
+	if (err) {
+		PoolDeallocate(unaligned);
+		return NULL;
+	} else if ((prep->state & kIOStateDone) == 0) {
+		CheckpointIO(prep->preparationID, 0);
 		PoolDeallocate(unaligned);
 		return NULL;
 	}
 
 	return aligned;
+}
+
+void FreePages(void *addr) {
+	struct IOPreparationTable *prep = (void *)((char *)addr - 0x1000);
+	void *unaligned = *(void **)((char *)addr - 0xf00);
+	CheckpointIO(prep->preparationID, 0);
+	PoolDeallocate(unaligned);
 }
