@@ -52,7 +52,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 static OSStatus initialize(DriverInitInfo *info);
 static void transact(void *req, size_t req_size, void *reply, size_t reply_size);
 static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]);
-static bool setScanout(void);
+static void getBestSize(short *width, short *height);
+static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list);
 static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
 static void updateScreen(short top, short left, short bottom, short right);
@@ -378,6 +379,10 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 
 static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
+	struct virtio_gpu_display_one pmodes[16];
+
+	lpage = AllocPages(1, &ppage);
+	if (lpage == NULL) goto fail;
 
 	if (!VInit(&info->deviceEntry)) goto fail;
 	if (!VFeaturesOK()) goto fail;
@@ -412,7 +417,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	if (!setScanout()) goto fail;
+	getBestSize(&W, &H);
+	screen_resource = setScanout(0 /*scanout id*/, W, H, fbpages);
+	if (!screen_resource) goto fail;
 
 	setDepth(k32bit);
 	memcpy(publicGamma, &builtinGamma[0].table, sizeof(builtinGamma[0].table));
@@ -488,138 +495,145 @@ static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]) {
 	memcpy(pmodes, reply.pmodes, sizeof(reply.pmodes));
 }
 
-// Must be called atomically
-// Returns true if screen dimensions changed
-static bool setScanout(void) {
-	static bool old_resource_exists;
-	uint32_t old_screen_resource = screen_resource;
-	uint32_t new_screen_resource = screen_resource ^ 1;
+static void getBestSize(short *width, short *height) {
+	long w, h;
+	int i;
+	struct virtio_gpu_display_one pmodes[16];
 
-	// Get a list of displays ("scanouts") and their sizes
-	// (for now, only the first display)
-	{
-		struct virtio_gpu_display_one pmodes[16];
-		short width, height;
+	getSuggestedSizes(pmodes);
 
-		getSuggestedSizes(pmodes);
-
-		width = GETLE32(&pmodes[0].r.le32_width);
-		height = GETLE32(&pmodes[0].r.le32_height);
-		if (width == W && height == H) return true;
-		while (rowbytesFor(k32bit, width) * height > bufsize) {
-			if (width > height)
-				width -= 32;
-			else
-				height -= 32;
-		}
-		W = width;
-		H = height;
+	for (i=0; i<16; i++) {
+		if (GETLE32(&pmodes[i].le32_enabled)) break;
 	}
 
-	if (old_resource_exists) {
-		struct virtio_gpu_resource_detach_backing request = {0};
-		struct virtio_gpu_ctrl_hdr reply = {0};
+	if (i == 16) {
+		*width = 800;
+		*height = 600;
+		return;
+	}
 
-		SETLE32(&request.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING);
-		SETLE32(&request.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(&request.le32_resource_id, old_screen_resource);
+	w = GETLE32(&pmodes[i].r.le32_width);
+	h = GETLE32(&pmodes[i].r.le32_height);
 
-		transact(&request, sizeof(request), &reply, sizeof(reply));
+	// Not enough RAM allocated? Try for smaller
+	if (h * rowbytesFor(k32bit, w) > bufsize) {
+		// Cancel aspect ratio down to its simplest form
+		long wr=w, hr=h;
+		for (i=2; i<wr && i<hr; i++) {
+			while (wr%i == 0 && hr%i == 0) {
+				wr /= i;
+				hr /= i;
+			}
+		}
 
-		if (GETLE32(&reply.le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return false;
+		do {
+			if (wr<=256 && hr<=256) {
+				// Match aspect ratio precisely
+				w -= wr;
+				h -= hr;
+			} else if (w > h) {
+				// Approximate smaller widescreen
+				h -= 1;
+				w = (h*wr + hr/2) / hr; // round to nearest integer
+			} else {
+				// Approximate smaller tallscreen
+				w -= 1;
+				h = (w*hr + wr/2) / wr;
+			}
+		} while (h * rowbytesFor(k32bit, w) > bufsize);
+	}
+
+	*width = w;
+	*height = h;
+}
+
+// Must be called atomically
+// Returns the resource ID, or zero if you prefer
+static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list) {
+	struct virtio_gpu_resource_detach_backing detach_backing = {0};
+	struct virtio_gpu_resource_create_2d create_2d = {0};
+	struct virtio_gpu_resource_attach_backing attach_backing = {0};
+	struct virtio_gpu_set_scanout set_scanout = {0};
+	struct virtio_gpu_resource_unref resource_unref = {0};
+	struct virtio_gpu_ctrl_hdr reply;
+
+	static uint32_t res_ids[16];
+	uint32_t old_resource = res_ids[idx];
+	uint32_t new_resource = res_ids[idx] ? (res_ids[idx] ^ 1) : (100 + 2*idx);
+
+	// Divide page_list into contiguous segments, hopefully not too many
+	size_t pgcnt = ((size_t)w * h * 4 + 0xfff) / 0x1000;
+	int extents[126] = {0};
+	int extcnt = 0;
+	int i, j;
+
+	for (i=0; i<pgcnt; i++) {
+		if (i == 0 || page_list[i] != page_list[i-1]+0x1000) {
+			// page_list too fragmented so fail gracefully
+			if (extcnt == sizeof(extents)/sizeof(*extents)) return 0;
+
+			extcnt++;
+		}
+
+		extents[extcnt-1]++;
 	}
 
 	// Create a host resource using VIRTIO_GPU_CMD_RESOURCE_CREATE_2D.
-	{
-		struct virtio_gpu_resource_create_2d request = {0};
-		struct virtio_gpu_ctrl_hdr reply = {0};
+	SETLE32(&create_2d.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
+	SETLE32(&create_2d.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+	SETLE32(&create_2d.le32_resource_id, new_resource);
+	SETLE32(&create_2d.le32_format, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
+	SETLE32(&create_2d.le32_width, w);
+	SETLE32(&create_2d.le32_height, h);
 
-		SETLE32(&request.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
-		SETLE32(&request.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(&request.le32_resource_id, new_screen_resource);
-		SETLE32(&request.le32_format, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
-		SETLE32(&request.le32_width, W);
-		SETLE32(&request.le32_height, H);
+	transact(&create_2d, sizeof(create_2d), &reply, sizeof(reply));
 
-		transact(&request, sizeof(request), &reply, sizeof(reply));
+	// Gracefully handle host running out of room for the resource
+	if (GETLE32(&reply.le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return 0;
 
-		if (GETLE32(&reply.le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return false;
+	// Detach backing from the old resource, but don't delete it yet.
+	if (old_resource != 0) {
+		SETLE32(&detach_backing.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING);
+		SETLE32(&detach_backing.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&detach_backing.le32_resource_id, old_resource);
+
+		transact(&detach_backing, sizeof(detach_backing), &reply, sizeof(reply));
 	}
 
 	// Attach guest allocated backing memory to the resource just created.
-	// Maximum 254 entries in the gather list, which should be plenty.
-	{
-		struct virtio_gpu_resource_attach_backing request = {0};
-		struct virtio_gpu_ctrl_hdr reply = {0};
+	SETLE32(&attach_backing.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
+	SETLE32(&attach_backing.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+	SETLE32(&attach_backing.le32_resource_id, new_resource);
+	SETLE32(&attach_backing.le32_nr_entries, extcnt);
 
-		uint32_t extent_base=0, extent_len=0;
-		int extent=-1, i;
-
-		for (i=0; i<sizeof(fbpages)/sizeof(*fbpages); i++) {
-			if (fbpages[i] == 0) {
-				break;
-			} else if (fbpages[i] != extent_base + extent_len) {
-				// New extent
-				extent++;
-				if (extent > sizeof(request.entries)/sizeof(*request.entries)) return false;
-
-				SETLE32(&request.entries[extent].le32_addr, fbpages[i]);
-				extent_base = fbpages[i];
-				extent_len = 4096;
-			} else {
-				extent_len += 4096;
-			}
-
-			SETLE32(&request.entries[extent].le32_length, extent_len);
-		}
-
-		SETLE32(&request.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
-		SETLE32(&request.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(&request.le32_resource_id, new_screen_resource);
-		SETLE32(&request.le32_nr_entries, extent + 1);
-
-		transact(&request, sizeof(request), &reply, sizeof(reply));
-
-		if (GETLE32(&reply.le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return false;
+	for (i=j=0; i<extcnt; j+=extents[i++]) {
+		SETLE32(&attach_backing.entries[i].le32_addr, page_list[j]);
+		SETLE32(&attach_backing.entries[i].le32_length, extents[i] * 0x1000);
 	}
 
-	// Use VIRTIO_GPU_CMD_SET_SCANOUT to link the framebuffer to a display
-	// scanout.
-	{
-		struct virtio_gpu_set_scanout request;
-		struct virtio_gpu_ctrl_hdr reply;
+	transact(&attach_backing, sizeof(attach_backing), &reply, sizeof(reply));
 
-		SETLE32(&request.hdr.le32_type, VIRTIO_GPU_CMD_SET_SCANOUT);
-		SETLE32(&request.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(&request.r.le32_x, 0);
-		SETLE32(&request.r.le32_y, 0);
-		SETLE32(&request.r.le32_width, W);
-		SETLE32(&request.r.le32_height, H);
-		SETLE32(&request.le32_scanout_id, 0); // index, 0-15
-		SETLE32(&request.le32_resource_id, new_screen_resource);
+	// Use VIRTIO_GPU_CMD_SET_SCANOUT to link the framebuffer to a display scanout.
+	SETLE32(&set_scanout.hdr.le32_type, VIRTIO_GPU_CMD_SET_SCANOUT);
+	SETLE32(&set_scanout.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+	SETLE32(&set_scanout.r.le32_x, 0);
+	SETLE32(&set_scanout.r.le32_y, 0);
+	SETLE32(&set_scanout.r.le32_width, w);
+	SETLE32(&set_scanout.r.le32_height, h);
+	SETLE32(&set_scanout.le32_scanout_id, 0); // index, 0-15
+	SETLE32(&set_scanout.le32_resource_id, new_resource);
 
-		transact(&request, sizeof(request), &reply, sizeof(reply));
+	transact(&set_scanout, sizeof(set_scanout), &reply, sizeof(reply));
 
-		if (GETLE32(&reply.le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return false;
+	if (old_resource != 0) {
+		SETLE32(&resource_unref.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_UNREF);
+		SETLE32(&resource_unref.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
+		SETLE32(&resource_unref.le32_resource_id, old_resource);
+
+		transact(&resource_unref, sizeof(resource_unref), &reply, sizeof(reply));
 	}
 
-	if (old_resource_exists) {
-		struct virtio_gpu_resource_unref request;
-		struct virtio_gpu_ctrl_hdr reply;
-
-		SETLE32(&request.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_UNREF);
-		SETLE32(&request.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(&request.le32_resource_id, old_screen_resource);
-
-		transact(&request, sizeof(request), &reply, sizeof(reply));
-
-		if (GETLE32(&reply.le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return false;
-	}
-
-	old_resource_exists = true;
-	screen_resource = new_screen_resource;
-
-	return true;
+	return new_resource;
 }
 
 void DConfigChange(void) {
@@ -650,22 +664,22 @@ static void notificationProc(NMRecPtr nmReqPtr) {
 
 // Now, in addition to the Toolbox being safe, interrupts are (mostly) disabled
 static void notificationAtomic(void *nmReqPtr) {
-	struct virtio_gpu_config *config = VConfig;
-	unsigned long newdepth = depth;
-
-	NMRemove(nmReqPtr);
-	pending_change = false;
-
-	if (GETLE32(&config->le32_events_read) & VIRTIO_GPU_EVENT_DISPLAY) {
-		SETLE32(&config->le32_events_clear, VIRTIO_GPU_EVENT_DISPLAY);
-		SynchronizeIO();
-
-		// Kick the Display Manager
-		if (setScanout()) {
-			DMSetDisplayMode(DMGetFirstScreenDevice(true), 1, &newdepth, NULL, NULL);
-			updateScreen(0, 0, H, W);
-		}
-	}
+// 	struct virtio_gpu_config *config = VConfig;
+// 	unsigned long newdepth = depth;
+//
+// 	NMRemove(nmReqPtr);
+// 	pending_change = false;
+//
+// 	if (GETLE32(&config->le32_events_read) & VIRTIO_GPU_EVENT_DISPLAY) {
+// 		SETLE32(&config->le32_events_clear, VIRTIO_GPU_EVENT_DISPLAY);
+// 		SynchronizeIO();
+//
+// 		// Kick the Display Manager
+// 		if (setScanout()) {
+// 			DMSetDisplayMode(DMGetFirstScreenDevice(true), 1, &newdepth, NULL, NULL);
+// 			updateScreen(0, 0, H, W);
+// 		}
+// 	}
 }
 
 void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
