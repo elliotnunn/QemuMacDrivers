@@ -32,7 +32,7 @@
 enum {
 	TRACECALLS = 0,
 	MAXBUF = 64*1024*1024, // enough for 4096x4096
-	MINBUF = 4*1024*1024, // enough for 1024*1024
+	MINBUF = 2*1024*1024, // enough for 800x600
 	FAST_REFRESH = -16626, // before QD callbacks work, microsec, 60.15 Hz
 	SLOW_REFRESH = 1000, // after QD callbacks work, millisec, 1 Hz
 };
@@ -291,17 +291,18 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
 
-	lpage = AllocPages(1, &ppage);
-	if (lpage == NULL) goto fail;
+	// No need to signal FAILED if cannot communicate with device
+	if (!VInit(&info->deviceEntry)) return paramErr;
 
-	if (!VInit(&info->deviceEntry)) goto fail;
 	if (!VFeaturesOK()) goto fail;
 
+	// Can have (descriptor count)/4 updateScreens in flight at once
 	maxinflight = QInit(0, 4*maxinflight /*n(descriptors)*/) / 4;
 	if (maxinflight < 1) goto fail;
 
 	freebufs = (1 << maxinflight) - 1;
 
+	// All our descriptors point into this wired-down page
 	lpage = AllocPages(1, &ppage);
 	if (lpage == NULL) goto fail;
 
@@ -317,8 +318,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 		if (backbuf != NULL && frontbuf != NULL) break;
 
-		if (backbuf == NULL) PoolDeallocate(backbuf);
-		if (frontbuf == NULL) FreePages(frontbuf);
+		if (backbuf != NULL) PoolDeallocate(backbuf);
+		if (frontbuf != NULL) FreePages(frontbuf);
 
 		bufsize /= 2;
 		if (bufsize < MINBUF) goto fail;
@@ -327,18 +328,23 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
+	// Connect back buffer to front buffer
+	setDepth(k32bit);
+	setGammaTable((GammaTbl *)&builtinGamma[0].table);
+
+	// Connect front buffer to scanout
 	getBestSize(&W, &H);
 	screen_resource = setScanout(0 /*scanout id*/, W, H, fbpages);
 	if (!screen_resource) goto fail;
 
-	setDepth(k32bit);
-	setGammaTable((GammaTbl *)&builtinGamma[0].table);
-
+	// Initially VBL interrupts must be fast
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &vblservice);
 	vbltime = AddDurationToAbsolute(FAST_REFRESH, UpTime());
 	SetInterruptTimer(&vbltime, VBL, NULL, &vbltimer);
 
+	// Catch MacsBug redraws (when interrupts are disabled)
 	InstallDebugPollPatch();
+
 	InstallLateBootHook();
 
 	// Performance test: 1x1 at 94096 Hz
@@ -372,6 +378,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 fail:
 	if (lpage) FreePages(lpage);
+	if (backbuf) PoolDeallocate(backbuf);
+	if (frontbuf) FreePages(frontbuf);
 	VFail();
 	return paramErr;
 }
