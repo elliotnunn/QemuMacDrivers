@@ -99,8 +99,8 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec);
 static OSStatus GetNextResolution(VDResolutionInfoRec *rec);
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec);
 
-// Allocate one 4096-byte page for all our virtio buffers
-// 16 is the maximum number of 192-byte chunks fitting in a page
+// Allocate one 4096-byte page for all our screen-update buffers.
+// (16 is the maximum number of 192-byte chunks fitting in a page)
 static void *lpage;
 static uint32_t ppage;
 static int maxinflight = 16;
@@ -727,6 +727,10 @@ void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 }
 
 void DebugPollCallback(void) {
+	// If we enter the debugger with all descriptors in flight (rare),
+	// we will stall waiting for an interrupt to free up a descriptor.
+	while (freebufs == 0) QPoll(0);
+
 	updateScreen(0, 0, H, W);
 }
 
