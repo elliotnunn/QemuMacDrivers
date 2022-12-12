@@ -668,8 +668,6 @@ static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list) {
 }
 
 void DConfigChange(void) {
-	lprintf("DConfigChange\n");
-
 	// Post a notification to get some system task time
 	if (!pending_notification) {
 		static RoutineDescriptor descriptor = BUILD_ROUTINE_DESCRIPTOR(
