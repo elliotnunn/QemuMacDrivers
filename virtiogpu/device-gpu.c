@@ -53,6 +53,8 @@ static OSStatus initialize(DriverInitInfo *info);
 static void transact(void *req, size_t req_size, void *reply, size_t reply_size);
 static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]);
 static void getBestSize(short *width, short *height);
+static uint32_t idForRes(short width, short height, bool force);
+static uint32_t resCount(void);
 static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list);
 static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
@@ -62,7 +64,7 @@ static OSStatus VBL(void *p1, void *p2);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
-static void setDepth(int relativeDepth);
+static void setDepth(int newdepth);
 static long rowbytesFor(int relativeDepth, long width);
 static void reCLUT(int index);
 static OSStatus GetBaseAddr(VDPageInfo *rec);
@@ -76,6 +78,7 @@ static OSStatus GetGamma(VDGammaRecord *rec);
 static OSStatus GetGammaInfoList(VDGetGammaListRec *rec);
 static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec);
 static OSStatus GrayPage(VDPageInfo *rec);
+static void gray(void);
 static OSStatus SetGray(VDGrayRecord *rec);
 static OSStatus GetGray(VDGrayRecord *rec);
 static OSStatus GetPages(VDPageInfo *rec);
@@ -113,6 +116,14 @@ static uint32_t screen_resource = 100;
 static volatile void *last_tag;
 
 // Current dimensions, depth and color settings
+struct rez {short w; short h;};
+struct rez rezzes[] = {
+	{512, 342},
+	{640, 480},
+	{800, 600},
+	{1024, 768},
+	{0, 0},
+};
 static short W, H, rowbytes;
 static int depth;
 static ColorSpec publicCLUT[256];
@@ -125,7 +136,8 @@ static TimerID vbltimer;
 static bool vblon = true;
 static bool qdworks;
 
-static bool pending_change;
+static bool pending_notification; // deduplicate NMInstall
+static bool change_in_progress; // SetMode/SwitchMode lock out frame interrupts
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -379,7 +391,6 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 
 static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
-	struct virtio_gpu_display_one pmodes[16];
 
 	lpage = AllocPages(1, &ppage);
 	if (lpage == NULL) goto fail;
@@ -547,6 +558,25 @@ static void getBestSize(short *width, short *height) {
 	*height = h;
 }
 
+static uint32_t idForRes(short width, short height, bool force) {
+	int i;
+	for (i=0; i<sizeof(rezzes)/sizeof(*rezzes)-1; i++) {
+		if (rezzes[i].w == width && rezzes[i].h == height) break;
+	}
+	if (force) {
+		rezzes[i].w = width;
+		rezzes[i].h = height;
+	}
+	return i + 1;
+}
+
+static uint32_t resCount(void) {
+	uint32_t n;
+	n = sizeof(rezzes)/sizeof(*rezzes);
+	if (rezzes[n-1].w == 0) n--;
+	return n;
+}
+
 // Must be called atomically
 // Returns the resource ID, or zero if you prefer
 static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list) {
@@ -633,12 +663,15 @@ static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list) {
 		transact(&resource_unref, sizeof(resource_unref), &reply, sizeof(reply));
 	}
 
+	res_ids[idx] = new_resource;
 	return new_resource;
 }
 
 void DConfigChange(void) {
+	lprintf("DConfigChange\n");
+
 	// Post a notification to get some system task time
-	if (!pending_change) {
+	if (!pending_notification) {
 		static RoutineDescriptor descriptor = BUILD_ROUTINE_DESCRIPTOR(
 			kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
 			notificationProc);
@@ -652,7 +685,7 @@ void DConfigChange(void) {
 		};
 
 		NMInstall(&rec);
-		pending_change = true;
+		pending_notification = true;
 	}
 }
 
@@ -664,22 +697,24 @@ static void notificationProc(NMRecPtr nmReqPtr) {
 
 // Now, in addition to the Toolbox being safe, interrupts are (mostly) disabled
 static void notificationAtomic(void *nmReqPtr) {
-// 	struct virtio_gpu_config *config = VConfig;
-// 	unsigned long newdepth = depth;
-//
-// 	NMRemove(nmReqPtr);
-// 	pending_change = false;
-//
-// 	if (GETLE32(&config->le32_events_read) & VIRTIO_GPU_EVENT_DISPLAY) {
-// 		SETLE32(&config->le32_events_clear, VIRTIO_GPU_EVENT_DISPLAY);
-// 		SynchronizeIO();
-//
-// 		// Kick the Display Manager
-// 		if (setScanout()) {
-// 			DMSetDisplayMode(DMGetFirstScreenDevice(true), 1, &newdepth, NULL, NULL);
-// 			updateScreen(0, 0, H, W);
-// 		}
-// 	}
+	struct virtio_gpu_config *config = VConfig;
+	short width, height;
+	unsigned long newdepth = depth;
+
+	NMRemove(nmReqPtr);
+	pending_notification = false;
+
+	if ((config->le32_events_read & LE32(VIRTIO_GPU_EVENT_DISPLAY)) == 0) return;
+
+	config->le32_events_clear = LE32(VIRTIO_GPU_EVENT_DISPLAY);
+	SynchronizeIO();
+
+	getBestSize(&width, &height);
+	if (W == width && H == height) return;
+
+	// Kick the Display Manager
+	DMSetDisplayMode(DMGetFirstScreenDevice(true),
+		idForRes(width, height, true), &newdepth, NULL, NULL);
 }
 
 void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
@@ -696,8 +731,8 @@ void DebugPollCallback(void) {
 }
 
 void LateBootHook(void) {
-	updateScreen(0, 0, H, W);
 	InstallDirtyRectPatch();
+	updateScreen(0, 0, H, W);
 	DConfigChange();
 }
 
@@ -716,6 +751,8 @@ void DirtyRectCallback(short top, short left, short bottom, short right) {
 
 static void updateScreen(short top, short left, short bottom, short right) {
 	int x, y;
+
+	if (change_in_progress) return;
 
 	logTime('Blit', 0);
 
@@ -1237,7 +1274,7 @@ static OSStatus GetGamma(VDGammaRecord *rec) {
 // <-- csGammaTableSize        Size of the gamma table in bytes
 // <-- csGammaTableName        Gamma table name (C string)
 static OSStatus GetGammaInfoList(VDGetGammaListRec *rec) {
-	enum {first = 1};
+	enum {first = 128};
 	long last = first + builtinGammaCount - 1;
 
 	long id;
@@ -1281,7 +1318,7 @@ static OSStatus GetGammaInfoList(VDGetGammaListRec *rec) {
 // --> csGammaTableID      ID of gamma table to retrieve
 // <-> csGammaTablePtr     Location to copy table into
 static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec) {
-	enum {first = 1};
+	enum {first = 128};
 	long last = first + builtinGammaCount - 1;
 
 	long id = rec->csGammaTableID;
@@ -1304,10 +1341,15 @@ static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec) {
 // --> csPage      Desired display page to gray
 // --- csBaseAddr  Unused
 static OSStatus GrayPage(VDPageInfo *rec) {
+	if (rec->csPage != 0) return controlErr;
+	gray();
+	updateScreen(0, 0, H, W);
+	return noErr;
+}
+
+static void gray(void) {
 	short x, y;
 	uint32_t value;
-
-	if (rec->csPage != 0) return controlErr;
 
 	if (depth <= k16bit) {
 		if (depth == k1bit) {
@@ -1338,9 +1380,6 @@ static OSStatus GrayPage(VDPageInfo *rec) {
 			value = ~value;
 		}
 	}
-
-	updateScreen(0, 0, H, W);
-	return noErr;
 }
 
 // Specify whether subsequent SetEntries calls fill a card’s CLUT with
@@ -1438,7 +1477,7 @@ static OSStatus GetConnection(VDDisplayConnectInfoRec *rec) {
 	rec->csDisplayType = kGenericLCD;
 	rec->csConnectTaggedType = 0;
 	rec->csConnectTaggedData = 0;
-	rec->csConnectFlags = (1 << kTaggingInfoNonStandard) | (1 << kUncertainConnection);
+	rec->csConnectFlags = (1 << kTaggingInfoNonStandard);
 	rec->csDisplayComponent = 0;
 	return noErr;
 }
@@ -1465,7 +1504,7 @@ static OSStatus GetMode(VDPageInfo *rec) {
 // <-- csBaseAddr  Base address of current page
 static OSStatus GetCurMode(VDSwitchInfoRec *rec) {
 	rec->csMode = depth;
-	rec->csData = 1;
+	rec->csData = idForRes(W, H, false);
 	rec->csPage = 0;
 	rec->csBaseAddr = backbuf;
 	return noErr;
@@ -1477,7 +1516,15 @@ static OSStatus GetCurMode(VDSwitchInfoRec *rec) {
 // <-- csTimingData    Scan timing for desired DisplayModeID
 // <-- csTimingFlags   Report whether this scan timing is optional or required
 static OSStatus GetModeTiming(VDTimingInfoRec *rec) {
-	return statusErr;
+	if (rec->csTimingMode < 1 || rec->csTimingMode > resCount()) return paramErr;
+
+	rec->csTimingFormat = kDeclROMtables;
+	rec->csTimingData = timingApple_FixedRateLCD;
+	rec->csTimingFlags = (1 << kModeValid) | (1 << kModeSafe) | (1 << kModeShowNow);
+	if (rezzes[rec->csTimingMode-1].w == W && rezzes[rec->csTimingMode-1].h == H)
+		rec->csTimingFlags |= (1 << kModeDefault);
+
+	return noErr;
 }
 
 // Sets the pixel depth of the screen.
@@ -1488,6 +1535,7 @@ static OSStatus GetModeTiming(VDTimingInfoRec *rec) {
 static OSStatus SetMode(VDPageInfo *rec) {
 	size_t i;
 
+	if (rec->csMode < kDepthMode1 || rec->csMode > kDepthModeMax) return paramErr;
 	if (rec->csPage != 0) return controlErr;
 
 	for (i=0; i<256; i++) {
@@ -1497,9 +1545,14 @@ static OSStatus SetMode(VDPageInfo *rec) {
 		reCLUT(i);
 	}
 
+	change_in_progress = true;
 	setDepth(rec->csMode);
-	rec->csBaseAddr = backbuf;
+	gray();
+	change_in_progress = false;
+
 	updateScreen(0, 0, H, W);
+
+	rec->csBaseAddr = backbuf;
 	return noErr;
 }
 
@@ -1508,9 +1561,13 @@ static OSStatus SetMode(VDPageInfo *rec) {
 // --> csPage          Video page number to switch into
 // <-- csBaseAddr      Base address of the new DisplayModeID
 static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
+	uint32_t resource;
+	short width, height;
 	size_t i;
 
-	if (rec->csPage != 0) return controlErr;
+	if (rec->csMode < kDepthMode1 || rec->csMode > kDepthModeMax) return paramErr;
+	if (rec->csData < 1 || rec->csData > resCount()) return paramErr;
+	if (rec->csPage != 0) return paramErr;
 
 	for (i=0; i<256; i++) {
 		publicCLUT[i].rgb.red = 0x7fff;
@@ -1519,9 +1576,25 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 		reCLUT(i);
 	}
 
+	width = rezzes[rec->csData-1].w;
+	height = rezzes[rec->csData-1].h;
+
+	change_in_progress = true;
+	resource = setScanout(0 /*scanout id*/, width, height, fbpages);
+	if (!resource) {
+		change_in_progress = false;
+		return paramErr;
+	}
+	screen_resource = resource;
+	W = width;
+	H = height;
 	setDepth(rec->csMode);
-	rec->csBaseAddr = backbuf;
+	gray();
+	change_in_progress = false;
+
 	updateScreen(0, 0, H, W);
+
+	rec->csBaseAddr = backbuf;
 	return noErr;
 }
 
@@ -1534,7 +1607,28 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 // <-- csRefreshRate             Vertical refresh rate of the screen
 // <-- csMaxDepthMode            Max relative bit depth for this DisplayModeID
 static OSStatus GetNextResolution(VDResolutionInfoRec *rec) {
-	return statusErr;
+	uint32_t id;
+
+	if (rec->csPreviousDisplayModeID == kDisplayModeIDFindFirstResolution) {
+		id = 1;
+	} else if (rec->csPreviousDisplayModeID >= 1 && rec->csPreviousDisplayModeID < resCount()) {
+		id = rec->csPreviousDisplayModeID + 1;
+	} else if (rec->csPreviousDisplayModeID == resCount()) {
+		rec->csDisplayModeID = kDisplayModeIDNoMoreResolutions;
+		return noErr;
+	} else if (rec->csPreviousDisplayModeID == kDisplayModeIDCurrent) {
+		id = idForRes(W, H, false);
+	} else {
+		return paramErr;
+	}
+
+	rec->csDisplayModeID = id;
+	rec->csHorizontalPixels = rezzes[id-1].w;
+	rec->csVerticalLines = rezzes[id-1].h;
+	rec->csRefreshRate = 60;
+	rec->csMaxDepthMode = k32bit;
+
+	return noErr;
 }
 
 // --> csDisplayModeID   ID of the desired DisplayModeID
@@ -1545,7 +1639,11 @@ static OSStatus GetNextResolution(VDResolutionInfoRec *rec) {
 // <-- csDeviceType      Direct, fixed, or CLUT
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
 	if (rec->csDepthMode < kDepthMode1 || rec->csDepthMode > kDepthModeMax) {
-		return statusErr;
+		return paramErr;
+	}
+
+	if (rec->csDisplayModeID < 1 || rec->csDisplayModeID > sizeof(rezzes)/sizeof(*rezzes)) {
+		return paramErr;
 	}
 
 	memset(rec->csVPBlockPtr, 0, sizeof(*rec->csVPBlockPtr));
@@ -1558,11 +1656,10 @@ static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
 	rec->csPageCount = 1;
 	rec->csVPBlockPtr->vpHRes = 0x00480000;	// Hard coded to 72 dpi
 	rec->csVPBlockPtr->vpVRes = 0x00480000;	// Hard coded to 72 dpi
-	rec->csVPBlockPtr->vpBounds.bottom = H;
-	rec->csVPBlockPtr->vpBounds.right = W;
 
-	// This does change per mode, but we have a function to calculate it
-	rec->csVPBlockPtr->vpRowBytes = rowbytesFor(rec->csDepthMode, W);
+	rec->csVPBlockPtr->vpBounds.bottom = rezzes[rec->csDisplayModeID-1].h;
+	rec->csVPBlockPtr->vpBounds.right = rezzes[rec->csDisplayModeID-1].w;
+	rec->csVPBlockPtr->vpRowBytes = rowbytesFor(rec->csDepthMode, rezzes[rec->csDisplayModeID-1].w);
 
 	switch (rec->csDepthMode) {
 	case k1bit:
