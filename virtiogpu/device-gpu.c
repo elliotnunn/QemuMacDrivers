@@ -1,7 +1,9 @@
 #include <stdbool.h>
+#include <stdio.h>
 #include <Devices.h>
 #include <Displays.h>
 #include <DriverServices.h>
+#include <Events.h>
 #include <fp.h>
 #include <Gestalt.h>
 #include <LowMem.h>
@@ -60,6 +62,8 @@ static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
 static void updateScreen(short top, short left, short bottom, short right);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
+static void perfTest(void);
+static void perfTestNotification(NMRecPtr nmReqPtr);
 static OSStatus VBL(void *p1, void *p2);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
@@ -346,33 +350,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	InstallDebugPollPatch();
 
 	InstallLateBootHook();
-
-	// Performance test: 1x1 at 94096 Hz
-	// Performance test: 2x2 at 105520 Hz
-	// Performance test: 4x4 at 101329 Hz
-	// Performance test: 8x8 at 108689 Hz
-	// Performance test: 16x16 at 72277 Hz
-	// Performance test: 32x32 at 39755 Hz
-	// Performance test: 64x64 at 17770 Hz
-	// Performance test: 128x128 at 5726 Hz
-	// Performance test: 256x256 at 1585 Hz
-	// Performance test: 512x512 at 428 Hz
-	//{
-	//	int size;
-	//	long t;
-	//	long n;
-	//	for (size=1; size<=512; size*=2) {
-	//		t = LMGetTicks() + 1;
-	//		while (t > LMGetTicks()) {}
-	//		t += 60;
-	//		n = 0;
-	//		while (t > LMGetTicks()) {
-	//			updateScreen(0, 0, size, size);
-	//			n++;
-	//		}
-	//		lprintf("Performance test: %dx%d at %d Hz\n", size, size, n);
-	//	}
-	//}
 
 	return noErr;
 
@@ -907,6 +884,81 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	pleft = 0x7fff;
 	pbottom = 0;
 	pright = 0;
+}
+
+static void perfTest(void) {
+	static RoutineDescriptor descriptor = BUILD_ROUTINE_DESCRIPTOR(
+		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
+		perfTestNotification);
+
+	static char str[256];
+
+	static NMRec rec = {
+		NULL, // qLink
+		8, // qType
+		0, 0, 0, // reserved fields
+		0, NULL, NULL, // nmMark, nmIcon, nmSound
+		(StringPtr)str, // nmStr
+		&descriptor,
+		0 // nmRefCon, 1 = onscreen
+	};
+
+	long t=LMGetTicks();
+	long ctr1=0, ctr2=0;
+	KeyMap keys;
+
+	// control-shift
+	GetKeys(keys);
+	if ((keys[1]&9) != 9) return;
+
+	if (rec.nmRefCon != 0) NMRemove(&rec);
+	rec.nmRefCon = 1;
+
+	// Warm up
+	t += 2;
+	while (t > LMGetTicks()) {
+		while (freebufs == 0) QPoll(0);
+		updateScreen(0, 0, H, W);
+	}
+
+	// Measure with our blitter involved
+	t += 30;
+	while (t > LMGetTicks()) {
+		while (freebufs == 0) QPoll(0);
+		updateScreen(0, 0, H, W);
+		ctr1++;
+	}
+
+	// Warm up
+	t += 2;
+	while (t > LMGetTicks()) {
+		while (freebufs == 0) QPoll(0);
+		Atomic2(sendPixels, (void *)0x00000000, (void *)0x7fff7fff);
+	}
+
+	// Measure without our blitter
+	t += 30;
+	while (t > LMGetTicks()) {
+		while (freebufs == 0) QPoll(0);
+		Atomic2(sendPixels, (void *)0x00000000, (void *)0x7fff7fff);
+		ctr2++;
+	}
+
+	// The return value of sprintf becomes the Pascal length byte
+	str[0] =
+		sprintf(str+1,
+		"virtio-gpu\n"
+		"  Mode: %dx%dx%d\n"
+		"  Frame rate with guest blitter: %ld Hz\n"
+		"  Frame rate without guest blitter: %ld Hz",
+		W, H, 1<<(depth-kDepthMode1), ctr1*2, ctr2*2);
+
+	NMInstall(&rec);
+}
+
+static void perfTestNotification(NMRecPtr nmReqPtr) {
+	NMRemove(nmReqPtr);
+	nmReqPtr->nmRefCon = 0;
 }
 
 static OSStatus VBL(void *p1, void *p2) {
@@ -1465,6 +1517,7 @@ static OSStatus SetMode(VDPageInfo *rec) {
 	gray();
 	change_in_progress = false;
 
+	perfTest();
 	updateScreen(0, 0, H, W);
 
 	rec->csBaseAddr = backbuf;
@@ -1507,6 +1560,7 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 	gray();
 	change_in_progress = false;
 
+	perfTest();
 	updateScreen(0, 0, H, W);
 
 	rec->csBaseAddr = backbuf;
