@@ -68,7 +68,6 @@ static OSStatus VBL(void *p1, void *p2);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
-static void setDepth(int newdepth);
 static long rowbytesFor(int relativeDepth, long width);
 static void reCLUT(int index);
 static OSStatus GetBaseAddr(VDPageInfo *rec);
@@ -332,14 +331,15 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	// Connect back buffer to front buffer
-	setDepth(k32bit);
-	setGammaTable((GammaTbl *)&builtinGamma[0].table);
-
 	// Connect front buffer to scanout
 	getBestSize(&W, &H);
 	screen_resource = setScanout(0 /*scanout id*/, W, H, fbpages);
 	if (!screen_resource) goto fail;
+
+	// Connect back buffer to front buffer
+	depth = k32bit;
+	rowbytes = rowbytesFor(depth, W);
+	setGammaTable((GammaTbl *)&builtinGamma[0].table);
 
 	// Initially VBL interrupts must be fast
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &vblservice);
@@ -1025,12 +1025,6 @@ static OSStatus status(short csCode, void *param) {
 	return statusErr;
 }
 
-// Should also call this if the resolution is changed
-static void setDepth(int newdepth) {
-	depth = newdepth;
-	rowbytes = rowbytesFor(depth, W);
-}
-
 static long rowbytesFor(int relativeDepth, long width) {
 	long ret;
 
@@ -1513,7 +1507,8 @@ static OSStatus SetMode(VDPageInfo *rec) {
 	}
 
 	change_in_progress = true;
-	setDepth(rec->csMode);
+	depth = rec->csMode;
+	rowbytes = rowbytesFor(depth, W);
 	gray();
 	change_in_progress = false;
 
@@ -1556,7 +1551,8 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 	screen_resource = resource;
 	W = width;
 	H = height;
-	setDepth(rec->csMode);
+	depth = rec->csMode;
+	rowbytes = rowbytesFor(depth, W);
 	gray();
 	change_in_progress = false;
 
