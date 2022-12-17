@@ -4,7 +4,8 @@
 COptions = -i :polyfill -proto strict
 PPCCOptions = {COptions}
 
-::builds:qemu_vga.ndrv ƒ allocator-ppc.c.x ∂
+::builds:qemu_vga.ndrv ƒ ∂
+                         allocator-ppc.c.x ∂
                          atomic-ppc.c.x ∂
                          debugpollpatch.c.x ∂
                          dirtyrectpatch.c.x ∂
