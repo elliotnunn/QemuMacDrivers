@@ -1,5 +1,5 @@
-#ifndef PCI_STRUCTS_H
-#define PCI_STRUCTS_H
+#ifndef STRUCTS_PCI_H
+#define STRUCTS_PCI_H
 
 struct virtio_pci_common_cfg {
 	// About the whole device

@@ -9,7 +9,7 @@
 #include "byteswap.h"
 #include "device.h"
 #include "transport.h"
-#include "virtqueue-structs.h"
+#include "structs-virtqueue.h"
 
 #include "virtqueue.h"
 

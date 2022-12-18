@@ -11,7 +11,7 @@
 
 #include "byteswap.h"
 #include "transport.h"
-#include "virtio-gpu-structs.h"
+#include "structs-gpu.h"
 #include "lprintf.h"
 
 #define CURSOR_RESOURCE 0xcc

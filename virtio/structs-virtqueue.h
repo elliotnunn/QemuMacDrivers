@@ -1,5 +1,5 @@
-#ifndef VIRTQUEUE_STRUCTS_H
-#define VIRTQUEUE_STRUCTS_H
+#ifndef STRUCTS_VIRTQUEUE_H
+#define STRUCTS_VIRTQUEUE_H
 
 struct virtq_desc { // all little-endian
 	uint32_t le_addr; // guest-physical

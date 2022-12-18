@@ -10,7 +10,7 @@
 #include "allocator.h"
 #include "byteswap.h"
 #include "device.h"
-#include "pci-structs.h"
+#include "structs-pci.h"
 #include "virtqueue.h"
 
 #include "transport.h"

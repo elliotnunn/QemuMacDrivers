@@ -21,7 +21,7 @@
 #include "lateboothook.h"
 #include "lprintf.h"
 #include "transport.h"
-#include "virtio-gpu-structs.h"
+#include "structs-gpu.h"
 #include "virtqueue.h"
 #include "wait.h"
 
