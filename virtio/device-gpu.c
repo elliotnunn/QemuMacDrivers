@@ -1509,7 +1509,6 @@ static OSStatus SetMode(VDPageInfo *rec) {
 	change_in_progress = true;
 	depth = rec->csMode;
 	rowbytes = rowbytesFor(depth, W);
-	gray();
 	change_in_progress = false;
 
 	perfTest();
@@ -1553,7 +1552,6 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 	H = height;
 	depth = rec->csMode;
 	rowbytes = rowbytesFor(depth, W);
-	gray();
 	change_in_progress = false;
 
 	perfTest();
