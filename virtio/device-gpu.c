@@ -1050,7 +1050,6 @@ static long rowbytesFor(int relativeDepth, long width) {
 }
 
 // Update privateCLUT from publicCLUT
-// TODO: needs gamma correction
 static void reCLUT(int index) {
 	privateCLUT[index] =
 		((uint32_t)gamma_red[publicCLUT[index].rgb.red >> 8] << 8) |
