@@ -68,7 +68,8 @@ static OSStatus VBL(void *p1, void *p2);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
-static long rowbytesFor(int relativeDepth, long width);
+static long rowbytesForBack(int relativeDepth, long width);
+static long rowbytesForFront(long width);
 static void reCLUT(int index);
 static OSStatus GetBaseAddr(VDPageInfo *rec);
 static OSStatus MySetEntries(VDSetEntryRecord *rec);
@@ -128,7 +129,7 @@ struct rez rezzes[] = {
 	{1024, 768},
 	{0, 0},
 };
-static short W, H, rowbytes;
+static short W, H, rowbytes_back, rowbytes_front;
 static int depth;
 static ColorSpec publicCLUT[256];
 static uint32_t privateCLUT[256];
@@ -338,7 +339,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// Connect back buffer to front buffer
 	depth = k32bit;
-	rowbytes = rowbytesFor(depth, W);
+	rowbytes_back = rowbytesForBack(depth, W);
+	rowbytes_front = rowbytesForFront(W);
 	setGammaTable((GammaTbl *)&builtinGamma[0].table);
 
 	// Initially VBL interrupts must be fast
@@ -411,7 +413,7 @@ static void getBestSize(short *width, short *height) {
 	h = GETLE32(&pmodes[i].r.le32_height);
 
 	// Not enough RAM allocated? Try for smaller
-	if (h * rowbytesFor(k32bit, w) > bufsize) {
+	if (h * rowbytesForBack(k32bit, w) > bufsize) {
 		// Cancel aspect ratio down to its simplest form
 		long wr=w, hr=h;
 		for (i=2; i<wr && i<hr; i++) {
@@ -435,7 +437,7 @@ static void getBestSize(short *width, short *height) {
 				w -= 1;
 				h = (w*hr + wr/2) / wr;
 			}
-		} while (h * rowbytesFor(k32bit, w) > bufsize);
+		} while (h * rowbytesForBack(k32bit, w) > bufsize);
 	}
 
 	*width = w;
@@ -648,8 +650,8 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		int leftBytes = (left / 8) & ~3;
 		int rightBytes = ((right + 31) / 8) & ~3;
 		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + leftBytes);
-			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~31) * 4);
+			uint32_t *src = (void *)((char *)backbuf + y * rowbytes_back + leftBytes);
+			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~31) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
 				*dest++ = (s & 0x80000000) ? c1 : c0;
@@ -690,8 +692,8 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		int leftBytes = (left / 4) & ~3;
 		int rightBytes = ((right + 15) / 4) & ~3;
 		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + leftBytes);
-			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~15) * 4);
+			uint32_t *src = (void *)((char *)backbuf + y * rowbytes_back + leftBytes);
+			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~15) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
 				*dest++ = privateCLUT[(s >> 30) & 3];
@@ -716,8 +718,8 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		int leftBytes = (left / 2) & ~3;
 		int rightBytes = ((right + 7) / 2) & ~3;
 		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + leftBytes);
-			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + (left & ~7) * 4);
+			uint32_t *src = (void *)((char *)backbuf + y * rowbytes_back + leftBytes);
+			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~7) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
 				*dest++ = privateCLUT[(s >> 28) & 15];
@@ -732,16 +734,16 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		}
 	} else if (depth == k8bit) {
 		for (y=top; y<bottom; y++) {
-			uint8_t *src = (void *)((char *)backbuf + y * rowbytes + left);
-			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
+			uint8_t *src = (void *)((char *)backbuf + y * rowbytes_back + left);
+			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + left * 4);
 			for (x=left; x<right; x++) {
 				*dest++ = privateCLUT[*src++];
 			}
 		}
 	} else if (depth == k16bit) {
 		for (y=top; y<bottom; y++) {
-			uint16_t *src = (void *)((char *)backbuf + y * rowbytes + left * 2);
-			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
+			uint16_t *src = (void *)((char *)backbuf + y * rowbytes_back + left * 2);
+			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + left * 4);
 			for (x=left; x<right; x++) {
 				uint16_t s = *src++;
 				*dest++ =
@@ -752,8 +754,8 @@ static void updateScreen(short top, short left, short bottom, short right) {
 		}
 	} else if (depth == k32bit) {
 		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowbytes + left * 4);
-			uint32_t *dest = (void *)((char *)frontbuf + y * W * 4 + left * 4);
+			uint32_t *src = (void *)((char *)backbuf + y * rowbytes_back + left * 4);
+			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + left * 4);
 			for (x=left; x<right; x++) {
 				uint32_t s = *src++;
 				*dest++ =
@@ -863,7 +865,7 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	SETLE32(&obuf1->r.le32_y, top);
 	SETLE32(&obuf1->r.le32_width, right - left);
 	SETLE32(&obuf1->r.le32_height, bottom - top);
-	SETLE32(&obuf1->le32_offset, top*W*4 + left*4);
+	SETLE32(&obuf1->le32_offset, top*rowbytes_front + left*4);
 	SETLE32(&obuf1->le32_resource_id, screen_resource);
 
 	QSend(0, 1, 1, physicals1, sizes1, (void *)'tfer');
@@ -1025,7 +1027,8 @@ static OSStatus status(short csCode, void *param) {
 	return statusErr;
 }
 
-static long rowbytesFor(int relativeDepth, long width) {
+// For QuickDraw
+static long rowbytesForBack(int relativeDepth, long width) {
 	long ret;
 
 	if (relativeDepth == k1bit) {
@@ -1047,6 +1050,11 @@ static long rowbytesFor(int relativeDepth, long width) {
 	ret -= ret % 4;
 
 	return ret;
+}
+
+// For Virtio
+static long rowbytesForFront(long width) {
+	return width * 4;
 }
 
 // Update privateCLUT from publicCLUT
@@ -1325,17 +1333,17 @@ static void gray(void) {
 		}
 
 		for (y=0; y<H; y++) {
-			for (x=0; x<rowbytes; x+=4) {
-				*(uint32_t *)((char *)backbuf + y*rowbytes + x) = value;
+			for (x=0; x<rowbytes_back; x+=4) {
+				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x) = value;
 			}
 			value = ~value;
 		}
 	} else if (depth == k32bit) {
 		value = 0x00000000;
 		for (y=0; y<H; y++) {
-			for (x=0; x<rowbytes; x+=8) {
-				*(uint32_t *)((char *)backbuf + y*rowbytes + x) = value;
-				*(uint32_t *)((char *)backbuf + y*rowbytes + x + 4) = ~value;
+			for (x=0; x<rowbytes_back; x+=8) {
+				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x) = value;
+				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x + 4) = ~value;
 			}
 			value = ~value;
 		}
@@ -1507,7 +1515,8 @@ static OSStatus SetMode(VDPageInfo *rec) {
 
 	change_in_progress = true;
 	depth = rec->csMode;
-	rowbytes = rowbytesFor(depth, W);
+	rowbytes_back = rowbytesForBack(depth, W);
+	rowbytes_front = rowbytesForFront(W);
 	change_in_progress = false;
 
 	perfTest();
@@ -1550,7 +1559,8 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 	W = width;
 	H = height;
 	depth = rec->csMode;
-	rowbytes = rowbytesFor(depth, W);
+	rowbytes_back = rowbytesForBack(depth, W);
+	rowbytes_front = rowbytesForFront(W);
 	change_in_progress = false;
 
 	perfTest();
@@ -1621,7 +1631,7 @@ static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
 
 	rec->csVPBlockPtr->vpBounds.bottom = rezzes[rec->csDisplayModeID-1].h;
 	rec->csVPBlockPtr->vpBounds.right = rezzes[rec->csDisplayModeID-1].w;
-	rec->csVPBlockPtr->vpRowBytes = rowbytesFor(rec->csDepthMode, rezzes[rec->csDisplayModeID-1].w);
+	rec->csVPBlockPtr->vpRowBytes = rowbytesForBack(rec->csDepthMode, rezzes[rec->csDisplayModeID-1].w);
 
 	switch (rec->csDepthMode) {
 	case k1bit:
