@@ -646,7 +646,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 
 	// These blitters are not satisfactory
 	if (depth == k1bit) {
-		uint32_t c0 = privateCLUT[0], c1 = privateCLUT[1];
+		uint32_t c0 = privateCLUT[0], c1 = privateCLUT[1] ^ privateCLUT[0];
 		int leftBytes = (left / 8) & ~3;
 		int rightBytes = ((right + 31) / 8) & ~3;
 		for (y=top; y<bottom; y++) {
@@ -654,38 +654,38 @@ static void updateScreen(short top, short left, short bottom, short right) {
 			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~31) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
-				*dest++ = (s & 0x80000000) ? c1 : c0;
-				*dest++ = (s & 0x40000000) ? c1 : c0;
-				*dest++ = (s & 0x20000000) ? c1 : c0;
-				*dest++ = (s & 0x10000000) ? c1 : c0;
-				*dest++ = (s & 0x08000000) ? c1 : c0;
-				*dest++ = (s & 0x04000000) ? c1 : c0;
-				*dest++ = (s & 0x02000000) ? c1 : c0;
-				*dest++ = (s & 0x01000000) ? c1 : c0;
-				*dest++ = (s & 0x00800000) ? c1 : c0;
-				*dest++ = (s & 0x00400000) ? c1 : c0;
-				*dest++ = (s & 0x00200000) ? c1 : c0;
-				*dest++ = (s & 0x00100000) ? c1 : c0;
-				*dest++ = (s & 0x00080000) ? c1 : c0;
-				*dest++ = (s & 0x00040000) ? c1 : c0;
-				*dest++ = (s & 0x00020000) ? c1 : c0;
-				*dest++ = (s & 0x00010000) ? c1 : c0;
-				*dest++ = (s & 0x00008000) ? c1 : c0;
-				*dest++ = (s & 0x00004000) ? c1 : c0;
-				*dest++ = (s & 0x00002000) ? c1 : c0;
-				*dest++ = (s & 0x00001000) ? c1 : c0;
-				*dest++ = (s & 0x00000800) ? c1 : c0;
-				*dest++ = (s & 0x00000400) ? c1 : c0;
-				*dest++ = (s & 0x00000200) ? c1 : c0;
-				*dest++ = (s & 0x00000100) ? c1 : c0;
-				*dest++ = (s & 0x00000080) ? c1 : c0;
-				*dest++ = (s & 0x00000040) ? c1 : c0;
-				*dest++ = (s & 0x00000020) ? c1 : c0;
-				*dest++ = (s & 0x00000010) ? c1 : c0;
-				*dest++ = (s & 0x00000008) ? c1 : c0;
-				*dest++ = (s & 0x00000004) ? c1 : c0;
-				*dest++ = (s & 0x00000002) ? c1 : c0;
-				*dest++ = (s & 0x00000001) ? c1 : c0;
+				*dest++ = ((-((s >> 31) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 30) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 29) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 28) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 27) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 26) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 25) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 24) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 23) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 22) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 21) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 20) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 19) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 18) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 17) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 16) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 15) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 14) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 13) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 12) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 11) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 10) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 9) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 8) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 7) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 6) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 5) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 4) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 3) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 2) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 1) & 1)) & c1) ^ c0;
+				*dest++ = ((-((s >> 0) & 1)) & c1) ^ c0;
 			}
 		}
 	} else if (depth == k2bit) {
