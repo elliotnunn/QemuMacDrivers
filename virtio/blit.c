@@ -15,7 +15,7 @@ void blit1(const void *src, long srcrowbytes, void *dst, long dstrowbytes, long 
 	blit1asm(
 		(char *)src + t*srcrowbytes + l/8 - 4,         // srcpix: subtract 4 to use PowerPC preincrement
 		srcrowbytes - w/8,                             // srcrowskip
-		(char *)dst + t*dstrowbytes + l*4 - 4,         // dstpix: subtract 4 to use PowerPC preincrement
+		(char *)dst + t*dstrowbytes + l*4,             // dstpix
 		dstrowbytes - w*4,                             // dstrowskip
 		w/CHUNK,                                       // w: pixels/CHUNK
 		b-t,                                           // h
