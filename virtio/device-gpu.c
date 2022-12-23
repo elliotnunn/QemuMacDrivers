@@ -14,6 +14,7 @@
 
 #include "allocator.h"
 #include "atomic.h"
+#include "blit.h"
 #include "byteswap.h"
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
@@ -646,48 +647,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 
 	// These blitters are not satisfactory
 	if (depth == k1bit) {
-		uint32_t c0 = privateCLUT[0], c1 = privateCLUT[1] ^ privateCLUT[0];
-		int leftBytes = (left / 8) & ~3;
-		int rightBytes = ((right + 31) / 8) & ~3;
-		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowbytes_back + leftBytes);
-			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~31) * 4);
-			for (x=leftBytes; x<rightBytes; x+=4) {
-				uint32_t s = *src++;
-				*dest++ = ((-((s >> 31) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 30) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 29) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 28) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 27) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 26) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 25) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 24) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 23) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 22) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 21) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 20) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 19) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 18) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 17) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 16) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 15) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 14) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 13) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 12) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 11) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 10) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 9) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 8) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 7) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 6) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 5) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 4) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 3) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 2) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 1) & 1)) & c1) ^ c0;
-				*dest++ = ((-((s >> 0) & 1)) & c1) ^ c0;
-			}
-		}
+		blit1(backbuf, rowbytes_back, frontbuf, rowbytes_front, top, left, bottom, right, privateCLUT);
 	} else if (depth == k2bit) {
 		int leftBytes = (left / 4) & ~3;
 		int rightBytes = ((right + 15) / 4) & ~3;

@@ -7,6 +7,8 @@ PPCCOptions = {COptions}
 ::builds:qemu_vga.ndrv ƒ ∂
                          allocator-ppc.c.x ∂
                          atomic-ppc.c.x ∂
+                         blit.c.x ∂
+                         blit.s.x ∂
                          debugpollpatch.c.x ∂
                          dirtyrectpatch.c.x ∂
                          gammatables.c.x ∂
