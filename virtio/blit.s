@@ -28,7 +28,7 @@ rColorXOR       equ r10
 	stmw	r30,-40(r1)
 
 @row
-	mtctr	rW
+	mtctr	rW ; using the ctr is worth about 2% speed
 @thirtytwopixels
 	lwzu	r31,4(rSrcPix)
 
