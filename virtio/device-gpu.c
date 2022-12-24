@@ -648,7 +648,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 
 	// These blitters are not satisfactory
 	if (depth == k1bit) {
-		blit1(backbuf, rowbytes_back, frontbuf, rowbytes_front, top, left, bottom, right, privateCLUT);
+		Blit1(backbuf, rowbytes_back, frontbuf, rowbytes_front, top, left, bottom, right, privateCLUT);
 	} else if (depth == k2bit) {
 		int leftBytes = (left / 4) & ~3;
 		int rightBytes = ((right + 15) / 4) & ~3;

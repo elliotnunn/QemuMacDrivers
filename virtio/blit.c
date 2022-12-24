@@ -12,7 +12,7 @@ const int BlitterAlign[6] = {
 };
 
 // Higher-level wrapper around asm loop
-void blit1(const void *src, long srcrowbytes, void *dst, long dstrowbytes, long t, long l, long b, long r, uint32_t *clut) {
+void Blit1(const void *src, long srcrowbytes, void *dst, long dstrowbytes, long t, long l, long b, long r, uint32_t *clut) {
 	enum {CHUNK = 32};
 
 	long w;
