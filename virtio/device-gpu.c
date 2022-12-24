@@ -135,8 +135,8 @@ struct rez rezzes[] = {
 };
 static short W, H, rowbytes_back, rowbytes_front;
 static int depth;
-static ColorSpec publicCLUT[256];
-static uint32_t privateCLUT[256];
+static ColorSpec public_clut[256];
+static uint32_t private_clut[256];
 
 static uint8_t gamma_red[256];
 static uint8_t gamma_grn[256];
@@ -675,7 +675,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 
 	// These blitters are not satisfactory
 	if (depth == k1bit) {
-		Blit1(backbuf, frontbuf, rowbytes_back, top, left, bottom, right, privateCLUT);
+		Blit1(backbuf, frontbuf, rowbytes_back, top, left, bottom, right, private_clut);
 	} else if (depth == k2bit) {
 		int leftBytes = (left / 4) & ~3;
 		int rightBytes = ((right + 15) / 4) & ~3;
@@ -684,22 +684,22 @@ static void updateScreen(short top, short left, short bottom, short right) {
 			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~15) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
-				*dest++ = privateCLUT[(s >> 30) & 3];
-				*dest++ = privateCLUT[(s >> 28) & 3];
-				*dest++ = privateCLUT[(s >> 26) & 3];
-				*dest++ = privateCLUT[(s >> 24) & 3];
-				*dest++ = privateCLUT[(s >> 22) & 3];
-				*dest++ = privateCLUT[(s >> 20) & 3];
-				*dest++ = privateCLUT[(s >> 18) & 3];
-				*dest++ = privateCLUT[(s >> 16) & 3];
-				*dest++ = privateCLUT[(s >> 14) & 3];
-				*dest++ = privateCLUT[(s >> 12) & 3];
-				*dest++ = privateCLUT[(s >> 10) & 3];
-				*dest++ = privateCLUT[(s >> 8) & 3];
-				*dest++ = privateCLUT[(s >> 6) & 3];
-				*dest++ = privateCLUT[(s >> 4) & 3];
-				*dest++ = privateCLUT[(s >> 2) & 3];
-				*dest++ = privateCLUT[(s >> 0) & 3];
+				*dest++ = private_clut[(s >> 30) & 3];
+				*dest++ = private_clut[(s >> 28) & 3];
+				*dest++ = private_clut[(s >> 26) & 3];
+				*dest++ = private_clut[(s >> 24) & 3];
+				*dest++ = private_clut[(s >> 22) & 3];
+				*dest++ = private_clut[(s >> 20) & 3];
+				*dest++ = private_clut[(s >> 18) & 3];
+				*dest++ = private_clut[(s >> 16) & 3];
+				*dest++ = private_clut[(s >> 14) & 3];
+				*dest++ = private_clut[(s >> 12) & 3];
+				*dest++ = private_clut[(s >> 10) & 3];
+				*dest++ = private_clut[(s >> 8) & 3];
+				*dest++ = private_clut[(s >> 6) & 3];
+				*dest++ = private_clut[(s >> 4) & 3];
+				*dest++ = private_clut[(s >> 2) & 3];
+				*dest++ = private_clut[(s >> 0) & 3];
 			}
 		}
 	} else if (depth == k4bit) {
@@ -710,14 +710,14 @@ static void updateScreen(short top, short left, short bottom, short right) {
 			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~7) * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *src++;
-				*dest++ = privateCLUT[(s >> 28) & 15];
-				*dest++ = privateCLUT[(s >> 24) & 15];
-				*dest++ = privateCLUT[(s >> 20) & 15];
-				*dest++ = privateCLUT[(s >> 16) & 15];
-				*dest++ = privateCLUT[(s >> 12) & 15];
-				*dest++ = privateCLUT[(s >> 8) & 15];
-				*dest++ = privateCLUT[(s >> 4) & 15];
-				*dest++ = privateCLUT[(s >> 0) & 15];
+				*dest++ = private_clut[(s >> 28) & 15];
+				*dest++ = private_clut[(s >> 24) & 15];
+				*dest++ = private_clut[(s >> 20) & 15];
+				*dest++ = private_clut[(s >> 16) & 15];
+				*dest++ = private_clut[(s >> 12) & 15];
+				*dest++ = private_clut[(s >> 8) & 15];
+				*dest++ = private_clut[(s >> 4) & 15];
+				*dest++ = private_clut[(s >> 0) & 15];
 			}
 		}
 	} else if (depth == k8bit) {
@@ -725,7 +725,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 			uint8_t *src = (void *)((char *)backbuf + y * rowbytes_back + left);
 			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + left * 4);
 			for (x=left; x<right; x++) {
-				*dest++ = privateCLUT[*src++];
+				*dest++ = private_clut[*src++];
 			}
 		}
 	} else if (depth == k16bit) {
@@ -1040,12 +1040,12 @@ static long rowbytesForFront(int relativeDepth, long width) {
 		<< (k32bit - relativeDepth);
 }
 
-// Update privateCLUT from publicCLUT
+// Update private_clut from public_clut
 static void reCLUT(int index) {
-	privateCLUT[index] =
-		((uint32_t)gamma_red[publicCLUT[index].rgb.red >> 8] << 8) |
-		((uint32_t)gamma_grn[publicCLUT[index].rgb.green >> 8] << 16) |
-		((uint32_t)gamma_blu[publicCLUT[index].rgb.blue >> 8] << 24);
+	private_clut[index] =
+		((uint32_t)gamma_red[public_clut[index].rgb.red >> 8] << 8) |
+		((uint32_t)gamma_grn[public_clut[index].rgb.green >> 8] << 16) |
+		((uint32_t)gamma_blu[public_clut[index].rgb.blue >> 8] << 24);
 }
 
 static void grayPattern(void) {
@@ -1089,9 +1089,9 @@ static void grayCLUT(void) {
 	if (depth > k8bit) return;
 
 	for (i=0; i<256; i++) {
-		publicCLUT[i].rgb.red = 0x7fff;
-		publicCLUT[i].rgb.green = 0x7fff;
-		publicCLUT[i].rgb.blue = 0x7fff;
+		public_clut[i].rgb.red = 0x7fff;
+		public_clut[i].rgb.green = 0x7fff;
+		public_clut[i].rgb.blue = 0x7fff;
 		reCLUT(i);
 	}
 }
@@ -1112,9 +1112,9 @@ static void linearCLUT(void) {
 		for (j=0; j<16; j++)
 			luma = (luma << bpp) | i;
 
-		publicCLUT[i].rgb.red = luma;
-		publicCLUT[i].rgb.green = luma;
-		publicCLUT[i].rgb.blue = luma;
+		public_clut[i].rgb.red = luma;
+		public_clut[i].rgb.green = luma;
+		public_clut[i].rgb.blue = luma;
 		reCLUT(i);
 	}
 }
@@ -1155,7 +1155,7 @@ static OSStatus DirectSetEntries(VDSetEntryRecord *rec) {
 			dst = rec->csStart + src;
 		}
 
-		publicCLUT[dst].rgb = rec->csTable[src].rgb;
+		public_clut[dst].rgb = rec->csTable[src].rgb;
 		reCLUT(dst);
 	}
 
@@ -1179,7 +1179,7 @@ static OSStatus GetEntries(VDSetEntryRecord *rec) {
 			src = rec->csStart + dst;
 		}
 
-		rec->csTable[dst] = publicCLUT[src];
+		rec->csTable[dst] = public_clut[src];
 	}
 
 	return noErr;
