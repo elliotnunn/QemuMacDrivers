@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+extern const int BlitterAlign[6];
+
 void blit1(const void *src, long srcrowbytes, void *dst, long dstrowbytes, long t, long l, long b, long r, uint32_t *clut);
 
 // Work in 32-bit longs

@@ -58,7 +58,7 @@ static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]);
 static void getBestSize(short *width, short *height);
 static uint32_t idForRes(short width, short height, bool force);
 static uint32_t resCount(void);
-static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list);
+static uint32_t setScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list);
 static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
 static void updateScreen(short top, short left, short bottom, short right);
@@ -70,7 +70,7 @@ static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus control(short csCode, void *param);
 static OSStatus status(short csCode, void *param);
 static long rowbytesForBack(int relativeDepth, long width);
-static long rowbytesForFront(long width);
+static long rowbytesForFront(int relativeDepth, long width);
 static void reCLUT(int index);
 static OSStatus GetBaseAddr(VDPageInfo *rec);
 static OSStatus MySetEntries(VDSetEntryRecord *rec);
@@ -334,16 +334,16 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	// Connect front buffer to scanout
-	getBestSize(&W, &H);
-	screen_resource = setScanout(0 /*scanout id*/, W, H, fbpages);
-	if (!screen_resource) goto fail;
-
 	// Connect back buffer to front buffer
+	getBestSize(&W, &H);
 	depth = k32bit;
 	rowbytes_back = rowbytesForBack(depth, W);
-	rowbytes_front = rowbytesForFront(W);
+	rowbytes_front = rowbytesForFront(depth, W);
 	setGammaTable((GammaTbl *)&builtinGamma[0].table);
+
+	// Connect front buffer to scanout
+	screen_resource = setScanout(0 /*scanout id*/, rowbytes_front, W, H, fbpages);
+	if (!screen_resource) goto fail;
 
 	// Initially VBL interrupts must be fast
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &vblservice);
@@ -467,7 +467,7 @@ static uint32_t resCount(void) {
 
 // Must be called atomically
 // Returns the resource ID, or zero if you prefer
-static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list) {
+static uint32_t setScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list) {
 	struct virtio_gpu_resource_detach_backing detach_backing = {0};
 	struct virtio_gpu_resource_create_2d create_2d = {0};
 	struct virtio_gpu_resource_attach_backing attach_backing = {0};
@@ -480,7 +480,7 @@ static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list) {
 	uint32_t new_resource = res_ids[idx] ? (res_ids[idx] ^ 1) : (100 + 2*idx);
 
 	// Divide page_list into contiguous segments, hopefully not too many
-	size_t pgcnt = ((size_t)w * h * 4 + 0xfff) / 0x1000;
+	size_t pgcnt = ((size_t)rowbytes * h + 0xfff) / 0x1000;
 	int extents[126] = {0};
 	int extcnt = 0;
 	int i, j;
@@ -501,7 +501,7 @@ static uint32_t setScanout(int idx, short w, short h, uint32_t *page_list) {
 	SETLE32(&create_2d.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
 	SETLE32(&create_2d.le32_resource_id, new_resource);
 	SETLE32(&create_2d.le32_format, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
-	SETLE32(&create_2d.le32_width, w);
+	SETLE32(&create_2d.le32_width, rowbytes/4);
 	SETLE32(&create_2d.le32_height, h);
 
 	transact(&create_2d, sizeof(create_2d), &reply, sizeof(reply));
@@ -990,32 +990,27 @@ static OSStatus status(short csCode, void *param) {
 
 // For QuickDraw
 static long rowbytesForBack(int relativeDepth, long width) {
-	long ret;
+	long bppshift, bytealign, size;
 
-	if (relativeDepth == k1bit) {
-		ret = (width + 7) / 8;
-	} else if (relativeDepth == k2bit) {
-		ret = (width + 3) / 4;
-	} else if (relativeDepth == k4bit) {
-		ret = (width + 1) / 2;
-	} else if (relativeDepth == k8bit) {
-		ret = width;
-	} else if (relativeDepth == k16bit) {
-		ret = width * 2;
-	} else if (relativeDepth == k32bit) {
-		ret = width * 4;
-	}
+	// log2(bits per pixel)
+	bppshift = relativeDepth - k1bit;
 
-	// 32-bit align
-	ret += 3;
-	ret -= ret % 4;
+	// Fewest bytes that can hold the pixels
+	size = ((width << bppshift) + 7) / 8;
 
-	return ret;
+	// Extra alignment according to table in blit.c
+	bytealign = BlitterAlign[relativeDepth - k1bit];
+	size = (size + bytealign - 1) & -bytealign;
+
+	return size;
 }
 
-// For Virtio
-static long rowbytesForFront(long width) {
-	return width * 4;
+// Virtio only requires 1-pixel i.e. 4-byte alignment, which is automatic,
+// but to simplify the blitters we match QuickDraw's "wasted" right-edge pixels.
+// This means the ratio between the sizes is a simple bit-shift.
+static long rowbytesForFront(int relativeDepth, long width) {
+	return rowbytesForBack(relativeDepth, width)
+		<< (k32bit - relativeDepth);
 }
 
 // Update privateCLUT from publicCLUT
@@ -1502,7 +1497,7 @@ static bool setModeCommon(int new_depth, uint32_t new_rez) {
 	height = rezzes[new_rez-1].h;
 
 	change_in_progress = true;
-	resource = setScanout(0 /*scanout id*/, width, height, fbpages);
+	resource = setScanout(0 /*scanout id*/, rowbytesForFront(new_depth, width), width, height, fbpages);
 	if (!resource) {
 		change_in_progress = false;
 		return false;
@@ -1512,7 +1507,7 @@ static bool setModeCommon(int new_depth, uint32_t new_rez) {
 	H = height;
 	depth = new_depth;
 	rowbytes_back = rowbytesForBack(depth, W);
-	rowbytes_front = rowbytesForFront(W);
+	rowbytes_front = rowbytesForFront(depth, W);
 	change_in_progress = false;
 
 	perfTest();
