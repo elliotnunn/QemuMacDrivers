@@ -102,6 +102,7 @@ static OSStatus GetCurMode(VDSwitchInfoRec *rec);
 static OSStatus GetModeTiming(VDTimingInfoRec *rec);
 static OSStatus SetMode(VDPageInfo *rec);
 static OSStatus SwitchMode(VDSwitchInfoRec *rec);
+static bool setModeCommon(int new_depth, uint32_t new_rez);
 static OSStatus GetNextResolution(VDResolutionInfoRec *rec);
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec);
 
@@ -1461,26 +1462,10 @@ static OSStatus GetModeTiming(VDTimingInfoRec *rec) {
 // --> csPage          Desired display page
 // <-- csBaseAddr      Base address of video RAM for this csMode
 static OSStatus SetMode(VDPageInfo *rec) {
-	size_t i;
-
 	if (rec->csMode < kDepthMode1 || rec->csMode > kDepthModeMax) return paramErr;
 	if (rec->csPage != 0) return controlErr;
 
-	for (i=0; i<256; i++) {
-		publicCLUT[i].rgb.red = 0x7fff;
-		publicCLUT[i].rgb.green = 0x7fff;
-		publicCLUT[i].rgb.blue = 0x7fff;
-		reCLUT(i);
-	}
-
-	change_in_progress = true;
-	depth = rec->csMode;
-	rowbytes_back = rowbytesForBack(depth, W);
-	rowbytes_front = rowbytesForFront(W);
-	change_in_progress = false;
-
-	perfTest();
-	updateScreen(0, 0, H, W);
+	if (!setModeCommon(rec->csMode, idForRes(W, H, false))) return paramErr;
 
 	rec->csBaseAddr = backbuf;
 	return noErr;
@@ -1491,13 +1476,20 @@ static OSStatus SetMode(VDPageInfo *rec) {
 // --> csPage          Video page number to switch into
 // <-- csBaseAddr      Base address of the new DisplayModeID
 static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
-	uint32_t resource;
-	short width, height;
-	size_t i;
-
 	if (rec->csMode < kDepthMode1 || rec->csMode > kDepthModeMax) return paramErr;
 	if (rec->csData < 1 || rec->csData > resCount()) return paramErr;
 	if (rec->csPage != 0) return paramErr;
+
+	if (!setModeCommon(rec->csMode, rec->csData)) return paramErr;
+
+	rec->csBaseAddr = backbuf;
+	return noErr;
+}
+
+static bool setModeCommon(int new_depth, uint32_t new_rez) {
+	uint32_t resource;
+	short width, height;
+	size_t i;
 
 	for (i=0; i<256; i++) {
 		publicCLUT[i].rgb.red = 0x7fff;
@@ -1506,19 +1498,19 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 		reCLUT(i);
 	}
 
-	width = rezzes[rec->csData-1].w;
-	height = rezzes[rec->csData-1].h;
+	width = rezzes[new_rez-1].w;
+	height = rezzes[new_rez-1].h;
 
 	change_in_progress = true;
 	resource = setScanout(0 /*scanout id*/, width, height, fbpages);
 	if (!resource) {
 		change_in_progress = false;
-		return paramErr;
+		return false;
 	}
 	screen_resource = resource;
 	W = width;
 	H = height;
-	depth = rec->csMode;
+	depth = new_depth;
 	rowbytes_back = rowbytesForBack(depth, W);
 	rowbytes_front = rowbytesForFront(W);
 	change_in_progress = false;
@@ -1526,8 +1518,7 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 	perfTest();
 	updateScreen(0, 0, H, W);
 
-	rec->csBaseAddr = backbuf;
-	return noErr;
+	return true;
 }
 
 // Reports all display resolutions that the driver supports.
