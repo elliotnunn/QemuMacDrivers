@@ -25,204 +25,205 @@ rH              equ r8
 rColor0         equ r9
 rColorXOR       equ r10
 
-	stmw	r30,-40(r1)
+rTmpPacked      equ r12
+rTmpPix         equ r13
 
 @row
 	mtctr	rW ; using the ctr is worth about 2% speed
 @thirtytwopixels
-	lwzu	r31,4(rSrcPix)
+	lwzu	rTmpPacked,4(rSrcPix)
 
-	rlwinm  r30,r31,1,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,0(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,1,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,0(rDstPix)
 
-	rlwinm  r30,r31,2,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,4(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,2,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,4(rDstPix)
 
-	rlwinm  r30,r31,3,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,8(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,3,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,8(rDstPix)
 
-	rlwinm  r30,r31,4,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,12(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,4,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,12(rDstPix)
 
-	rlwinm  r30,r31,5,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,16(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,5,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,16(rDstPix)
 
-	rlwinm  r30,r31,6,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,20(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,6,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,20(rDstPix)
 
-	rlwinm  r30,r31,7,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,24(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,7,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,24(rDstPix)
 
-	rlwinm  r30,r31,8,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,28(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,8,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,28(rDstPix)
 
-	rlwinm  r30,r31,9,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,32(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,9,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,32(rDstPix)
 
-	rlwinm  r30,r31,10,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,36(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,10,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,36(rDstPix)
 
-	rlwinm  r30,r31,11,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,40(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,11,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,40(rDstPix)
 
-	rlwinm  r30,r31,12,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,44(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,12,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,44(rDstPix)
 
-	rlwinm  r30,r31,13,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,48(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,13,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,48(rDstPix)
 
-	rlwinm  r30,r31,14,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,52(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,14,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,52(rDstPix)
 
-	rlwinm  r30,r31,15,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,56(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,15,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,56(rDstPix)
 
-	rlwinm  r30,r31,16,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,60(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,16,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,60(rDstPix)
 
-	rlwinm  r30,r31,17,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,64(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,17,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,64(rDstPix)
 
-	rlwinm  r30,r31,18,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,68(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,18,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,68(rDstPix)
 
-	rlwinm  r30,r31,19,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,72(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,19,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,72(rDstPix)
 
-	rlwinm  r30,r31,20,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,76(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,20,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,76(rDstPix)
 
-	rlwinm  r30,r31,21,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,80(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,21,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,80(rDstPix)
 
-	rlwinm  r30,r31,22,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,84(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,22,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,84(rDstPix)
 
-	rlwinm  r30,r31,23,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,88(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,23,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,88(rDstPix)
 
-	rlwinm  r30,r31,24,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,92(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,24,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,92(rDstPix)
 
-	rlwinm  r30,r31,25,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,96(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,25,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,96(rDstPix)
 
-	rlwinm  r30,r31,26,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,100(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,26,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,100(rDstPix)
 
-	rlwinm  r30,r31,27,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,104(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,27,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,104(rDstPix)
 
-	rlwinm  r30,r31,28,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,108(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,28,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,108(rDstPix)
 
-	rlwinm  r30,r31,29,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,112(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,29,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,112(rDstPix)
 
-	rlwinm  r30,r31,30,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,116(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,30,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,116(rDstPix)
 
-	rlwinm  r30,r31,31,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,120(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,31,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,120(rDstPix)
 
-	rlwinm  r30,r31,0,31,31
-	neg     r30,r30
-	and     r30,r30,rColorXOR
-	xor     r30,r30,rColor0
-	stw     r30,124(rDstPix)
+	rlwinm  rTmpPix,rTmpPacked,0,31,31
+	neg     rTmpPix,rTmpPix
+	and     rTmpPix,rTmpPix,rColorXOR
+	xor     rTmpPix,rTmpPix,rColor0
+	stw     rTmpPix,124(rDstPix)
 
 	addi	rDstPix,rDstPix,128 ; avoiding stwu speeds up by 4%
 
@@ -235,5 +236,4 @@ rColorXOR       equ r10
 	cmpwi   rH,0
 	bne		@row
 
-	lmw		r30,-40(r1)
 	blr
