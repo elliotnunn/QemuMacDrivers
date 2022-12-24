@@ -138,10 +138,10 @@ static int depth;
 static ColorSpec publicCLUT[256];
 static uint32_t privateCLUT[256];
 
-uint8_t gamma_red[256];
-uint8_t gamma_grn[256];
-uint8_t gamma_blu[256];
-char gamma_public[1024];
+static uint8_t gamma_red[256];
+static uint8_t gamma_grn[256];
+static uint8_t gamma_blu[256];
+static char gamma_public[1024];
 
 // Fake vertical blanking interrupts
 static InterruptServiceIDType vblservice;
