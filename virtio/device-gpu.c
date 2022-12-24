@@ -666,6 +666,7 @@ void DirtyRectCallback(short top, short left, short bottom, short right) {
 	updateScreen(top, left, bottom, right);
 }
 
+// Caller must not give out-of-range coords!
 static void updateScreen(short top, short left, short bottom, short right) {
 	int x, y;
 
