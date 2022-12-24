@@ -1,13 +1,13 @@
 	MACRO
 	MakeFunction &fnName
 		EXPORT &fnName[DS]
- 		EXPORT .&fnName[PR]
+		EXPORT .&fnName[PR]
 
 		TC &fnName[TC], &fnName[DS]
 
 		CSECT &fnName[DS]
 			DC.L .&fnName[PR]
- 			DC.L TOC[tc0]
+			DC.L TOC[tc0]
 
 		CSECT .&fnName[PR]
 		FUNCTION .&fnName[PR]
@@ -47,9 +47,9 @@ rTmpPix1        equ r11
 rTmpPix2        equ r12
 
 @row
-	mtctr	rW ; using the ctr is worth about 2% speed
+	mtctr   rW ; using the ctr is worth about 2% speed
 @thirtytwopixels
-	lwzu	rTmpPacked,4(rSrcPix) ; prefetching does not help
+	lwzu    rTmpPacked,4(rSrcPix) ; prefetching does not help
 
 	; interleaving doesn't help on QEMU/TCG but is good practice on real PowerPC
 	rlwinm  rTmpPix1,rTmpPacked,1,31,31
@@ -213,15 +213,15 @@ rTmpPix2        equ r12
 	stw     rTmpPix1,120(rDstPix)
 	stw     rTmpPix2,124(rDstPix)
 
-	addi	rDstPix,rDstPix,128 ; avoiding stwu speeds up by 4%
+	addi    rDstPix,rDstPix,128 ; avoiding stwu speeds up by 4%
 
-	bdnz	@thirtytwopixels
+	bdnz    @thirtytwopixels
 
-	add		rDstPix,rDstPix,rDstRowSkip ; skip to next row
-	add		rSrcPix,rSrcPix,rSrcRowSkip
+	add     rDstPix,rDstPix,rDstRowSkip ; skip to next row
+	add     rSrcPix,rSrcPix,rSrcRowSkip
 
-	subi	rH,rH,1 ; decrement and check row counter
+	subi    rH,rH,1 ; decrement and check row counter
 	cmpwi   rH,0
-	bne		@row
+	bne     @row
 
 	blr
