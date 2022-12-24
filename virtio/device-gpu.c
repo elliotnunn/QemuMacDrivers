@@ -296,6 +296,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 
 static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
+	short width, height;
 
 	// No need to signal FAILED if cannot communicate with device
 	if (!VInit(&info->deviceEntry)) return paramErr;
@@ -334,16 +335,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	// Connect back buffer to front buffer
-	getBestSize(&W, &H);
-	depth = k32bit;
-	rowbytes_back = rowbytesForBack(depth, W);
-	rowbytes_front = rowbytesForFront(depth, W);
 	setGammaTable((GammaTbl *)&builtinGamma[0].table);
 
-	// Connect front buffer to scanout
-	screen_resource = setScanout(0 /*scanout id*/, rowbytes_front, W, H, fbpages);
-	if (!screen_resource) goto fail;
+	getBestSize(&width, &height);
+	if (!setModeCommon(k32bit, idForRes(width, height, true)))
+		goto fail;
 
 	// Initially VBL interrupts must be fast
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &vblservice);
