@@ -12,9 +12,10 @@ const int BlitterAlign[6] = {
 };
 
 // Higher-level wrapper around asm loop
-void Blit1(const void *src, long srcrowbytes, void *dst, long dstrowbytes, long t, long l, long b, long r, uint32_t *clut) {
+void Blit1(const void *src, void *dst, long rowbytes, long t, long l, long b, long r, uint32_t *clut) {
 	enum {CHUNK = 32};
 
+	long dstrowbytes = rowbytes * 32;
 	long w;
 	l &= -CHUNK;
 	r = (r + CHUNK - 1) & -CHUNK;
@@ -22,8 +23,8 @@ void Blit1(const void *src, long srcrowbytes, void *dst, long dstrowbytes, long 
 	w = r - l;
 
 	blit1asm(
-		(char *)src + t*srcrowbytes + l/8 - 4,         // srcpix: subtract 4 to use PowerPC preincrement
-		srcrowbytes - w/8,                             // srcrowskip
+		(char *)src + t*rowbytes + l/8 - 4,            // srcpix: subtract 4 to use PowerPC preincrement
+		rowbytes - w/8,                                // srcrowskip
 		(char *)dst + t*dstrowbytes + l*4,             // dstpix
 		dstrowbytes - w*4,                             // dstrowskip
 		w/CHUNK,                                       // w: pixels/CHUNK

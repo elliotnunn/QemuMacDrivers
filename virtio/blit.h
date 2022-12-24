@@ -5,7 +5,9 @@
 
 extern const int BlitterAlign[6];
 
-void Blit1(const void *src, long srcrowbytes, void *dst, long dstrowbytes, long t, long l, long b, long r, uint32_t *clut);
+// rowbytes applies to the src, and can be bitshifted to apply to dst
+
+void Blit1(const void *src, void *dst, long rowbytes, long t, long l, long b, long r, uint32_t *clut);
 
 // Work in 32-bit longs
 void blit1asm(const void *srcpix, long srcrowskip, void *dstpix, long dstrowskip, long w, long h, uint32_t color0, uint32_t colorXOR);
