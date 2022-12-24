@@ -25,8 +25,8 @@ rH              equ r8
 rColor0         equ r9
 rColorXOR       equ r10
 
-rTmpPacked      equ r12
-rTmpPix         equ r13
+rTmpPacked      equ r11
+rTmpPix         equ r12
 
 @row
 	mtctr	rW ; using the ctr is worth about 2% speed
