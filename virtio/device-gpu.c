@@ -58,7 +58,8 @@ static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]);
 static void getBestSize(short *width, short *height);
 static uint32_t idForRes(short width, short height, bool force);
 static uint32_t resCount(void);
-static uint32_t setScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list);
+static bool mode(int new_depth, uint32_t new_rez);
+static uint32_t setVirtioScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list);
 static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
 static void updateScreen(short top, short left, short bottom, short right);
@@ -72,6 +73,9 @@ static OSStatus status(short csCode, void *param);
 static long rowbytesForBack(int relativeDepth, long width);
 static long rowbytesForFront(int relativeDepth, long width);
 static void reCLUT(int index);
+static void grayPattern(void);
+static void grayCLUT(void);
+static void linearCLUT(void);
 static OSStatus GetBaseAddr(VDPageInfo *rec);
 static OSStatus MySetEntries(VDSetEntryRecord *rec);
 static OSStatus DirectSetEntries(VDSetEntryRecord *rec);
@@ -84,7 +88,6 @@ static OSStatus GetGammaInfoList(VDGetGammaListRec *rec);
 static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec);
 static void setGammaTable(GammaTbl *tbl);
 static OSStatus GrayPage(VDPageInfo *rec);
-static void gray(void);
 static OSStatus SetGray(VDGrayRecord *rec);
 static OSStatus GetGray(VDGrayRecord *rec);
 static OSStatus GetPages(VDPageInfo *rec);
@@ -102,7 +105,6 @@ static OSStatus GetCurMode(VDSwitchInfoRec *rec);
 static OSStatus GetModeTiming(VDTimingInfoRec *rec);
 static OSStatus SetMode(VDPageInfo *rec);
 static OSStatus SwitchMode(VDSwitchInfoRec *rec);
-static bool setModeCommon(int new_depth, uint32_t new_rez);
 static OSStatus GetNextResolution(VDResolutionInfoRec *rec);
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec);
 
@@ -335,11 +337,15 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	setGammaTable((GammaTbl *)&builtinGamma[0].table);
 
 	getBestSize(&width, &height);
-	if (!setModeCommon(k32bit, idForRes(width, height, true)))
+	if (!mode(k32bit, idForRes(width, height, true)))
 		goto fail;
+
+	setGammaTable((GammaTbl *)&builtinGamma[0].table);
+	linearCLUT();
+	grayPattern();
+	updateScreen(0, 0, H, W);
 
 	// Initially VBL interrupts must be fast
 	VSLNewInterruptService(&info->deviceEntry, kVBLInterruptServiceType, &vblservice);
@@ -461,9 +467,34 @@ static uint32_t resCount(void) {
 	return n;
 }
 
+static bool mode(int new_depth, uint32_t new_rez) {
+	uint32_t resource;
+	short width, height;
+	size_t i;
+
+	width = rezzes[new_rez-1].w;
+	height = rezzes[new_rez-1].h;
+
+	change_in_progress = true;
+	resource = setVirtioScanout(0 /*scanout id*/, rowbytesForFront(new_depth, width), width, height, fbpages);
+	if (!resource) {
+		change_in_progress = false;
+		return false;
+	}
+	screen_resource = resource;
+	W = width;
+	H = height;
+	depth = new_depth;
+	rowbytes_back = rowbytesForBack(depth, W);
+	rowbytes_front = rowbytesForFront(depth, W);
+	change_in_progress = false;
+
+	return true;
+}
+
 // Must be called atomically
 // Returns the resource ID, or zero if you prefer
-static uint32_t setScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list) {
+static uint32_t setVirtioScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list) {
 	struct virtio_gpu_resource_detach_backing detach_backing = {0};
 	struct virtio_gpu_resource_create_2d create_2d = {0};
 	struct virtio_gpu_resource_attach_backing attach_backing = {0};
@@ -1017,6 +1048,77 @@ static void reCLUT(int index) {
 		((uint32_t)gamma_blu[publicCLUT[index].rgb.blue >> 8] << 24);
 }
 
+static void grayPattern(void) {
+	short x, y;
+	uint32_t value;
+
+	if (depth <= k16bit) {
+		if (depth == k1bit) {
+			value = 0x55555555;
+		} else if (depth == k2bit) {
+			value = 0x33333333;
+		} else if (depth == k4bit) {
+			value = 0x0f0f0f0f;
+		} else if (depth == k8bit) {
+			value = 0x00ff00ff;
+		} else if (depth == k16bit) {
+			value = 0x0000ffff;
+		}
+
+		for (y=0; y<H; y++) {
+			for (x=0; x<rowbytes_back; x+=4) {
+				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x) = value;
+			}
+			value = ~value;
+		}
+	} else if (depth == k32bit) {
+		value = 0x00000000;
+		for (y=0; y<H; y++) {
+			for (x=0; x<rowbytes_back; x+=8) {
+				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x) = value;
+				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x + 4) = ~value;
+			}
+			value = ~value;
+		}
+	}
+}
+
+static void grayCLUT(void) {
+	int i;
+
+	if (depth > k8bit) return;
+
+	for (i=0; i<256; i++) {
+		publicCLUT[i].rgb.red = 0x7fff;
+		publicCLUT[i].rgb.green = 0x7fff;
+		publicCLUT[i].rgb.blue = 0x7fff;
+		reCLUT(i);
+	}
+}
+
+static void linearCLUT(void) {
+	int i, j, bppshift, bpp, colors;
+	uint16_t luma;
+
+	if (depth > k8bit) return;
+
+	bppshift = depth - k1bit;
+	bpp = 1 << bppshift;
+	colors = 1 << bpp;
+
+	for (i=0; i<colors; i++) {
+		// Stretch the 1/2/4/8-bit code into 16 bits
+		luma = 0;
+		for (j=0; j<16; j++)
+			luma = (luma << bpp) | i;
+
+		publicCLUT[i].rgb.red = luma;
+		publicCLUT[i].rgb.green = luma;
+		publicCLUT[i].rgb.blue = luma;
+		reCLUT(i);
+	}
+}
+
 // Returns the base address of a specified page in the current mode.
 // --- csMode      Unused
 // --- csData      Unused
@@ -1131,9 +1233,14 @@ static OSStatus SetGamma(VDGammaRecord *rec) {
 	else
 		setGammaTable((GammaTbl *)&uncorrectedTable);
 
-	// SetGamma guaranteed to be followed by SetEntries, which will updateScreen;
-	// but this can't apply to direct modes
-	if (depth >= k16bit) updateScreen(0, 0, H, W);
+	if (depth <= k8bit) {
+		// SetGamma on indexed devices sets a linear black-to-white CLUT,
+		// and is guaranteed to be followed by a SetEntries to fix the CLUT.
+		linearCLUT();
+	} else {
+		// What to do on direct devices?
+		updateScreen(0, 0, H, W);
+	}
 
 	return noErr;
 }
@@ -1262,44 +1369,9 @@ static void setGammaTable(GammaTbl *tbl) {
 // --- csBaseAddr  Unused
 static OSStatus GrayPage(VDPageInfo *rec) {
 	if (rec->csPage != 0) return controlErr;
-	gray();
+	grayPattern();
 	updateScreen(0, 0, H, W);
 	return noErr;
-}
-
-static void gray(void) {
-	short x, y;
-	uint32_t value;
-
-	if (depth <= k16bit) {
-		if (depth == k1bit) {
-			value = 0x55555555;
-		} else if (depth == k2bit) {
-			value = 0x33333333;
-		} else if (depth == k4bit) {
-			value = 0x0f0f0f0f;
-		} else if (depth == k8bit) {
-			value = 0x00ff00ff;
-		} else if (depth == k16bit) {
-			value = 0x0000ffff;
-		}
-
-		for (y=0; y<H; y++) {
-			for (x=0; x<rowbytes_back; x+=4) {
-				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x) = value;
-			}
-			value = ~value;
-		}
-	} else if (depth == k32bit) {
-		value = 0x00000000;
-		for (y=0; y<H; y++) {
-			for (x=0; x<rowbytes_back; x+=8) {
-				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x) = value;
-				*(uint32_t *)((char *)backbuf + y*rowbytes_back + x + 4) = ~value;
-			}
-			value = ~value;
-		}
-	}
 }
 
 // Specify whether subsequent SetEntries calls fill a card’s CLUT with
@@ -1456,7 +1528,11 @@ static OSStatus SetMode(VDPageInfo *rec) {
 	if (rec->csMode < kDepthMode1 || rec->csMode > kDepthModeMax) return paramErr;
 	if (rec->csPage != 0) return controlErr;
 
-	if (!setModeCommon(rec->csMode, idForRes(W, H, false))) return paramErr;
+	if (!mode(rec->csMode, idForRes(W, H, false))) return paramErr;
+
+	grayCLUT();
+	perfTest();
+	updateScreen(0, 0, H, W);
 
 	rec->csBaseAddr = backbuf;
 	return noErr;
@@ -1471,45 +1547,14 @@ static OSStatus SwitchMode(VDSwitchInfoRec *rec) {
 	if (rec->csData < 1 || rec->csData > resCount()) return paramErr;
 	if (rec->csPage != 0) return paramErr;
 
-	if (!setModeCommon(rec->csMode, rec->csData)) return paramErr;
+	if (!mode(rec->csMode, rec->csData)) return paramErr;
 
-	rec->csBaseAddr = backbuf;
-	return noErr;
-}
-
-static bool setModeCommon(int new_depth, uint32_t new_rez) {
-	uint32_t resource;
-	short width, height;
-	size_t i;
-
-	for (i=0; i<256; i++) {
-		publicCLUT[i].rgb.red = 0x7fff;
-		publicCLUT[i].rgb.green = 0x7fff;
-		publicCLUT[i].rgb.blue = 0x7fff;
-		reCLUT(i);
-	}
-
-	width = rezzes[new_rez-1].w;
-	height = rezzes[new_rez-1].h;
-
-	change_in_progress = true;
-	resource = setScanout(0 /*scanout id*/, rowbytesForFront(new_depth, width), width, height, fbpages);
-	if (!resource) {
-		change_in_progress = false;
-		return false;
-	}
-	screen_resource = resource;
-	W = width;
-	H = height;
-	depth = new_depth;
-	rowbytes_back = rowbytesForBack(depth, W);
-	rowbytes_front = rowbytesForFront(depth, W);
-	change_in_progress = false;
-
+	grayCLUT();
 	perfTest();
 	updateScreen(0, 0, H, W);
 
-	return true;
+	rec->csBaseAddr = backbuf;
+	return noErr;
 }
 
 // Reports all display resolutions that the driver supports.
