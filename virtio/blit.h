@@ -7,6 +7,10 @@ extern const int BlitterAlign[6];
 
 // rowbytes applies to the src, and can be bitshifted to apply to dst
 
+void Blit(int bppshift,
+	long t, long l, long b, long r, const void *src, void *dest, long rowbytes,
+	uint32_t clut[256], uint8_t gamma_red[256], uint8_t gamma_grn[256], uint8_t gamma_blu[256]);
+
 void Blit1(const void *src, void *dst, long rowbytes, long t, long l, long b, long r, uint32_t *clut);
 
 // Work in 32-bit longs

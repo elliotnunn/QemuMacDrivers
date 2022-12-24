@@ -674,86 +674,10 @@ static void updateScreen(short top, short left, short bottom, short right) {
 
 	logTime('Blit', 0);
 
-	// These blitters are not satisfactory
-	if (depth == k1bit) {
-		Blit1(backbuf, frontbuf, rowbytes_back, top, left, bottom, right, private_clut);
-	} else if (depth == k2bit) {
-		int leftBytes = (left / 4) & ~3;
-		int rightBytes = ((right + 15) / 4) & ~3;
-		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowbytes_back + leftBytes);
-			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~15) * 4);
-			for (x=leftBytes; x<rightBytes; x+=4) {
-				uint32_t s = *src++;
-				*dest++ = private_clut[(s >> 30) & 3];
-				*dest++ = private_clut[(s >> 28) & 3];
-				*dest++ = private_clut[(s >> 26) & 3];
-				*dest++ = private_clut[(s >> 24) & 3];
-				*dest++ = private_clut[(s >> 22) & 3];
-				*dest++ = private_clut[(s >> 20) & 3];
-				*dest++ = private_clut[(s >> 18) & 3];
-				*dest++ = private_clut[(s >> 16) & 3];
-				*dest++ = private_clut[(s >> 14) & 3];
-				*dest++ = private_clut[(s >> 12) & 3];
-				*dest++ = private_clut[(s >> 10) & 3];
-				*dest++ = private_clut[(s >> 8) & 3];
-				*dest++ = private_clut[(s >> 6) & 3];
-				*dest++ = private_clut[(s >> 4) & 3];
-				*dest++ = private_clut[(s >> 2) & 3];
-				*dest++ = private_clut[(s >> 0) & 3];
-			}
-		}
-	} else if (depth == k4bit) {
-		int leftBytes = (left / 2) & ~3;
-		int rightBytes = ((right + 7) / 2) & ~3;
-		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowbytes_back + leftBytes);
-			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + (left & ~7) * 4);
-			for (x=leftBytes; x<rightBytes; x+=4) {
-				uint32_t s = *src++;
-				*dest++ = private_clut[(s >> 28) & 15];
-				*dest++ = private_clut[(s >> 24) & 15];
-				*dest++ = private_clut[(s >> 20) & 15];
-				*dest++ = private_clut[(s >> 16) & 15];
-				*dest++ = private_clut[(s >> 12) & 15];
-				*dest++ = private_clut[(s >> 8) & 15];
-				*dest++ = private_clut[(s >> 4) & 15];
-				*dest++ = private_clut[(s >> 0) & 15];
-			}
-		}
-	} else if (depth == k8bit) {
-		for (y=top; y<bottom; y++) {
-			uint8_t *src = (void *)((char *)backbuf + y * rowbytes_back + left);
-			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + left * 4);
-			for (x=left; x<right; x++) {
-				*dest++ = private_clut[*src++];
-			}
-		}
-	} else if (depth == k16bit) {
-		for (y=top; y<bottom; y++) {
-			uint16_t *src = (void *)((char *)backbuf + y * rowbytes_back + left * 2);
-			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + left * 4);
-			for (x=left; x<right; x++) {
-				uint16_t s = *src++;
-				*dest++ =
-					((uint32_t)gamma_blu[((s & 0x1f) << 3) | ((s & 0x1f) << 3 >> 5)] << 24) |
-					((uint32_t)gamma_grn[((s & 0x3e0) >> 5 << 3) | ((s & 0x3e0) >> 5 << 3 >> 5)] << 16) |
-					((uint32_t)gamma_red[((s & 0x7c00) >> 10 << 3) | ((s & 0x7c00) >> 10 << 3 >> 5)] << 8);
-			}
-		}
-	} else if (depth == k32bit) {
-		for (y=top; y<bottom; y++) {
-			uint32_t *src = (void *)((char *)backbuf + y * rowbytes_back + left * 4);
-			uint32_t *dest = (void *)((char *)frontbuf + y * rowbytes_front + left * 4);
-			for (x=left; x<right; x++) {
-				uint32_t s = *src++;
-				*dest++ =
-					((uint32_t)gamma_blu[s & 0xff] << 24) |
-					((uint32_t)gamma_grn[(s >> 8) & 0xff] << 16) |
-					((uint32_t)gamma_red[(s >> 16) & 0xff] << 8);
-			}
-		}
-	}
+	Blit(depth - k1bit,
+		top, left, bottom, right,
+		backbuf, frontbuf, rowbytes_back,
+		private_clut, gamma_red, gamma_grn, gamma_blu);
 
 	Atomic2(sendPixels,
 		(void *)(((unsigned long)top << 16) | left),
