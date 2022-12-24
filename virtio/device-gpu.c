@@ -53,6 +53,9 @@ enum {
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
 static OSStatus initialize(DriverInitInfo *info);
+static OSStatus finalize(DriverFinalInfo *info);
+static OSStatus control(short csCode, void *param);
+static OSStatus status(short csCode, void *param);
 static void transact(void *req, size_t req_size, void *reply, size_t reply_size);
 static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]);
 static void getBestSize(short *width, short *height);
@@ -67,15 +70,13 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
 static void perfTest(void);
 static void perfTestNotification(NMRecPtr nmReqPtr);
 static OSStatus VBL(void *p1, void *p2);
-static OSStatus finalize(DriverFinalInfo *info);
-static OSStatus control(short csCode, void *param);
-static OSStatus status(short csCode, void *param);
 static long rowbytesForBack(int relativeDepth, long width);
 static long rowbytesForFront(int relativeDepth, long width);
 static void reCLUT(int index);
 static void grayPattern(void);
 static void grayCLUT(void);
 static void linearCLUT(void);
+static void setGammaTable(GammaTbl *tbl);
 static OSStatus GetBaseAddr(VDPageInfo *rec);
 static OSStatus MySetEntries(VDSetEntryRecord *rec);
 static OSStatus DirectSetEntries(VDSetEntryRecord *rec);
@@ -86,7 +87,6 @@ static OSStatus SetGamma(VDGammaRecord *rec);
 static OSStatus GetGamma(VDGammaRecord *rec);
 static OSStatus GetGammaInfoList(VDGetGammaListRec *rec);
 static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec);
-static void setGammaTable(GammaTbl *tbl);
 static OSStatus GrayPage(VDPageInfo *rec);
 static OSStatus SetGray(VDGrayRecord *rec);
 static OSStatus GetGray(VDGrayRecord *rec);
@@ -365,6 +365,56 @@ fail:
 	if (frontbuf) FreePages(frontbuf);
 	VFail();
 	return paramErr;
+}
+
+static OSStatus finalize(DriverFinalInfo *info) {
+	return noErr;
+}
+
+static OSStatus control(short csCode, void *param) {
+	switch (csCode) {
+		case cscDirectSetEntries: return DirectSetEntries(param);
+		//case cscDrawHardwareCursor: return DrawHardwareCursor(param);
+		case cscGrayPage: return GrayPage(param);
+		case cscSavePreferredConfiguration: return SavePreferredConfiguration(param);
+		case cscSetClutBehavior: return SetClutBehavior(param);
+		case cscSetEntries: return MySetEntries(param);
+		case cscSetGamma: return SetGamma(param);
+		case cscSetGray: return SetGray(param);
+		//case cscSetHardwareCursor: return SetHardwareCursor(param);
+		case cscSetInterrupt: return SetInterrupt(param);
+		case cscSetMode: return SetMode(param);
+		case cscSetPowerState: return SetPowerState(param);
+		case cscSetSync: return SetSync(param);
+		case cscSwitchMode: return SwitchMode(param);
+	}
+	return controlErr;
+}
+
+static OSStatus status(short csCode, void *param) {
+	switch (csCode) {
+		case cscGetBaseAddr: return GetBaseAddr(param);
+		case cscGetClutBehavior: return GetClutBehavior(param);
+		case cscGetConnection: return GetConnection(param);
+		case cscGetCurMode: return GetCurMode(param);
+		case cscGetEntries: return GetEntries(param);
+		case cscGetGamma: return GetGamma(param);
+		case cscGetGammaInfoList: return GetGammaInfoList(param);
+		case cscGetGray: return GetGray(param);
+		//case cscGetHardwareCursorDrawState: return GetHardwareCursorDrawState(param);
+		case cscGetInterrupt: return GetInterrupt(param);
+		case cscGetMode: return GetMode(param);
+		case cscGetModeTiming: return GetModeTiming(param);
+		case cscGetNextResolution: return GetNextResolution(param);
+		case cscGetPages: return GetPages(param);
+		case cscGetPowerState: return GetPowerState(param);
+		case cscGetPreferredConfiguration: return GetPreferredConfiguration(param);
+		case cscGetSync: return GetSync(param);
+		case cscGetVideoParameters: return GetVideoParameters(param);
+		case cscRetrieveGammaTable: return RetrieveGammaTable(param);
+		//case cscSupportsHardwareCursor: return SupportsHardwareCursor(param);
+	}
+	return statusErr;
 }
 
 // Synchronous transaction instead of the usual async queue, must not interrupt
@@ -890,56 +940,6 @@ static OSStatus VBL(void *p1, void *p2) {
 	return noErr;
 }
 
-static OSStatus finalize(DriverFinalInfo *info) {
-	return noErr;
-}
-
-static OSStatus control(short csCode, void *param) {
-	switch (csCode) {
-		case cscDirectSetEntries: return DirectSetEntries(param);
-		//case cscDrawHardwareCursor: return DrawHardwareCursor(param);
-		case cscGrayPage: return GrayPage(param);
-		case cscSavePreferredConfiguration: return SavePreferredConfiguration(param);
-		case cscSetClutBehavior: return SetClutBehavior(param);
-		case cscSetEntries: return MySetEntries(param);
-		case cscSetGamma: return SetGamma(param);
-		case cscSetGray: return SetGray(param);
-		//case cscSetHardwareCursor: return SetHardwareCursor(param);
-		case cscSetInterrupt: return SetInterrupt(param);
-		case cscSetMode: return SetMode(param);
-		case cscSetPowerState: return SetPowerState(param);
-		case cscSetSync: return SetSync(param);
-		case cscSwitchMode: return SwitchMode(param);
-	}
-	return controlErr;
-}
-
-static OSStatus status(short csCode, void *param) {
-	switch (csCode) {
-		case cscGetBaseAddr: return GetBaseAddr(param);
-		case cscGetClutBehavior: return GetClutBehavior(param);
-		case cscGetConnection: return GetConnection(param);
-		case cscGetCurMode: return GetCurMode(param);
-		case cscGetEntries: return GetEntries(param);
-		case cscGetGamma: return GetGamma(param);
-		case cscGetGammaInfoList: return GetGammaInfoList(param);
-		case cscGetGray: return GetGray(param);
-		//case cscGetHardwareCursorDrawState: return GetHardwareCursorDrawState(param);
-		case cscGetInterrupt: return GetInterrupt(param);
-		case cscGetMode: return GetMode(param);
-		case cscGetModeTiming: return GetModeTiming(param);
-		case cscGetNextResolution: return GetNextResolution(param);
-		case cscGetPages: return GetPages(param);
-		case cscGetPowerState: return GetPowerState(param);
-		case cscGetPreferredConfiguration: return GetPreferredConfiguration(param);
-		case cscGetSync: return GetSync(param);
-		case cscGetVideoParameters: return GetVideoParameters(param);
-		case cscRetrieveGammaTable: return RetrieveGammaTable(param);
-		//case cscSupportsHardwareCursor: return SupportsHardwareCursor(param);
-	}
-	return statusErr;
-}
-
 // For QuickDraw
 static long rowbytesForBack(int relativeDepth, long width) {
 	long bppshift, bytealign, size;
@@ -1041,6 +1041,46 @@ static void linearCLUT(void) {
 		public_clut[i].rgb.green = luma;
 		public_clut[i].rgb.blue = luma;
 		reCLUT(i);
+	}
+}
+
+static void setGammaTable(GammaTbl *tbl) {
+	void *data = (char *)tbl + 12 + tbl->gFormulaSize;
+	long size = 12 +
+		tbl->gFormulaSize +
+		(long)tbl->gChanCnt * tbl->gDataCnt * tbl->gDataWidth / 8;
+	int i, j;
+
+	memcpy(gamma_public, tbl, size);
+
+	// red, green, blue
+	for (i=0; i<3; i++) {
+		uint8_t *src, *dst;
+		if (tbl->gChanCnt == 3) {
+			src = (uint8_t *)data + i * tbl->gDataCnt * tbl->gDataWidth / 8;
+		} else {
+			src = (uint8_t *)data;
+		}
+
+		if (i == 0) {
+			dst = (void *)gamma_red;
+		} else if (i == 1) {
+			dst = (void *)gamma_grn;
+		} else {
+			dst = (void *)gamma_blu;
+		}
+
+		// Calculate and report approximate exponent
+		// {
+		// 	const char colors[] = "RGB";
+		// 	double middle = ((double)src[127] + (double)src[128]) / 2.0 / 255.0;
+		// 	double exponent = -log2(middle);
+		// 	lprintf("Approximate %c exponent = %.3f\n", colors[i], exponent);
+		// }
+
+		for (j=0; j<256 && j<tbl->gDataCnt; j++) {
+			dst[j] = src[j * tbl->gDataWidth / 8];
+		}
 	}
 }
 
@@ -1244,46 +1284,6 @@ static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec) {
 	memcpy(rec->csGammaTablePtr, &builtinGamma[id-first].table, sizeof(builtinGamma[0].table));
 
 	return noErr;
-}
-
-static void setGammaTable(GammaTbl *tbl) {
-	void *data = (char *)tbl + 12 + tbl->gFormulaSize;
-	long size = 12 +
-		tbl->gFormulaSize +
-		(long)tbl->gChanCnt * tbl->gDataCnt * tbl->gDataWidth / 8;
-	int i, j;
-
-	memcpy(gamma_public, tbl, size);
-
-	// red, green, blue
-	for (i=0; i<3; i++) {
-		uint8_t *src, *dst;
-		if (tbl->gChanCnt == 3) {
-			src = (uint8_t *)data + i * tbl->gDataCnt * tbl->gDataWidth / 8;
-		} else {
-			src = (uint8_t *)data;
-		}
-
-		if (i == 0) {
-			dst = (void *)gamma_red;
-		} else if (i == 1) {
-			dst = (void *)gamma_grn;
-		} else {
-			dst = (void *)gamma_blu;
-		}
-
-		// Calculate and report approximate exponent
-		// {
-		// 	const char colors[] = "RGB";
-		// 	double middle = ((double)src[127] + (double)src[128]) / 2.0 / 255.0;
-		// 	double exponent = -log2(middle);
-		// 	lprintf("Approximate %c exponent = %.3f\n", colors[i], exponent);
-		// }
-
-		for (j=0; j<256 && j<tbl->gDataCnt; j++) {
-			dst[j] = src[j * tbl->gDataWidth / 8];
-		}
-	}
 }
 
 // Fills the specified video page with a dithered gray pattern in the
