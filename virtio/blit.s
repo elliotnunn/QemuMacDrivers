@@ -14,6 +14,21 @@
 
 	ENDM
 
+	MakeFunction blit1asm
+
+rSrcPix         equ r3
+rSrcRowSkip     equ r4
+rDstPix         equ r5
+rDstRowSkip     equ r6
+rW              equ r7
+rH              equ r8
+rColor0         equ r9
+rColorXOR       equ r10
+
+rTmpPacked      equ r0
+rTmpPix1        equ r11
+rTmpPix2        equ r12
+
 ;# Python script to generate the tight loop
 ;columns = ([], [])
 ;
@@ -30,21 +45,6 @@
 ;    for col in columns:
 ;        if i < len(col) and col[i]:
 ;            print('\t' + col[i])
-
-	MakeFunction blit1asm
-
-rSrcPix         equ r3
-rSrcRowSkip     equ r4
-rDstPix         equ r5
-rDstRowSkip     equ r6
-rW              equ r7
-rH              equ r8
-rColor0         equ r9
-rColorXOR       equ r10
-
-rTmpPacked      equ r0
-rTmpPix1        equ r11
-rTmpPix2        equ r12
 
 @row
 	mtctr   rW ; using the ctr is worth about 2% speed
