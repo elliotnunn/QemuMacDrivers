@@ -38,6 +38,7 @@ enum {
 	MINBUF = 2*1024*1024, // enough for 800x600
 	FAST_REFRESH = -16626, // before QD callbacks work, microsec, 60.15 Hz
 	SLOW_REFRESH = 1000, // after QD callbacks work, millisec, 1 Hz
+	CURSOREDGE = 16,
 };
 
 enum {
@@ -107,6 +108,12 @@ static OSStatus SetMode(VDPageInfo *rec);
 static OSStatus SwitchMode(VDSwitchInfoRec *rec);
 static OSStatus GetNextResolution(VDResolutionInfoRec *rec);
 static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec);
+static OSStatus SupportsHardwareCursor(VDSupportsHardwareCursorRec *rec);
+static OSStatus GetHardwareCursorDrawState(VDHardwareCursorDrawStateRec *rec);
+static OSStatus SetHardwareCursor(VDSetHardwareCursorRec *rec);
+static OSStatus DrawHardwareCursor(VDDrawHardwareCursorRec *rec);
+static void gammaCursor(void);
+static void blitCursor(void);
 
 // Allocate one 4096-byte page for all our screen-update buffers.
 // (16 is the maximum number of 192-byte chunks fitting in a page)
@@ -152,6 +159,14 @@ static bool qdworks;
 
 static bool pending_notification; // deduplicate NMInstall
 static bool change_in_progress; // SetMode/SwitchMode lock out frame interrupts
+
+// Cursor that the driver composites (like a hardware cursor)
+static bool curs_set;
+static bool curs_visible;
+static bool curs_inverts;
+static short curs_t, curs_l, curs_b, curs_r;
+static uint32_t curs_back[CURSOREDGE*CURSOREDGE];
+static uint32_t curs_front[CURSOREDGE*CURSOREDGE];
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -374,14 +389,14 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static OSStatus control(short csCode, void *param) {
 	switch (csCode) {
 		case cscDirectSetEntries: return DirectSetEntries(param);
-		//case cscDrawHardwareCursor: return DrawHardwareCursor(param);
+		case cscDrawHardwareCursor: return DrawHardwareCursor(param);
 		case cscGrayPage: return GrayPage(param);
 		case cscSavePreferredConfiguration: return SavePreferredConfiguration(param);
 		case cscSetClutBehavior: return SetClutBehavior(param);
 		case cscSetEntries: return MySetEntries(param);
 		case cscSetGamma: return SetGamma(param);
 		case cscSetGray: return SetGray(param);
-		//case cscSetHardwareCursor: return SetHardwareCursor(param);
+		case cscSetHardwareCursor: return SetHardwareCursor(param);
 		case cscSetInterrupt: return SetInterrupt(param);
 		case cscSetMode: return SetMode(param);
 		case cscSetPowerState: return SetPowerState(param);
@@ -401,7 +416,7 @@ static OSStatus status(short csCode, void *param) {
 		case cscGetGamma: return GetGamma(param);
 		case cscGetGammaInfoList: return GetGammaInfoList(param);
 		case cscGetGray: return GetGray(param);
-		//case cscGetHardwareCursorDrawState: return GetHardwareCursorDrawState(param);
+		case cscGetHardwareCursorDrawState: return GetHardwareCursorDrawState(param);
 		case cscGetInterrupt: return GetInterrupt(param);
 		case cscGetMode: return GetMode(param);
 		case cscGetModeTiming: return GetModeTiming(param);
@@ -412,7 +427,7 @@ static OSStatus status(short csCode, void *param) {
 		case cscGetSync: return GetSync(param);
 		case cscGetVideoParameters: return GetVideoParameters(param);
 		case cscRetrieveGammaTable: return RetrieveGammaTable(param);
-		//case cscSupportsHardwareCursor: return SupportsHardwareCursor(param);
+		case cscSupportsHardwareCursor: return SupportsHardwareCursor(param);
 	}
 	return statusErr;
 }
@@ -726,6 +741,21 @@ static void updateScreen(short t, short l, short b, short r) {
 		t, &l, b, &r,
 		backbuf, frontbuf, rowbytes_back,
 		private_clut, gamma_red, gamma_grn, gamma_blu);
+
+	// Any overlap with the cursor? Redraw the cursor.
+	if (curs_visible && curs_l < r && l < curs_r && curs_t < b && t < curs_b) {
+		// Does the cursor need a clean background to draw on?
+		// And is the background overlap incomplete?
+		if (curs_inverts && (curs_l < l || r < curs_r || curs_t < t || b < curs_b)) {
+			short my_curs_l = curs_l, my_curs_r = curs_r;
+			Blit(depth - k1bit,
+				curs_t, &my_curs_l, curs_b, &my_curs_r,
+				backbuf, frontbuf, rowbytes_back,
+				private_clut, gamma_red, gamma_grn, gamma_blu);
+		}
+
+		blitCursor();
+	}
 
 	Atomic2(sendPixels,
 		(void *)(((unsigned long)t << 16) | l),
@@ -1080,6 +1110,8 @@ static void setGammaTable(GammaTbl *tbl) {
 			dst[j] = src[j * tbl->gDataWidth / 8];
 		}
 	}
+
+	gammaCursor();
 }
 
 // Returns the base address of a specified page in the current mode.
@@ -1589,4 +1621,217 @@ static OSStatus GetVideoParameters(VDVideoParametersInfoRec *rec) {
 	}
 
 	return noErr;
+}
+
+// Graphics drivers that support hardware cursors must return true.
+// <-- csSupportsHardwareCursor  true if hardware cursor is supported
+static OSStatus SupportsHardwareCursor(VDSupportsHardwareCursorRec *rec) {
+	rec->csSupportsHardwareCursor = 1;
+	return noErr;
+}
+
+// The csCursorSet parameter should be true if the last SetHardwareCursor
+// control call was successful and false otherwise. If csCursorSet is true,
+// the csCursorX, csCursorY, and csCursorVisible values must match the
+// parameters passed in to the last DrawHardwareCursor control call.
+// <-- csCursorX           X coordinate from last DrawHardwareCursor call
+// <-- csCursorY           Y coordinate from last DrawHardwareCursor call
+// <-- csCursorVisible     true if the cursor is visible
+// <-- csCursorSet         true if cursor was successfully set by the last
+//                         SetHardwareCursor call
+static OSStatus GetHardwareCursorDrawState(VDHardwareCursorDrawStateRec *rec) {
+	rec->csCursorX = curs_l;
+	rec->csCursorY = curs_t;
+	rec->csCursorVisible = curs_visible;
+	rec->csCursorSet = curs_set;
+	return noErr;
+}
+
+// QuickDraw uses the SetHardwareCursor control call to set up the hardware
+// cursor and determine whether the hardware can support it. The driver
+// must determine whether it can support the given cursor and, if so,
+// program the hardware cursor frame buffer (or equivalent), set up the
+// CLUT, and return noErr. If the driver cannot support the cursor it must
+// return controlErr. The driver must remember whether this call was
+// successful for subsequent GetHardwareCursorDrawState or
+// DrawHardwareCursor calls, but should not change the cursor’s x or y
+// coordinates or its visible state.
+//  --> csCursorRef    Reference to cursor data
+static OSStatus SetHardwareCursor(VDSetHardwareCursorRec *rec) {
+	int i;
+	int x, y;
+
+	enum {CLUTSIZE = 256};
+
+	struct CursorColorTable {
+		long ctSeed;
+		short ctFlags;
+		short ctSize;
+		ColorSpec ctTable[CLUTSIZE];
+	};
+	static struct CursorColorTable curs_clut;
+	static uint32_t curs_bmp_values[CLUTSIZE]; // populated 0...255 below
+
+	static HardwareCursorDescriptorRec curs_desc = {
+		kHardwareCursorDescriptorMajorVersion,
+		kHardwareCursorDescriptorMinorVersion,
+		CURSOREDGE, CURSOREDGE, // height, width
+		sizeof(curs_back[0])*8, // bitDepth
+		0, // maskBitDepth (reserved)
+		CLUTSIZE, // numColors (excluding the transparent and invert ones)
+		curs_bmp_values,
+		0, // flags
+		kTransparentEncodedPixel | kInvertingEncodedPixel, // supportedSpecialEncodings
+		{0x80000000, 0x40000000}
+	};
+
+	static HardwareCursorInfoRec curs_struct = {
+		kHardwareCursorInfoMajorVersion,
+		kHardwareCursorInfoMinorVersion,
+		0, 0, // height, width
+		(ColorTable *)&curs_clut, // colorMap
+		(void *)curs_back
+	};
+
+	for (i=0; i<sizeof(curs_bmp_values)/sizeof(*curs_bmp_values); i++) {
+		curs_bmp_values[i] = i;
+	}
+
+	if (!VSLPrepareCursorForHardwareCursor(rec->csCursorRef, &curs_desc, &curs_struct)) {
+		curs_set = false;
+		return controlErr;
+	}
+
+	curs_r = curs_l + curs_struct.cursorWidth;
+	curs_b = curs_t + curs_struct.cursorHeight;
+
+	// Stretch a potentially smaller image out to 16x16
+	for (y=CURSOREDGE-1; y>=0; y--) {
+		for (x=CURSOREDGE-1; x>=0; x--) {
+			if (x < curs_struct.cursorWidth && y < curs_struct.cursorHeight) {
+				curs_back[CURSOREDGE*y + x] = curs_back[curs_struct.cursorWidth*y + x];
+			} else {
+				curs_back[CURSOREDGE*y + x] = 0x80000000; // transparent
+			}
+		}
+	}
+
+	curs_r = curs_l;
+	curs_b = curs_t;
+	curs_inverts = false;
+
+	// Look up each pixel in the CLUT
+	// Byte-swap from CRGB to BGRC; C=special-code
+	for (y=0; y<CURSOREDGE; y++) {
+		for (x=0; x<CURSOREDGE; x++) {
+			uint32_t *pixel = &curs_back[CURSOREDGE*y + x];
+
+			// While we're looping, get the bounds of nontransparent pixels
+			if ((*pixel & 0x80000000) == 0) {
+				curs_r = MAX(curs_r, curs_l + x + 1);
+				curs_b = curs_t + y + 1;
+			}
+
+			// And flag whether the cursor inverts its background
+			if ((*pixel & 0x40000000) == 0) {
+				curs_inverts = true;
+			}
+
+			if (*pixel & 0xff000000) {
+				*pixel >>= 24;
+			} else {
+				*pixel =
+					((uint32_t)curs_clut.ctTable[*pixel].rgb.red >> 8 << 8) |
+					((uint32_t)curs_clut.ctTable[*pixel].rgb.green >> 8 << 16) |
+					((uint32_t)curs_clut.ctTable[*pixel].rgb.blue >> 8 << 24);
+			}
+		}
+	}
+
+	gammaCursor();
+
+	curs_set = true;
+	return noErr;
+}
+
+// Sets the cursor’s x and y coordinates and visible state. If the cursor
+// was successfully set by a previous call to SetHardwareCursor, the driver
+// must program the hardware with the given x, y, and visible parameters
+// and then return noErr. If the cursor was not successfully set by the
+// last SetHardwareCursor call, the driver must return controlErr.
+// --> csCursorX           X coordinate
+// --> csCursorY           Y coordinate
+// --> csCursorVisible     true if the cursor must be visible
+static OSStatus DrawHardwareCursor(VDDrawHardwareCursorRec *rec) {
+	short t=0x7fff, l=0x7fff, b=0, r=0;
+
+	if (!curs_set) return controlErr;
+
+	// Erase the old one
+	if (curs_visible) {
+		t = MIN(t, curs_t);
+		l = MIN(l, curs_l);
+		b = MAX(b, curs_b);
+		r = MAX(r, curs_r);
+	}
+
+	curs_visible = rec->csCursorVisible;
+	curs_b += rec->csCursorY - curs_t;
+	curs_r += rec->csCursorX - curs_l;
+	curs_t = rec->csCursorY;
+	curs_l = rec->csCursorX;
+
+	// Paint the new one
+	if (curs_visible) {
+		t = MIN(t, curs_t);
+		l = MIN(l, curs_l);
+		b = MAX(b, curs_b);
+		r = MAX(r, curs_r);
+	}
+
+	// Never call updateScreen out of bounds
+	if (t != 0x7fff) {
+		updateScreen(MAX(t, 0), MAX(l, 0), MIN(b, H), MIN(r, W));
+	}
+
+	return noErr;
+}
+
+static void gammaCursor(void) {
+	int i;
+
+	for (i=0; i<sizeof(curs_back)/sizeof(*curs_back); i++) {
+		uint32_t pixel = curs_back[i];
+
+		// Keep in BGRC format
+		if ((pixel & 0xff) == 0) {
+			pixel =
+				((uint32_t)gamma_red[(pixel >> 8) & 0xff] << 8) |
+				((uint32_t)gamma_grn[(pixel >> 16) & 0xff] << 16) |
+				((uint32_t)gamma_blu[(pixel >> 24) & 0xff] << 24);
+		}
+
+		curs_front[i] = pixel;
+	}
+}
+
+// Copy cursor to front buffer
+static void blitCursor(void) {
+	short x, y;
+
+	// Primitively blit the cursor
+	for (y=MAX(0, -curs_t); y<MIN(CURSOREDGE, H-curs_t); y++) {
+		for (x=MAX(0, -curs_l); x<MIN(CURSOREDGE, W-curs_l); x++) {
+			uint32_t pixel = curs_front[CURSOREDGE*y + x];
+			uint32_t *target = (uint32_t *)((char *)frontbuf + rowbytes_front*(curs_t+y) + 4*(curs_l+x));
+			if (pixel & 0x80) {
+				// transparent, do nothing
+			} else if (pixel & 0x40) {
+				// invert
+				*target ^= 0xffffff00;
+			} else {
+				*target = pixel;
+			}
+		}
+	}
 }
