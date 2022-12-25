@@ -27,8 +27,6 @@ void Blit(int bppshift,
 	*l &= -pixalign;
 	*r = (*r + pixalign - 1) & -pixalign;
 
-	// DRAW CURSOR HERE!
-
 	if (bppshift == 0) {
 		long w = *r - *l;
 
