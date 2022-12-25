@@ -15,7 +15,7 @@ const char BlitterAlign[6] = {
 
 void Blit(int bppshift,
 	short t, short *l, short b, short *r, const void *src, void *dest, long rowbytes,
-	uint32_t clut[256], uint8_t gamma_red[256], uint8_t gamma_grn[256], uint8_t gamma_blu[256]) {
+	uint32_t clut[256], uint8_t red[256], uint8_t grn[256], uint8_t blu[256]) {
 
 	long bytealign, pixalign, rowbytes_dest;
 	size_t x, y;
@@ -99,9 +99,9 @@ void Blit(int bppshift,
 			for (x=*l; x<*r; x++) {
 				uint16_t s = *srcctr++;
 				*destctr++ =
-					((uint32_t)gamma_blu[((s & 0x1f) << 3) | ((s & 0x1f) << 3 >> 5)] << 24) |
-					((uint32_t)gamma_grn[((s & 0x3e0) >> 5 << 3) | ((s & 0x3e0) >> 5 << 3 >> 5)] << 16) |
-					((uint32_t)gamma_red[((s & 0x7c00) >> 10 << 3) | ((s & 0x7c00) >> 10 << 3 >> 5)] << 8);
+					((uint32_t)blu[((s & 0x1f) << 3) | ((s & 0x1f) << 3 >> 5)] << 24) |
+					((uint32_t)grn[((s & 0x3e0) >> 5 << 3) | ((s & 0x3e0) >> 5 << 3 >> 5)] << 16) |
+					((uint32_t)red[((s & 0x7c00) >> 10 << 3) | ((s & 0x7c00) >> 10 << 3 >> 5)] << 8);
 			}
 		}
 	} else if (bppshift == 5) {
@@ -111,9 +111,9 @@ void Blit(int bppshift,
 			for (x=*l; x<*r; x++) {
 				uint32_t s = *srcctr++;
 				*destctr++ =
-					((uint32_t)gamma_blu[s & 0xff] << 24) |
-					((uint32_t)gamma_grn[(s >> 8) & 0xff] << 16) |
-					((uint32_t)gamma_red[(s >> 16) & 0xff] << 8);
+					((uint32_t)blu[s & 0xff] << 24) |
+					((uint32_t)grn[(s >> 8) & 0xff] << 16) |
+					((uint32_t)red[(s >> 16) & 0xff] << 8);
 			}
 		}
 	}
