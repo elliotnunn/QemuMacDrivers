@@ -17,17 +17,37 @@ void Blit(int bppshift,
 	long t, long l, long b, long r, const void *src, void *dest, long rowbytes,
 	uint32_t clut[256], uint8_t gamma_red[256], uint8_t gamma_grn[256], uint8_t gamma_blu[256]) {
 
-	long rowbytes_dest = rowbytes << (5 - bppshift);
+	long bytealign, pixalign, rowbytes_dest;
 	size_t x, y;
 
+	bytealign = BlitterAlign[bppshift];
+	pixalign = bytealign << 3 >> bppshift;
+	rowbytes_dest = rowbytes << (5 - bppshift);
+
+	l &= -pixalign;
+	r = (r + pixalign - 1) & -pixalign;
+
+	// DRAW CURSOR HERE!
+
 	if (bppshift == 0) {
-		Blit1(src, dest, rowbytes, t, l, b, r, clut);
+		long w = r - l;
+
+		blit1asm(
+			(char *)src + t*rowbytes + l/8 - 4,            // srcpix: subtract 4 to use PowerPC preincrement
+			rowbytes - w/8,                                // srcrowskip
+			(char *)dest + t*rowbytes_dest + l*4,          // dstpix
+			rowbytes_dest - w*4,                           // dstrowskip
+			w/32,                                          // w: pixels/CHUNK
+			b-t,                                           // h
+			clut[0],                                       // color0
+			clut[0]^clut[1]                                // colorXOR
+		);
 	} else if (bppshift == 1) {
-		int leftBytes = (l / 4) & ~3;
-		int rightBytes = ((r + 15) / 4) & ~3;
+		int leftBytes = l / 4;
+		int rightBytes = r / 4;
 		for (y=t; y<b; y++) {
 			uint32_t *srcctr = (void *)((char *)src + y * rowbytes + leftBytes);
-			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + (l & ~15) * 4);
+			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + l * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *srcctr++;
 				*destctr++ = clut[(s >> 30) & 3];
@@ -49,11 +69,11 @@ void Blit(int bppshift,
 			}
 		}
 	} else if (bppshift == 2) {
-		int leftBytes = (l / 2) & ~3;
-		int rightBytes = ((r + 7) / 2) & ~3;
+		int leftBytes = l / 2;
+		int rightBytes = r / 2;
 		for (y=t; y<b; y++) {
 			uint32_t *srcctr = (void *)((char *)src + y * rowbytes + leftBytes);
-			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + (l & ~7) * 4);
+			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + l * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *srcctr++;
 				*destctr++ = clut[(s >> 28) & 15];
@@ -99,26 +119,4 @@ void Blit(int bppshift,
 			}
 		}
 	}
-}
-
-// Higher-level wrapper around asm loop
-void Blit1(const void *src, void *dst, long rowbytes, long t, long l, long b, long r, uint32_t *clut) {
-	enum {CHUNK = 32};
-
-	long dstrowbytes = rowbytes * 32;
-	long w;
-	l &= -CHUNK;
-	r = (r + CHUNK - 1) & -CHUNK;
-
-	w = r - l;
-
-	blit1asm(
-		(char *)src + t*rowbytes + l/8 - 4,            // srcpix: subtract 4 to use PowerPC preincrement
-		rowbytes - w/8,                                // srcrowskip
-		(char *)dst + t*dstrowbytes + l*4,             // dstpix
-		dstrowbytes - w*4,                             // dstrowskip
-		w/CHUNK,                                       // w: pixels/CHUNK
-		b-t,                                           // h
-		clut[0],                                       // color0
-		clut[0]^clut[1]);                              // colorXOR
 }
