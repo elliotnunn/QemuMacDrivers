@@ -129,57 +129,6 @@
 			| STACK_ROUTINE_PARAMETER(7, kTwoByteCode) \
 			| STACK_ROUTINE_PARAMETER(8, kFourByteCode) \
 	) \
-	X( \
-		0xa850, \
-		InitCursor, \
-		(void), \
-		kPascalStackBased \
-	) \
-	X( \
-		0xa851, \
-		SetCursor, \
-		(const Cursor *crsr), \
-		kPascalStackBased \
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
-	) \
-	X( \
-		0xaa1c, \
-		SetCCursor, \
-		(CCrsrHandle crsr), \
-		kPascalStackBased \
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
-	) \
-	X( \
-		0xa852, \
-		HideCursor, \
-		(void), \
-		kPascalStackBased \
-	) \
-	X( \
-		0xa853, \
-		ShowCursor, \
-		(void), \
-		kPascalStackBased \
-	) \
-	X( \
-		0xa855, \
-		ShieldCursor, \
-		(void), \
-		kPascalStackBased \
-	) \
-	X( \
-		0xa856, \
-		ObscureCursor, \
-		(void), \
-		kPascalStackBased \
-	) \
-	X( \
-		3, \
-		Mystery3, \
-		(long arg), \
-		kPascalStackBased \
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode) \
-	) \
 
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -246,10 +195,6 @@ void InstallDirtyRectPatch(void) {
 		} else if (trap >= 0xa000) { \
 			their##StdName = GetOSTrapAddress(trap); \
 			SetOSTrapAddress(&my##StdName##Desc, trap); \
-		} else if (trap < 0x100) { \
-			void **field = ((void *******)0x2b6)[0][0x1e0/4][4/4][4/4][8/4]+trap; \
-			their##StdName = *(void **)field; \
-			*(void **)field = &my##StdName##Desc; \
 		} else { \
 			their##StdName = *(void **)trap; \
 			*(void **)trap = &my##StdName##Desc; \
@@ -534,92 +479,4 @@ static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const 
 
 	LOCALTOGLOBAL(dstBits, t, l, b, r);
 	DirtyRectCallback(t, l, b, r);
-}
-
-int nextCrsrTaskMustRedraw;
-
-#include <stdio.h>
-#include <string.h>
-
-static void printCurState(char *string);
-static void printCurState(char *string) {
-	sprintf(string, "Mse(%d,%d) RawMouse(%d,%d) MTemp(%d,%d) Vis,New,Obscure(%d,%d,%d)",
-		*(int16_t *)0x830, *(int16_t *)0x832,
-		*(int16_t *)0x82c, *(int16_t *)0x82e,
-		*(int16_t *)0x828, *(int16_t *)0x82a,
-		!!*(char *)0x8cc, !!*(char *)0x8ce, !!*(char *)0x8d2);
-}
-
-static void reinstallTrap(void);
-static void reinstallTrap(void) {
-	void **field = ((void *******)0x2b6)[0][0x1e0/4][4/4][4/4][8/4]+3;
-
-	if (*field != &myMystery3Desc) {
-		// lprintf("Repatched\n");
-		theirMystery3 = *field;
-		*field = &myMystery3Desc;
-
-	}
-}
-
-static void myInitCursor(void) {
-	CallUniversalProc(theirInitCursor, kInitCursorProcInfo);
-	reinstallTrap();
-}
-
-static void mySetCursor(const Cursor *crsr) {
-	CallUniversalProc(theirSetCursor, kSetCursorProcInfo, crsr);
-	reinstallTrap();
-}
-
-static void mySetCCursor(CCrsrHandle crsr) {
-	CallUniversalProc(theirSetCCursor, kSetCCursorProcInfo, crsr);
-	reinstallTrap();
-}
-
-static void myHideCursor(void) {
-	CallUniversalProc(theirHideCursor, kHideCursorProcInfo);
-	reinstallTrap();
-}
-
-static void myShowCursor(void) {
-	CallUniversalProc(theirShowCursor, kShowCursorProcInfo);
-	reinstallTrap();
-}
-
-static void myShieldCursor(void) {
-	CallUniversalProc(theirShieldCursor, kShieldCursorProcInfo);
-	reinstallTrap();
-}
-
-static void myObscureCursor(void) {
-	CallUniversalProc(theirObscureCursor, kObscureCursorProcInfo);
-	reinstallTrap();
-}
-
-int lastBX, lastBY;
-
-static void myMystery3(long arg) {
-	short top = *(short *)0x828;
-	short left = *(short *)0x82a;
-	short bottom = lastBY;
-	short right = lastBX;
-
-	CallUniversalProc(theirMystery3, kMystery3ProcInfo, arg);
-
-	if (top > bottom) {
-		short swap = top;
-		top = bottom;
-		bottom = swap;
-	}
-
-	if (left > right) {
-		short swap = left;
-		left = right;
-		right = swap;
-	}
-
-	DirtyRectCallback(top-16, left-16, bottom+16, right+16);
-	lastBX = *(short *)0x82a;
-	lastBY = *(short *)0x828;
 }
