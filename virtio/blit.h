@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-extern const int BlitterAlign[6];
+extern const char BlitterAlign[6];
 
 // rowbytes applies to the src, and can be bitshifted to apply to dst
 

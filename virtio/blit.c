@@ -4,7 +4,7 @@
 
 #include "blit.h"
 
-const int BlitterAlign[6] = {
+const char BlitterAlign[6] = {
 	4, // 1-bit
 	4, // 2-bit
 	4, // 4-bit
