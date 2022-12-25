@@ -725,7 +725,7 @@ static void updateScreen(short top, short left, short bottom, short right) {
 	logTime('Blit', 0);
 
 	Blit(depth - k1bit,
-		top, left, bottom, right,
+		top, &left, bottom, &right,
 		backbuf, frontbuf, rowbytes_back,
 		private_clut, gamma_red, gamma_grn, gamma_blu);
 

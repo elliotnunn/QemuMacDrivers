@@ -14,7 +14,7 @@ const char BlitterAlign[6] = {
 };
 
 void Blit(int bppshift,
-	long t, long l, long b, long r, const void *src, void *dest, long rowbytes,
+	short t, short *l, short b, short *r, const void *src, void *dest, long rowbytes,
 	uint32_t clut[256], uint8_t gamma_red[256], uint8_t gamma_grn[256], uint8_t gamma_blu[256]) {
 
 	long bytealign, pixalign, rowbytes_dest;
@@ -24,18 +24,18 @@ void Blit(int bppshift,
 	pixalign = bytealign << 3 >> bppshift;
 	rowbytes_dest = rowbytes << (5 - bppshift);
 
-	l &= -pixalign;
-	r = (r + pixalign - 1) & -pixalign;
+	*l &= -pixalign;
+	*r = (*r + pixalign - 1) & -pixalign;
 
 	// DRAW CURSOR HERE!
 
 	if (bppshift == 0) {
-		long w = r - l;
+		long w = *r - *l;
 
 		blit1asm(
-			(char *)src + t*rowbytes + l/8 - 4,            // srcpix: subtract 4 to use PowerPC preincrement
+			(char *)src + t*rowbytes + *l/8 - 4,            // srcpix: subtract 4 to use PowerPC preincrement
 			rowbytes - w/8,                                // srcrowskip
-			(char *)dest + t*rowbytes_dest + l*4,          // dstpix
+			(char *)dest + t*rowbytes_dest + *l*4,          // dstpix
 			rowbytes_dest - w*4,                           // dstrowskip
 			w/32,                                          // w: pixels/CHUNK
 			b-t,                                           // h
@@ -43,11 +43,11 @@ void Blit(int bppshift,
 			clut[0]^clut[1]                                // colorXOR
 		);
 	} else if (bppshift == 1) {
-		int leftBytes = l / 4;
-		int rightBytes = r / 4;
+		int leftBytes = *l / 4;
+		int rightBytes = *r / 4;
 		for (y=t; y<b; y++) {
 			uint32_t *srcctr = (void *)((char *)src + y * rowbytes + leftBytes);
-			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + l * 4);
+			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + *l * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *srcctr++;
 				*destctr++ = clut[(s >> 30) & 3];
@@ -69,11 +69,11 @@ void Blit(int bppshift,
 			}
 		}
 	} else if (bppshift == 2) {
-		int leftBytes = l / 2;
-		int rightBytes = r / 2;
+		int leftBytes = *l / 2;
+		int rightBytes = *r / 2;
 		for (y=t; y<b; y++) {
 			uint32_t *srcctr = (void *)((char *)src + y * rowbytes + leftBytes);
-			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + l * 4);
+			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + *l * 4);
 			for (x=leftBytes; x<rightBytes; x+=4) {
 				uint32_t s = *srcctr++;
 				*destctr++ = clut[(s >> 28) & 15];
@@ -88,17 +88,17 @@ void Blit(int bppshift,
 		}
 	} else if (bppshift == 3) {
 		for (y=t; y<b; y++) {
-			uint8_t *srcctr = (void *)((char *)src + y * rowbytes + l);
-			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + l * 4);
-			for (x=l; x<r; x++) {
+			uint8_t *srcctr = (void *)((char *)src + y * rowbytes + *l);
+			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + *l * 4);
+			for (x=*l; x<*r; x++) {
 				*destctr++ = clut[*srcctr++];
 			}
 		}
 	} else if (bppshift == 4) {
 		for (y=t; y<b; y++) {
-			uint16_t *srcctr = (void *)((char *)src + y * rowbytes + l * 2);
-			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + l * 4);
-			for (x=l; x<r; x++) {
+			uint16_t *srcctr = (void *)((char *)src + y * rowbytes + *l * 2);
+			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + *l * 4);
+			for (x=*l; x<*r; x++) {
 				uint16_t s = *srcctr++;
 				*destctr++ =
 					((uint32_t)gamma_blu[((s & 0x1f) << 3) | ((s & 0x1f) << 3 >> 5)] << 24) |
@@ -108,9 +108,9 @@ void Blit(int bppshift,
 		}
 	} else if (bppshift == 5) {
 		for (y=t; y<b; y++) {
-			uint32_t *srcctr = (void *)((char *)src + y * rowbytes + l * 4);
-			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + l * 4);
-			for (x=l; x<r; x++) {
+			uint32_t *srcctr = (void *)((char *)src + y * rowbytes + *l * 4);
+			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + *l * 4);
+			for (x=*l; x<*r; x++) {
 				uint32_t s = *srcctr++;
 				*destctr++ =
 					((uint32_t)gamma_blu[s & 0xff] << 24) |
