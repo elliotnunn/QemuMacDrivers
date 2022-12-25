@@ -65,7 +65,7 @@ static bool mode(int new_depth, uint32_t new_rez);
 static uint32_t setVirtioScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list);
 static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
-static void updateScreen(short top, short left, short bottom, short right);
+static void updateScreen(short t, short l, short b, short r);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
 static void perfTest(void);
 static void perfTestNotification(NMRecPtr nmReqPtr);
@@ -717,7 +717,7 @@ void DirtyRectCallback(short top, short left, short bottom, short right) {
 }
 
 // Caller must not give out-of-range coords!
-static void updateScreen(short top, short left, short bottom, short right) {
+static void updateScreen(short t, short l, short b, short r) {
 	int x, y;
 
 	if (change_in_progress) return;
@@ -725,13 +725,13 @@ static void updateScreen(short top, short left, short bottom, short right) {
 	logTime('Blit', 0);
 
 	Blit(depth - k1bit,
-		top, &left, bottom, &right,
+		t, &l, b, &r,
 		backbuf, frontbuf, rowbytes_back,
 		private_clut, gamma_red, gamma_grn, gamma_blu);
 
 	Atomic2(sendPixels,
-		(void *)(((unsigned long)top << 16) | left),
-		(void *)(((unsigned long)bottom << 16) | right));
+		(void *)(((unsigned long)t << 16) | l),
+		(void *)(((unsigned long)b << 16) | r));
 }
 
 // Non-reentrant, must be called atomically
