@@ -733,20 +733,22 @@ void DirtyRectCallback(short top, short left, short bottom, short right) {
 
 // Caller must not give out-of-range coords!
 static void updateScreen(short t, short l, short b, short r) {
+	short drawn_l=l, drawn_r=r;
+
 	if (change_in_progress) return;
 
 	logTime('Blit', 0);
 
 	Blit(depth - k1bit,
-		t, &l, b, &r,
+		t, &drawn_l, b, &drawn_r,
 		backbuf, frontbuf, rowbytes_back,
 		private_clut, gamma_red, gamma_grn, gamma_blu);
 
 	// Any overlap with the cursor? Redraw the cursor.
-	if (curs_visible && curs_l < r && l < curs_r && curs_t < b && t < curs_b) {
+	if (curs_visible && curs_l < drawn_r && drawn_l < curs_r && curs_t < b && t < curs_b) {
 		// Does the cursor need a clean background to draw on?
 		// And is the background overlap incomplete?
-		if (curs_inverts && (curs_l < l || r < curs_r || curs_t < t || b < curs_b)) {
+		if (curs_inverts && (curs_l < drawn_l || drawn_r < curs_r || curs_t < t || b < curs_b)) {
 			short my_curs_l = curs_l, my_curs_r = curs_r;
 			Blit(depth - k1bit,
 				curs_t, &my_curs_l, curs_b, &my_curs_r,
