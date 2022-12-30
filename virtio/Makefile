@@ -15,6 +15,7 @@ PPCCOptions = {COptions}
                          lateboothook.c.x ∂
                          lprintf.s.x ∂
                          transport-ppc.c.x ∂
+                         virgl.c.x ∂
                          virtqueue.c.x ∂
                          wait.s.x ∂
                          device-gpu.c.x
