@@ -737,8 +737,6 @@ static void updateScreen(short t, short l, short b, short r) {
 
 	if (change_in_progress) return;
 
-	logTime('Blit', 0);
-
 	Blit(depth - k1bit,
 		t, &drawn_l, b, &drawn_r,
 		backbuf, frontbuf, rowbytes_back,

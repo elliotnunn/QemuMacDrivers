@@ -28,6 +28,5 @@ For this to work, apply the following patch to qemu:
 #define LPRINTF_H
 
 void lprintf(const char *fmt, ...);
-void logTime(unsigned long letters, int andFlush);
 
 #endif
