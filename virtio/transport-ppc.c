@@ -93,6 +93,13 @@ bool VInit(void *dev) {
 	gCommonConfig->device_status = 1 | 2;
 	SynchronizeIO();
 
+	// Absolutely require the version 1 "non-legacy" spec
+	if (!VGetDevFeature(32)) {
+		VFail();
+		return false;
+	}
+	VSetFeature(32, true);
+
 	// Install interrupt handler
 	{
 		void *oldRefCon;
@@ -134,9 +141,6 @@ void VSetFeature(uint32_t number, bool val) {
 }
 
 bool VFeaturesOK(void) {
-	// Absolutely require the version 1 "non-legacy" spec
-	VSetFeature(32, true);
-
 	gCommonConfig->device_status = 1 | 2 | 8;
 	SynchronizeIO();
 
