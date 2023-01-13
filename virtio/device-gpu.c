@@ -876,6 +876,7 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	SETLE32(&obuf1->r.le32_width, right - left);
 	SETLE32(&obuf1->r.le32_height, bottom - top);
 	SETLE32(&obuf1->le32_offset, top*rowbytes_front + left*4);
+	SETLE32(&obuf1->le32_offset_hi, 0);
 	SETLE32(&obuf1->le32_resource_id, screen_resource);
 
 	QSend(0, 1, 1, physicals1, sizes1, (void *)'tfer');
