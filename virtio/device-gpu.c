@@ -1,4 +1,3 @@
-#include <stdbool.h>
 #include <stdio.h>
 #include <Devices.h>
 #include <Displays.h>
@@ -15,7 +14,6 @@
 #include "allocator.h"
 #include "atomic.h"
 #include "blit.h"
-#include "byteswap.h"
 #include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
@@ -26,6 +24,8 @@
 #include "virgl.h"
 #include "virtqueue.h"
 #include "wait.h"
+
+#include <stdbool.h>
 
 #include "device.h"
 
@@ -171,17 +171,22 @@ static short curs_t, curs_l, curs_b, curs_r;
 static uint32_t curs_back[CURSOREDGE*CURSOREDGE];
 static uint32_t curs_front[CURSOREDGE*CURSOREDGE];
 
+
+  OSType              driverDescSignature;    /* Signature field of this structure*/
+  DriverDescVersion   driverDescVersion;      /* Version of this data structure*/
+  MacDriverType       driverType;             /* Type of Driver*/
+  DriverOSRuntime     driverOSRuntimeInfo;    /* OS Runtime Requirements of Driver*/
+  DriverOSService     driverServices;         /* Apple Service API Membership*/
+
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
 	kInitialDriverDescriptor,
-	"\ppci1af4,1050",
-	0x00, 0x10, 0x80, 0x00, // v0.1
-	kDriverIsUnderExpertControl |
+	{"\x0cpci1af4,1050", {0x00, 0x10, 0x80, 0x00}}, // v0.1
+	{kDriverIsUnderExpertControl |
 		kDriverIsOpenedUponLoad,
-	"\p.Display_Video_VirtIO",
-	0, 0, 0, 0, 0, 0, 0, 0, // reserved
-	1, // nServices
-	kServiceCategoryNdrvDriver, kNdrvTypeIsVideo, 0x00, 0x10, 0x80, 0x00, //v0.1
+		"\x15.Display_Video_VirtIO"},
+	{1, // nServices
+	{{kServiceCategoryNdrvDriver, kNdrvTypeIsVideo, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
 static const char *controlNames[] = {
@@ -472,8 +477,8 @@ uint32_t VirglSend(void *req, size_t req_size) {
 
 static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]) {
 	struct virtio_gpu_ctrl_hdr request = {
-		LE32(VIRTIO_GPU_CMD_GET_DISPLAY_INFO),
-		LE32(VIRTIO_GPU_FLAG_FENCE)};
+		VIRTIO_GPU_CMD_GET_DISPLAY_INFO,
+		VIRTIO_GPU_FLAG_FENCE};
 	struct virtio_gpu_resp_display_info reply = {0};
 
 	transact(&request, sizeof(request), &reply, sizeof(reply));
@@ -488,7 +493,7 @@ static void getBestSize(short *width, short *height) {
 	getSuggestedSizes(pmodes);
 
 	for (i=0; i<16; i++) {
-		if (GETLE32(&pmodes[i].le32_enabled)) break;
+		if (pmodes[i].enabled) break;
 	}
 
 	if (i == 16) {
@@ -497,8 +502,8 @@ static void getBestSize(short *width, short *height) {
 		return;
 	}
 
-	w = GETLE32(&pmodes[i].r.le32_width);
-	h = GETLE32(&pmodes[i].r.le32_height);
+	w = pmodes[i].r.width;
+	h = pmodes[i].r.height;
 
 	// Not enough RAM allocated? Try for smaller
 	if (h * rowbytesForBack(k32bit, w) > bufsize) {
@@ -554,7 +559,6 @@ static uint32_t resCount(void) {
 static bool mode(int new_depth, uint32_t new_rez) {
 	uint32_t resource;
 	short width, height;
-	size_t i;
 
 	width = rezzes[new_rez-1].w;
 	height = rezzes[new_rez-1].h;
@@ -608,56 +612,56 @@ static uint32_t setVirtioScanout(int idx, short rowbytes, short w, short h, uint
 	}
 
 	// Create a host resource using VIRTIO_GPU_CMD_RESOURCE_CREATE_2D.
-	SETLE32(&create_2d.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D);
-	SETLE32(&create_2d.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-	SETLE32(&create_2d.le32_resource_id, new_resource);
-	SETLE32(&create_2d.le32_format, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
-	SETLE32(&create_2d.le32_width, rowbytes/4);
-	SETLE32(&create_2d.le32_height, h);
+	create_2d.hdr.type = VIRTIO_GPU_CMD_RESOURCE_CREATE_2D;
+	create_2d.hdr.flags = VIRTIO_GPU_FLAG_FENCE;
+	create_2d.resource_id = new_resource;
+	create_2d.format = VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM;
+	create_2d.width = rowbytes/4;
+	create_2d.height = h;
 
 	transact(&create_2d, sizeof(create_2d), &reply, sizeof(reply));
 
 	// Gracefully handle host running out of room for the resource
-	if (GETLE32(&reply.le32_type) != VIRTIO_GPU_RESP_OK_NODATA) return 0;
+	if (reply.type != VIRTIO_GPU_RESP_OK_NODATA) return 0;
 
 	// Detach backing from the old resource, but don't delete it yet.
 	if (old_resource != 0) {
-		SETLE32(&detach_backing.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING);
-		SETLE32(&detach_backing.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(&detach_backing.le32_resource_id, old_resource);
+		detach_backing.hdr.type = VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING;
+		detach_backing.hdr.flags = VIRTIO_GPU_FLAG_FENCE;
+		detach_backing.resource_id = old_resource;
 
 		transact(&detach_backing, sizeof(detach_backing), &reply, sizeof(reply));
 	}
 
 	// Attach guest allocated backing memory to the resource just created.
-	SETLE32(&attach_backing.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
-	SETLE32(&attach_backing.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-	SETLE32(&attach_backing.le32_resource_id, new_resource);
-	SETLE32(&attach_backing.le32_nr_entries, extcnt);
+	attach_backing.hdr.type = VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING;
+	attach_backing.hdr.flags = VIRTIO_GPU_FLAG_FENCE;
+	attach_backing.resource_id = new_resource;
+	attach_backing.nr_entries = extcnt;
 
 	for (i=j=0; i<extcnt; j+=extents[i++]) {
-		SETLE32(&attach_backing.entries[i].le32_addr, page_list[j]);
-		SETLE32(&attach_backing.entries[i].le32_length, extents[i] * 0x1000);
+		attach_backing.entries[i].addr = page_list[j];
+		attach_backing.entries[i].length = extents[i] * 0x1000;
 	}
 
 	transact(&attach_backing, sizeof(attach_backing), &reply, sizeof(reply));
 
 	// Use VIRTIO_GPU_CMD_SET_SCANOUT to link the framebuffer to a display scanout.
-	SETLE32(&set_scanout.hdr.le32_type, VIRTIO_GPU_CMD_SET_SCANOUT);
-	SETLE32(&set_scanout.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-	SETLE32(&set_scanout.r.le32_x, 0);
-	SETLE32(&set_scanout.r.le32_y, 0);
-	SETLE32(&set_scanout.r.le32_width, w);
-	SETLE32(&set_scanout.r.le32_height, h);
-	SETLE32(&set_scanout.le32_scanout_id, 0); // index, 0-15
-	SETLE32(&set_scanout.le32_resource_id, new_resource);
+	set_scanout.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
+	set_scanout.hdr.flags = VIRTIO_GPU_FLAG_FENCE;
+	set_scanout.r.x = 0;
+	set_scanout.r.y = 0;
+	set_scanout.r.width = w;
+	set_scanout.r.height = h;
+	set_scanout.scanout_id = 0; // index, 0-15
+	set_scanout.resource_id = new_resource;
 
 	transact(&set_scanout, sizeof(set_scanout), &reply, sizeof(reply));
 
 	if (old_resource != 0) {
-		SETLE32(&resource_unref.hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_UNREF);
-		SETLE32(&resource_unref.hdr.le32_flags, VIRTIO_GPU_FLAG_FENCE);
-		SETLE32(&resource_unref.le32_resource_id, old_resource);
+		resource_unref.hdr.type = VIRTIO_GPU_CMD_RESOURCE_UNREF;
+		resource_unref.hdr.flags = VIRTIO_GPU_FLAG_FENCE;
+		resource_unref.resource_id = old_resource;
 
 		transact(&resource_unref, sizeof(resource_unref), &reply, sizeof(reply));
 	}
@@ -701,9 +705,9 @@ static void notificationAtomic(void *nmReqPtr) {
 	NMRemove(nmReqPtr);
 	pending_notification = false;
 
-	if ((config->le32_events_read & LE32(VIRTIO_GPU_EVENT_DISPLAY)) == 0) return;
+	if ((config->events_read & VIRTIO_GPU_EVENT_DISPLAY) == 0) return;
 
-	config->le32_events_clear = LE32(VIRTIO_GPU_EVENT_DISPLAY);
+	config->events_clear = VIRTIO_GPU_EVENT_DISPLAY;
 	SynchronizeIO();
 
 	getBestSize(&width, &height);
@@ -711,14 +715,14 @@ static void notificationAtomic(void *nmReqPtr) {
 
 	// Kick the Display Manager
 	DMSetDisplayMode(DMGetFirstScreenDevice(true),
-		idForRes(width, height, true), &newdepth, NULL, NULL);
+		idForRes(width, height, true), &newdepth, 0, NULL);
 }
 
 void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 	last_tag = tag;
 	QFree(q, buf);
 	if ((unsigned long)tag < 256) {
-		freebufs |= 1 << (char)tag;
+		freebufs |= 1 << (char)(uint32_t)tag;
 		sendPixels((void *)0x7fff7fff, (void *)0x00000000);
 	}
 }
@@ -788,30 +792,26 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	static bool reentered;
 	static bool interest;
 
-	static int n;
-
 	// Stored pending rect
 	static short ptop = 0x7fff;
 	static short pleft = 0x7fff;
 	static short pbottom = 0;
 	static short pright = 0;
 
-	short top = (unsigned long)topleft_voidptr >> 16;
-	short left = (short)topleft_voidptr;
-	short bottom = (unsigned long)botright_voidptr >> 16;
-	short right = (short)botright_voidptr;
+	short top = (uint32_t)topleft_voidptr >> 16;
+	short left = (uint32_t)topleft_voidptr;
+	short bottom = (uint32_t)botright_voidptr >> 16;
+	short right = (uint32_t)botright_voidptr;
 
 	int i;
 
 	struct virtio_gpu_transfer_to_host_2d *obuf1; // 56 bytes
-	struct virtio_gpu_ctrl_hdr *ibuf1;            // 24 bytes
 	uint32_t physicals1[2];
-	uint32_t sizes1[2] = {56, 24};
+	uint32_t sizes1[2] = {56, 24}; // obuf1 and virtio_gpu_ctrl_hdr
 
 	struct virtio_gpu_resource_flush *obuf2;      // 48 bytes
-	struct virtio_gpu_ctrl_hdr *ibuf2;            // 24 bytes
 	uint32_t physicals2[2];
-	uint32_t sizes2[2] = {48, 24};
+	uint32_t sizes2[2] = {48, 24}; // obuf2 and virtio_gpu_ctrl_hdr
 
 	// We have been reentered via QPoll and DNotified -- nothing to do
 	if (reentered) return;
@@ -859,9 +859,7 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 
 	// The 4096-byte page is divided into 192-byte blocks for locality
 	obuf1 = (void *)((char *)lpage + 192*i);
-	ibuf1 = (void *)((char *)obuf1 + 128);
 	obuf2 = (void *)((char *)obuf1 + 64);
-	ibuf2 = (void *)((char *)obuf1 + 160);
 
 	physicals1[0] = ppage + 192*i;
 	physicals1[1] = physicals1[0] + 128;
@@ -869,26 +867,26 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	physicals2[1] = physicals1[0] + 160;
 
 	// Update the host resource from guest memory.
-	SETLE32(&obuf1->hdr.le32_type, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
-	SETLE32(&obuf1->hdr.le32_flags, 0);
-	SETLE32(&obuf1->r.le32_x, left);
-	SETLE32(&obuf1->r.le32_y, top);
-	SETLE32(&obuf1->r.le32_width, right - left);
-	SETLE32(&obuf1->r.le32_height, bottom - top);
-	SETLE32(&obuf1->le32_offset, top*rowbytes_front + left*4);
-	SETLE32(&obuf1->le32_offset_hi, 0);
-	SETLE32(&obuf1->le32_resource_id, screen_resource);
+	obuf1->hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
+	obuf1->hdr.flags = 0;
+	obuf1->r.x = left;
+	obuf1->r.y = top;
+	obuf1->r.width = right - left;
+	obuf1->r.height = bottom - top;
+	obuf1->offset = top*rowbytes_front + left*4;
+	obuf1->offset_hi = 0;
+	obuf1->resource_id = screen_resource;
 
 	QSend(0, 1, 1, physicals1, sizes1, (void *)'tfer');
 
 	// Flush the updated resource to the display.
-	SETLE32(&obuf2->hdr.le32_type, VIRTIO_GPU_CMD_RESOURCE_FLUSH);
-	SETLE32(&obuf2->hdr.le32_flags, 0);
-	SETLE32(&obuf2->r.le32_x, left);
-	SETLE32(&obuf2->r.le32_y, top);
-	SETLE32(&obuf2->r.le32_width, right - left);
-	SETLE32(&obuf2->r.le32_height, bottom - top);
-	SETLE32(&obuf2->le32_resource_id, screen_resource);
+	obuf2->hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+	obuf2->hdr.flags = 0;
+	obuf2->r.x = left;
+	obuf2->r.y = top;
+	obuf2->r.width = right - left;
+	obuf2->r.height = bottom - top;
+	obuf2->resource_id = screen_resource;
 
 	QSend(0, 1, 1, physicals2, sizes2, (void *)i);
 	QNotify(0);

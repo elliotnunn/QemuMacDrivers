@@ -1,13 +1,15 @@
 #ifndef STRUCTS_VIRTQUEUE_H
 #define STRUCTS_VIRTQUEUE_H
 
+#include <stdint.h>
+
 struct virtq_desc { // all little-endian
-	uint32_t le_addr; // guest-physical
-	uint32_t le_addr_hi;
-	uint32_t le_len;
-	uint16_t le_flags;
-	uint16_t le_next;
-};
+	uint32_t addr; // guest-physical
+	uint32_t addr_hi;
+	uint32_t len;
+	uint16_t flags;
+	uint16_t next;
+} __attribute((scalar_storage_order("little-endian")));
 
 /* This marks a buffer as continuing via the next field. */
 #define VIRTQ_DESC_F_NEXT 1
@@ -17,21 +19,21 @@ struct virtq_desc { // all little-endian
 #define VIRTQ_DESC_F_INDIRECT 4
 
 struct virtq_avail {
-	uint16_t le_flags;
-	uint16_t le_idx;
-	uint16_t le_ring[999];
-};
+	uint16_t flags;
+	uint16_t idx;
+	uint16_t ring[999];
+} __attribute((scalar_storage_order("little-endian")));
 
 struct virtq_used_elem {
-	uint16_t le_id; // of descriptor chain
-	uint16_t le_pad;
-	uint32_t le_len; // in bytes of descriptor chain
-};
+	uint16_t id; // of descriptor chain
+	uint16_t pad;
+	uint32_t len; // in bytes of descriptor chain
+} __attribute((scalar_storage_order("little-endian")));
 
 struct virtq_used {
-	uint16_t le_flags;
-	uint16_t le_idx;
+	uint16_t flags;
+	uint16_t idx;
 	struct virtq_used_elem ring[999]; // 8 bytes each
-};
+} __attribute((scalar_storage_order("little-endian")));
 
 #endif

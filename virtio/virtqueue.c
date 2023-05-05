@@ -1,12 +1,12 @@
-#include <stdbool.h>
 #include <stdint.h>
 
 #include <DriverSynchronization.h>
 
+#include <stdbool.h>
+
 #include "allocator.h"
 #include "atomic.h"
 #include "allocator.h"
-#include "byteswap.h"
 #include "device.h"
 #include "transport.h"
 #include "structs-virtqueue.h"
@@ -56,7 +56,7 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 	queues[q].size = size;
 
 	// Disable notifications until QInterest
-	SETLE16(&queues[q].avail->le_flags, 1);
+	queues[q].avail->flags = 1;
 
 	return size;
 }
@@ -91,44 +91,44 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 			((i<n_out+n_in-1) ? VIRTQ_DESC_F_NEXT : 0) |
 			((i>=n_out) ? VIRTQ_DESC_F_WRITE : 0);
 
-		SETLE32(&queues[q].desc[buf].le_addr, addrs[i]);
-		SETLE32(&queues[q].desc[buf].le_len, sizes[i]);
-		SETLE16(&queues[q].desc[buf].le_flags, flags);
-		SETLE16(&queues[q].desc[buf].le_next, next);
+		queues[q].desc[buf].addr = addrs[i];
+		queues[q].desc[buf].len = sizes[i];
+		queues[q].desc[buf].flags = flags;
+		queues[q].desc[buf].next = next;
 	}
 
 	// Put a pointer to the "head" descriptor in the avail queue
-	Atomic2(QSendAtomicPart, (void *)q, (void *)buffers[0]);
+	Atomic2(QSendAtomicPart, (void *)(uint32_t)q, (void *)(uint32_t)buffers[0]);
 
 	return true;
 }
 
 static void QSendAtomicPart(void *q_voidptr, void *buf_voidptr) {
-	uint16_t q = (uint16_t)q_voidptr;
-	uint16_t buf = (uint16_t)buf_voidptr;
+	uint16_t q = (uint16_t)(uint32_t)q_voidptr;
+	uint16_t buf = (uint16_t)(uint32_t)buf_voidptr;
 	uint16_t idx;
 
-	idx = GETLE16(&queues[q].avail->le_idx);
-	SETLE16(&queues[q].avail->le_ring[idx & (queues[q].size - 1)], buf);
+	idx = queues[q].avail->idx;
+	queues[q].avail->ring[idx & (queues[q].size - 1)] = buf;
 	SynchronizeIO();
-	SETLE16(&queues[q].avail->le_idx, idx + 1);
+	queues[q].avail->idx = idx + 1;
 	SynchronizeIO();
 }
 
 void QNotify(uint16_t q) {
-	if (queues[q].used->le_flags == 0) VNotify(q);
+	if (queues[q].used->flags == 0) VNotify(q);
 }
 
 void QInterest(uint16_t q, int32_t delta) {
-	int32_t interest = AddAtomic(delta, &queues[q].interest);
-	SETLE16(&queues[q].avail->le_flags, queues[q].interest == 0);
+	AddAtomic(delta, &queues[q].interest);
+	queues[q].avail->flags = (queues[q].interest == 0);
 }
 
 // Called by transport hardware interrupt to reduce chance of redundant interrupts
 void QDisarm(void) {
 	uint16_t q;
 	for (q=0; queues[q].size != 0; q++) {
-		SETLE16(&queues[q].avail->le_flags, 1);
+		queues[q].avail->flags = 1;
 	}
 	SynchronizeIO();
 }
@@ -143,7 +143,7 @@ void QNotified(void) {
 
 	VRearm();
 	for (q=0; queues[q].size != 0; q++) {
-		SETLE16(&queues[q].avail->le_flags, queues[q].interest == 0);
+		queues[q].avail->flags = queues[q].interest == 0;
 	}
 	SynchronizeIO();
 
@@ -156,12 +156,12 @@ void QNotified(void) {
 void QPoll(uint16_t q) {
 	uint16_t i = queues[q].used_ctr;
 	uint16_t mask = queues[q].size - 1;
-	uint16_t end = GETLE16(&queues[q].used->le_idx);
+	uint16_t end = queues[q].used->idx;
 	queues[q].used_ctr = end;
 
 	for (; i != end; i++) {
-		uint16_t desc = GETLE16(&queues[q].used->ring[i&mask].le_id);
-		size_t len = GETLE32(&queues[q].used->ring[i&mask].le_len);
+		uint16_t desc = queues[q].used->ring[i&mask].id;
+		size_t len = queues[q].used->ring[i&mask].len;
 
 		DNotified(q, desc, len, queues[q].tag[desc]);
 	}
@@ -171,8 +171,8 @@ void QPoll(uint16_t q) {
 void QFree(uint16_t q, uint16_t buf) {
 	for (;;) {
 		TestAndClear(buf%8, queues[q].bitmap + buf/8);
-		if ((GETLE16(&queues[q].desc[buf].le_flags) & VIRTQ_DESC_F_NEXT) == 0)
+		if (((queues[q].desc[buf].flags) & VIRTQ_DESC_F_NEXT) == 0)
 			break;
-		buf = GETLE16(&queues[q].desc[buf].le_next);
+		buf = queues[q].desc[buf].next;
 	}
 }

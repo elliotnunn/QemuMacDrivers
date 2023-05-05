@@ -1,6 +1,5 @@
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 #include <Devices.h>
 #include <DriverServices.h>
@@ -8,10 +7,11 @@
 #include <PCI.h>
 
 #include "allocator.h"
-#include "byteswap.h"
 #include "device.h"
 #include "structs-pci.h"
 #include "virtqueue.h"
+
+#include <stdbool.h>
 
 #include "transport.h"
 
@@ -20,7 +20,7 @@ void *VConfig;
 uint16_t VMaxQueues;
 
 // Internal globals
-static struct virtio_pci_common_cfg *gCommonConfig;
+static volatile struct virtio_pci_common_cfg *gCommonConfig;
 static uint16_t *gNotify;
 static uint32_t gNotifyMultiplier;
 static uint8_t *gISRStatus;
@@ -51,7 +51,7 @@ bool VInit(void *dev) {
 		void *address;
 
 		// vendor-specific capability struct, i.e. a "VIRTIO_*" one
-		ExpMgrConfigReadByte(dev, (LogicalAddress)cap_offset, &cap_vndr);
+		ExpMgrConfigReadByte(dev, (LogicalAddress)(uint32_t)cap_offset, &cap_vndr);
 		if (cap_vndr != 9) continue;
 
 		ExpMgrConfigReadByte(dev, (LogicalAddress)(cap_offset+3), &cfg_type);
@@ -78,12 +78,12 @@ bool VInit(void *dev) {
 	pci_status |= 2;
 	ExpMgrConfigWriteWord(dev, (LogicalAddress)4, pci_status);
 
-	VMaxQueues = GETLE16(&gCommonConfig->le_num_queues);
+	VMaxQueues = gCommonConfig->num_queues;
 
 	// 1. Reset the device.
 	gCommonConfig->device_status = 0;
 	SynchronizeIO();
-	while (*(volatile char *)&gCommonConfig->device_status) {} // wait till 0
+	while (gCommonConfig->device_status) {} // wait till 0
 
 	// 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
 	gCommonConfig->device_status = 1;
@@ -109,7 +109,7 @@ bool VInit(void *dev) {
 		struct InterruptSetMember ist = {0};
 		RegPropertyValueSize size = sizeof(ist);
 
-		RegistryPropertyGet(dev, "driver-ist", (void *)ist, &size);
+		RegistryPropertyGet(dev, "driver-ist", (void *)&ist, &size);
 		GetInterruptFunctions(ist.setID, ist.member, &oldRefCon, &oldHandler, &enabler, &disabler);
 		InstallInterruptFunctions(ist.setID, ist.member, NULL, interruptTopHalf, NULL, NULL);
 
@@ -120,22 +120,22 @@ bool VInit(void *dev) {
 }
 
 bool VGetDevFeature(uint32_t number) {
-	SETLE32(&gCommonConfig->le_device_feature_select, number / 32);
+	gCommonConfig->device_feature_select = number / 32;
 	SynchronizeIO();
 
-	return (GETLE32(&gCommonConfig->le_device_feature) >> (number % 32)) & 1;
+	return (gCommonConfig->device_feature >> (number % 32)) & 1;
 }
 
 void VSetFeature(uint32_t number, bool val) {
 	uint32_t mask = 1 << (number % 32);
 	uint32_t bits;
 
-	SETLE32(&gCommonConfig->le_driver_feature_select, number / 32);
+	gCommonConfig->driver_feature_select = number / 32;
 	SynchronizeIO();
 
-	bits = GETLE32(&gCommonConfig->le_driver_feature);
+	bits = gCommonConfig->driver_feature;
 	bits = val ? (bits|mask) : (bits&~mask);
-	SETLE32(&gCommonConfig->le_driver_feature, bits);
+	gCommonConfig->driver_feature = bits;
 
 	SynchronizeIO();
 }
@@ -158,25 +158,25 @@ void VFail(void) {
 }
 
 uint16_t VQueueMaxSize(uint16_t q) {
-	SETLE16(&gCommonConfig->le_queue_select, q);
+	gCommonConfig->queue_select = q;
 	SynchronizeIO();
-	return GETLE16(&gCommonConfig->le_queue_size);
+	return gCommonConfig->queue_size;
 }
 
 void VQueueSet(uint16_t q, uint16_t size, uint32_t desc, uint32_t avail, uint32_t used) {
-	SETLE16(&gCommonConfig->le_queue_select, q);
+	gCommonConfig->queue_select = q;
 	SynchronizeIO();
-	SETLE16(&gCommonConfig->le_queue_size, size);
-	SETLE32(&gCommonConfig->le_queue_desc, desc);
-	SETLE32(&gCommonConfig->le_queue_driver, avail);
-	SETLE32(&gCommonConfig->le_queue_device, used);
+	gCommonConfig->queue_size = size;
+	gCommonConfig->queue_desc = desc;
+	gCommonConfig->queue_driver = avail;
+	gCommonConfig->queue_device = used;
 	SynchronizeIO();
-	SETLE16(&gCommonConfig->le_queue_enable, 1);
+	gCommonConfig->queue_enable = 1;
 	SynchronizeIO();
 }
 
 void VNotify(uint16_t queue) {
-	SETLE16(&gNotify[gNotifyMultiplier * queue / 2], queue);
+	gNotify[gNotifyMultiplier * queue / 2] = queue;
 	SynchronizeIO();
 }
 
