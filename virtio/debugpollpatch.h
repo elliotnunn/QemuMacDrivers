@@ -1,10 +1,7 @@
-#ifndef DEBUGPOLLPATCH_H
-#define DEBUGPOLLPATCH_H
+#pragma once
 
 // Implemented by the callee
 void InstallDebugPollPatch(void);
 
 // Implemented by the caller
 void DebugPollCallback(void);
-
-#endif

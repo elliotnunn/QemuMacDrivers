@@ -1,10 +1,7 @@
-#ifndef LATEBOOTHOOK_H
-#define LATEBOOTHOOK_H
+#pragma once
 
 // Implemented by the callee
 void InstallLateBootHook(void);
 
 // Implemented by the caller
 void LateBootHook(void);
-
-#endif

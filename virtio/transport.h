@@ -1,7 +1,6 @@
 // Implemented by transport-[ppc|drvr].c
 
-#ifndef TRANSPORT_H
-#define TRANSPORT_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -31,5 +30,3 @@ void VNotify(uint16_t queue);
 
 // Interrupts need to be explicitly reenabled after a notification
 void VRearm(void);
-
-#endif

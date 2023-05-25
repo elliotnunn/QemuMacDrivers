@@ -1,5 +1,4 @@
-#ifndef STRUCTS_PCI_H
-#define STRUCTS_PCI_H
+#pragma once
 
 #include <stdint.h>
 
@@ -27,5 +26,3 @@ struct virtio_pci_common_cfg {
 	uint32_t queue_device;           // read-write
 	uint32_t queue_device_hi;
 } __attribute((scalar_storage_order("little-endian")));
-
-#endif

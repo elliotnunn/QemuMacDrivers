@@ -1,5 +1,4 @@
-#ifndef BLIT_H
-#define BLIT_H
+#pragma once
 
 #include <stdint.h>
 
@@ -15,5 +14,3 @@ void Blit(int bppshift,
 
 // Work in 32-bit longs
 void blit1asm(const void *srcpix, long srcrowskip, void *dstpix, long dstrowskip, long w, long h, uint32_t color0, uint32_t colorXOR);
-
-#endif

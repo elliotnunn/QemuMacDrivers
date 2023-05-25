@@ -1,5 +1,4 @@
-#ifndef GAMMATABLES_H
-#define GAMMATABLES_H
+#pragma once
 
 struct builtinGamma {
 	char name[32];
@@ -16,5 +15,3 @@ struct builtinGamma {
 
 extern const struct builtinGamma builtinGamma[];
 extern const int builtinGammaCount;
-
-#endif

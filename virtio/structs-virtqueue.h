@@ -1,5 +1,4 @@
-#ifndef STRUCTS_VIRTQUEUE_H
-#define STRUCTS_VIRTQUEUE_H
+#pragma once
 
 #include <stdint.h>
 
@@ -35,5 +34,3 @@ struct virtq_used {
 	uint16_t idx;
 	struct virtq_used_elem ring[999]; // 8 bytes each
 } __attribute((scalar_storage_order("little-endian")));
-
-#endif
