@@ -33,16 +33,14 @@ static struct virtq queues[MAX_VQ];
 static void QSendAtomicPart(void *q, void *buf);
 
 uint16_t QInit(uint16_t q, uint16_t max_size) {
-	void *pages;
-	uint32_t phys[3];
-	uint16_t size = max_size;
-
 	if (q > MAX_VQ) return 0;
 
+	uint16_t size = max_size;
 	if (size > MAX_RING) size = MAX_RING;
 	if (size > VQueueMaxSize(q)) size = VQueueMaxSize(q);
 
-	pages = AllocPages(3, phys);
+	uint32_t phys[3];
+	void *pages = AllocPages(3, phys);
 	if (pages == NULL) return 0;
 
 	// Underlying transport needs the physical addresses of the rings
@@ -62,13 +60,11 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 }
 
 bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag) {
-	uint16_t count, try, i;
 	uint16_t buffers[MAX_RING];
 
 	// Find enough free buffer descriptors
-	count = 0;
-	try = 0;
-	for (try=0; try<queues[q].size; try++) {
+	uint16_t count = 0;
+	for (uint16_t try=0; try<queues[q].size; try++) {
 		if (!TestAndSet(try%8, queues[q].bitmap + try/8)) {
 			buffers[count++] = try;
 			if (count == n_out+n_in) break;
@@ -77,14 +73,16 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 
 	// Not enough
 	if (count < n_out+n_in) {
-		for (i=0; i<count; i++) TestAndClear(i%8, queues[q].bitmap + i/8);
+		for (uint16_t i=0; i<count; i++) {
+			TestAndClear(i%8, queues[q].bitmap + i/8);
+		}
 		return false;
 	}
 
 	queues[q].tag[buffers[0]] = tag;
 
 	// Populate the descriptors
-	for (i=0; i<n_out+n_in; i++) {
+	for (uint16_t i=0; i<n_out+n_in; i++) {
 		uint16_t buf = buffers[i];
 		uint16_t next = (i<n_out+n_in-1) ? buffers[i+1] : 0;
 		uint16_t flags =
@@ -106,9 +104,8 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 static void QSendAtomicPart(void *q_voidptr, void *buf_voidptr) {
 	uint16_t q = (uint16_t)(uint32_t)q_voidptr;
 	uint16_t buf = (uint16_t)(uint32_t)buf_voidptr;
-	uint16_t idx;
 
-	idx = queues[q].avail->idx;
+	uint16_t idx = queues[q].avail->idx;
 	queues[q].avail->ring[idx & (queues[q].size - 1)] = buf;
 	SynchronizeIO();
 	queues[q].avail->idx = idx + 1;
@@ -126,8 +123,7 @@ void QInterest(uint16_t q, int32_t delta) {
 
 // Called by transport hardware interrupt to reduce chance of redundant interrupts
 void QDisarm(void) {
-	uint16_t q;
-	for (q=0; queues[q].size != 0; q++) {
+	for (uint16_t q=0; queues[q].size != 0; q++) {
 		queues[q].avail->flags = 1;
 	}
 	SynchronizeIO();
@@ -135,19 +131,17 @@ void QDisarm(void) {
 
 // Called by transport at "deferred" or "secondary" interrupt time
 void QNotified(void) {
-	uint16_t q;
-
-	for (q=0; queues[q].size != 0; q++) {
+	for (uint16_t q=0; queues[q].size != 0; q++) {
 		QPoll(q);
 	}
 
 	VRearm();
-	for (q=0; queues[q].size != 0; q++) {
+	for (uint16_t q=0; queues[q].size != 0; q++) {
 		queues[q].avail->flags = queues[q].interest == 0;
 	}
 	SynchronizeIO();
 
-	for (q=0; queues[q].size != 0; q++) {
+	for (uint16_t q=0; queues[q].size != 0; q++) {
 		QPoll(q);
 	}
 }
