@@ -257,10 +257,7 @@ static const char *statusNames[] = {
 
 extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
-
 	OSStatus err;
-
-	(void)spaceID; // Apple never implemented multiple address space support
 
 	switch (code) {
 	case kInitializeCommand:

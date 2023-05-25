@@ -186,8 +186,6 @@ void VRearm(void) {
 static InterruptMemberNumber interruptTopHalf(InterruptSetMember ist, void *refCon, uint32_t intCount) {
 	uint8_t flags = *gISRStatus; // read flags and also deassert the interrupt
 
-	(void)ist; (void)refCon; (void)intCount;
-
 	if ((flags & 1) && !gSuppressNotification) {
 		QDisarm();
 		gSuppressNotification = true;
@@ -202,13 +200,11 @@ static InterruptMemberNumber interruptTopHalf(InterruptSetMember ist, void *refC
 }
 
 static OSStatus queueIntBottomHalf(void *arg1, void *arg2) {
-	(void)arg1; (void)arg2;
 	QNotified();
 	return noErr;
 }
 
 static OSStatus configIntBottomHalf(void *arg1, void *arg2) {
-	(void)arg1; (void)arg2;
 	DConfigChange();
 	return noErr;
 }
