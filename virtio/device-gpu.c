@@ -260,8 +260,6 @@ static const char *statusNames[] = {
 extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 
-	lprintf("at leaast we got loaded\n");
-/*
 	OSStatus err;
 
 	(void)spaceID; // Apple never implemented multiple address space support
@@ -314,43 +312,13 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	} else {
 		return IOCommandIsComplete(cmdID, err);
 	}
-	*/
-}
-
-static void SCCReg(char key, char val) {
-	volatile char *reg = *(char **)0x1dc + 2; // ACtl
-
-	*reg = key;
-	__asm__ __volatile__("eieio":::"memory");
-	*reg = val;
-	__asm__ __volatile__("eieio":::"memory");
-}
-
-static void SCCData(char val) {
-	volatile char *reg = *(char **)0x1dc + 6; // AData
-
-	*reg = val;
-	__asm__ __volatile__("eieio":::"memory");
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
 	short width, height;
 
-	// let's try wanging the SCC
-	SCCReg(9, 0x80); // reset A/modem
-	SCCReg(4, 0x48); // SB1 | X16CLK
-	SCCReg(12, 0); // basic baud rate
-	SCCReg(13, 0); // basic baud rate
-	SCCReg(14, 3); // baud rate generator = BRSRC | BRENAB
-	// skip enabling receive via reg 3
-	SCCReg(5, 0xca); // enable tx, 8 bits/char, set RTS & DTR
-
-	for (int i=0; i<40; i++) {
-		SCCData('e');
-	}
-	SCCData('\r');
-	SCCData('\n');
+	lprintf_enable = 1;
 
 	// No need to signal FAILED if cannot communicate with device
 	if (!VInit(&info->deviceEntry)) return paramErr;
@@ -390,7 +358,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
-
 
 	getBestSize(&width, &height);
 	if (!mode(k32bit, idForRes(width, height, true)))
