@@ -6,7 +6,7 @@ CFLAGS = -O3
 	~/Documents/mac/tbxi-patches/cfmtool.py $@ /tmp/dmp
 
 all.so: allocator-ppc.o atomic-ppc.o blit.o debugpollpatch.o dirtyrectpatch.o gammatables.o lateboothook.o transport-ppc.o virgl.o virtqueue.o device-gpu.o lprintf.o scc.o
-	${CC} -fdce -shared    -Wl,-bE:library.exp    $^ -o $@      -lDriverServicesLib -lMathLib -lNameRegistryLib -lPCILib -lVideoServicesLib -lStdCLib
+	${CC} -fdce -shared    -Wl,-bE:ndrv.exp    $^ -o $@      -lDriverServicesLib -lMathLib -lNameRegistryLib -lPCILib -lVideoServicesLib -lStdCLib
 
 clean:
 	rm -f *.o
