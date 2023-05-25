@@ -1,5 +1,5 @@
 CC = ${HOME}/Documents/mac/Retro68-build/toolchain/bin/powerpc-apple-macos-gcc
-CFLAGS =
+CFLAGS = -O3
 
 ../builds/qemu_vga.ndrv: all.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -v $^ -o $@
