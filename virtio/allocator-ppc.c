@@ -9,20 +9,16 @@ Bugs:
 #include "allocator.h"
 
 void *AllocPages(size_t count, uint32_t *physicalPageAddresses) {
-	struct IOPreparationTable *prep;
-	char *unaligned, *aligned;
-	OSStatus err;
-
-	unaligned = PoolAllocateResident(count*0x1000 + 0x2000, true);
+	char *unaligned = PoolAllocateResident(count*0x1000 + 0x2000, true);
 	if (unaligned == NULL) return NULL;
 
 	// This address is page aligned and has a guaranteed page below
-	aligned = (char *)(((unsigned long)unaligned + 0x2000) & ~0xfff);
+	char *aligned = (char *)(((unsigned long)unaligned + 0x2000) & ~0xfff);
 
 	// Place structures at known offsets below the returned pointer,
 	// for cleanup by FreePages
 	*(void **)(aligned - 0xf00) = unaligned;
-	prep = (void *)(aligned - 0x1000);
+	struct IOPreparationTable *prep = (void *)(aligned - 0x1000);
 
 	prep->options = kIOLogicalRanges;
 	prep->state = 0;
@@ -37,7 +33,7 @@ void *AllocPages(size_t count, uint32_t *physicalPageAddresses) {
 	prep->rangeInfo.range.base = aligned;
 	prep->rangeInfo.range.length = 0x1000 * count;
 
-	err = PrepareMemoryForIO(prep);
+	OSStatus err = PrepareMemoryForIO(prep);
 	if (err) {
 		PoolDeallocate(unaligned);
 		return NULL;
