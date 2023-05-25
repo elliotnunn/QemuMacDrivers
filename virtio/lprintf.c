@@ -17,10 +17,15 @@ void lprintf(const char *fmt, ...) {
 	vsprintf(buf, fmt, aptr);
 	va_end(aptr);
 
+	// Convert \r and \n to \r\n
 	for (int i=0; i<sizeof buf && buf[i]; i++) {
-		if (buf[i] == '\n') {
+		char this = buf[i];
+
+		if (this == '\r' || this == '\n') {
 			sccWrite('\r');
+			sccWrite('\n');
+		} else {
+			sccWrite(this);
 		}
-		sccWrite(buf[i]);
 	}
 }
