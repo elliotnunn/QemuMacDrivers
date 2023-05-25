@@ -35,7 +35,6 @@
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
 enum {
-	TRACECALLS = 1,
 	MAXBUF = 64*1024*1024, // enough for 4096x4096
 	MINBUF = 2*1024*1024, // enough for 800x600
 	FAST_REFRESH = -16626, // before QD callbacks work, microsec, 60.15 Hz
@@ -273,7 +272,7 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = finalize(pb.finalInfo);
 		break;
 	case kControlCommand:
-		if (TRACECALLS) {
+		if (lprintf_enable && (*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
 			if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames)) {
 				lprintf("Control(%s)\n", controlNames[(*pb.pb).cntrlParam.csCode]);
 			} else {
@@ -282,10 +281,14 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		}
 
 		err = control((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
-		if (TRACECALLS) lprintf("    = %d\n", err);
+
+		if (lprintf_enable && (*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
+			lprintf("    = %d\n", err);
+		}
+
 		break;
 	case kStatusCommand:
-		if (TRACECALLS) {
+		if (lprintf_enable) {
 			if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames)) {
 				lprintf("Status(%s)\n", statusNames[(*pb.pb).cntrlParam.csCode]);
 			} else {
@@ -294,7 +297,11 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		}
 
 		err = status((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
-		if (TRACECALLS) lprintf("    = %d\n", err);
+
+		if (lprintf_enable) {
+			lprintf("    = %d\n", err);
+		}
+
 		break;
 	case kOpenCommand:
 	case kCloseCommand:
