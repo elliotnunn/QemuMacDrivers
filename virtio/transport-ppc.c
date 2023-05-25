@@ -36,12 +36,10 @@ static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]);
 // Leave the device in DRIVER status.
 bool VInit(void *dev) {
 	void *bars[6];
-	uint8_t cap_offset;
-	uint16_t pci_status = 0;
-
 	findLogicalBARs(dev, bars);
 
 	// PCI configuration structures point to addresses we need within the BARs
+	uint8_t cap_offset;
 	for (ExpMgrConfigReadByte(dev, (LogicalAddress)0x34, &cap_offset);
 		cap_offset != 0;
 		ExpMgrConfigReadByte(dev, (LogicalAddress)(cap_offset+1), &cap_offset)) {
@@ -74,6 +72,7 @@ bool VInit(void *dev) {
 	if (!gCommonConfig || !gNotify || !gISRStatus || !VConfig) return false;
 
 	// Incantation to enable memory-mapped access
+	uint16_t pci_status = 0;
 	ExpMgrConfigReadWord(dev, (LogicalAddress)4, &pci_status);
 	pci_status |= 2;
 	ExpMgrConfigWriteWord(dev, (LogicalAddress)4, pci_status);
@@ -220,18 +219,16 @@ static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]) {
 	#define MAXADDRS 10
 	uint32_t assignAddrs[5*MAXADDRS] = {0};
 	void *applAddrs[MAXADDRS] = {0};
-	RegPropertyValueSize size;
-	int i;
 
-	for (i=0; i<6; i++) barArray[i] = NULL;
+	for (int i=0; i<6; i++) barArray[i] = NULL;
 
-	size = sizeof(assignAddrs);
+	RegPropertyValueSize size = sizeof(assignAddrs);
 	RegistryPropertyGet(pciDevice, "assigned-addresses", (void *)assignAddrs, &size);
 
 	size = sizeof(applAddrs);
 	RegistryPropertyGet(pciDevice, "AAPL,address", applAddrs, &size);
 
-	for (i=0; i<MAXADDRS; i++) {
+	for (int i=0; i<MAXADDRS; i++) {
 		uint8_t bar;
 
 		// Only interested in PCI 32 or 64-bit memory space
