@@ -28,6 +28,7 @@ void Blit(int bppshift,
 	*r = (*r + pixalign - 1) & -pixalign;
 
 	if (bppshift == 0) {
+	/*
 		long w = *r - *l;
 
 		blit1asm(
@@ -40,6 +41,7 @@ void Blit(int bppshift,
 			clut[0],                                       // color0
 			clut[0]^clut[1]                                // colorXOR
 		);
+	*/
 	} else if (bppshift == 1) {
 		int leftBytes = *l / 4;
 		int rightBytes = *r / 4;

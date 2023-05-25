@@ -29,12 +29,13 @@
 
 #include "device.h"
 
+
 // The classics
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
 enum {
-	TRACECALLS = 0,
+	TRACECALLS = 1,
 	MAXBUF = 64*1024*1024, // enough for 4096x4096
 	MINBUF = 2*1024*1024, // enough for 800x600
 	FAST_REFRESH = -16626, // before QD callbacks work, microsec, 60.15 Hz
@@ -171,13 +172,6 @@ static short curs_t, curs_l, curs_b, curs_r;
 static uint32_t curs_back[CURSOREDGE*CURSOREDGE];
 static uint32_t curs_front[CURSOREDGE*CURSOREDGE];
 
-
-  OSType              driverDescSignature;    /* Signature field of this structure*/
-  DriverDescVersion   driverDescVersion;      /* Version of this data structure*/
-  MacDriverType       driverType;             /* Type of Driver*/
-  DriverOSRuntime     driverOSRuntimeInfo;    /* OS Runtime Requirements of Driver*/
-  DriverOSService     driverServices;         /* Apple Service API Membership*/
-
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
 	kInitialDriverDescriptor,
@@ -263,8 +257,11 @@ static const char *statusNames[] = {
 	"GetCommunicationInfo",         // 32
 };
 
-OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
+extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
+
+	lprintf("at leaast we got loaded\n");
+/*
 	OSStatus err;
 
 	(void)spaceID; // Apple never implemented multiple address space support
@@ -317,11 +314,43 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	} else {
 		return IOCommandIsComplete(cmdID, err);
 	}
+	*/
+}
+
+static void SCCReg(char key, char val) {
+	volatile char *reg = *(char **)0x1dc + 2; // ACtl
+
+	*reg = key;
+	__asm__ __volatile__("eieio":::"memory");
+	*reg = val;
+	__asm__ __volatile__("eieio":::"memory");
+}
+
+static void SCCData(char val) {
+	volatile char *reg = *(char **)0x1dc + 6; // AData
+
+	*reg = val;
+	__asm__ __volatile__("eieio":::"memory");
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
 	short width, height;
+
+	// let's try wanging the SCC
+	SCCReg(9, 0x80); // reset A/modem
+	SCCReg(4, 0x48); // SB1 | X16CLK
+	SCCReg(12, 0); // basic baud rate
+	SCCReg(13, 0); // basic baud rate
+	SCCReg(14, 3); // baud rate generator = BRSRC | BRENAB
+	// skip enabling receive via reg 3
+	SCCReg(5, 0xca); // enable tx, 8 bits/char, set RTS & DTR
+
+	for (int i=0; i<40; i++) {
+		SCCData('e');
+	}
+	SCCData('\r');
+	SCCData('\n');
 
 	// No need to signal FAILED if cannot communicate with device
 	if (!VInit(&info->deviceEntry)) return paramErr;
