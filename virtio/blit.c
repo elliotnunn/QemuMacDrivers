@@ -28,20 +28,20 @@ void Blit(int bppshift,
 	*r = (*r + pixalign - 1) & -pixalign;
 
 	if (bppshift == 0) {
-	/*
-		long w = *r - *l;
-
-		blit1asm(
-			(char *)src + t*rowbytes + *l/8 - 4,            // srcpix: subtract 4 to use PowerPC preincrement
-			rowbytes - w/8,                                // srcrowskip
-			(char *)dest + t*rowbytes_dest + *l*4,          // dstpix
-			rowbytes_dest - w*4,                           // dstrowskip
-			w/32,                                          // w: pixels/CHUNK
-			b-t,                                           // h
-			clut[0],                                       // color0
-			clut[0]^clut[1]                                // colorXOR
-		);
-	*/
+		int leftBytes = *l / 8;
+		int rightBytes = *r / 8;
+		uint32_t c0 = clut[0], c1 = clut[1];
+		for (y=t; y<b; y++) {
+			uint32_t *srcctr = (void *)((char *)src + y * rowbytes + leftBytes);
+			uint32_t *destctr = (void *)((char *)dest + y * rowbytes_dest + *l * 4);
+			for (x=leftBytes; x<rightBytes; x+=4) {
+				uint32_t s = *srcctr++;
+				for (int i=0; i<32; i++) {
+					*destctr++ = (s & 0x80000000) ? c1 : c0;
+					s <<= 1;
+				}
+			}
+		}
 	} else if (bppshift == 1) {
 		int leftBytes = *l / 4;
 		int rightBytes = *r / 4;
