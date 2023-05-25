@@ -71,7 +71,6 @@ static void notificationAtomic(void *nmReqPtr);
 static void updateScreen(short t, short l, short b, short r);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
 static void perfTest(void);
-static void perfTestNotification(NMRecPtr nmReqPtr);
 static OSStatus VBL(void *p1, void *p2);
 static long rowbytesForBack(int relativeDepth, long width);
 static long rowbytesForFront(int relativeDepth, long width);
@@ -318,7 +317,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
 	short width, height;
 
-	lprintf_enable = 1;
+	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
+		lprintf_enable = 1;
+	}
 
 	// No need to signal FAILED if cannot communicate with device
 	if (!VInit(&info->deviceEntry)) return paramErr;
@@ -894,32 +895,19 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 }
 
 static void perfTest(void) {
-	static RoutineDescriptor descriptor = BUILD_ROUTINE_DESCRIPTOR(
-		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
-		perfTestNotification);
-
-	static char str[256];
-
-	static NMRec rec = {
-		NULL, // qLink
-		8, // qType
-		0, 0, 0, // reserved fields
-		0, NULL, NULL, // nmMark, nmIcon, nmSound
-		(StringPtr)str, // nmStr
-		&descriptor,
-		0 // nmRefCon, 1 = onscreen
-	};
+	// control-shift
+	KeyMap keys;
+	GetKeys(keys);
+	if ((keys[1]&9) == 9) {
+		lprintf_enable = 1; // enable debug printing from now on
+		lprintf("Switching to %dx%dx%d. Speed test:\n", W, H, 1<<(depth-kDepthMode1));
+	} else {
+		lprintf("Switching to %dx%dx%d. Ctrl-shift for speed test.\n", W, H, 1<<(depth-kDepthMode1));
+		return;
+	}
 
 	long t=LMGetTicks();
 	long ctr1=0, ctr2=0;
-	KeyMap keys;
-
-	// control-shift
-	GetKeys(keys);
-	if ((keys[1]&9) != 9) return;
-
-	if (rec.nmRefCon != 0) NMRemove(&rec);
-	rec.nmRefCon = 1;
 
 	// Warm up
 	t += 2;
@@ -951,21 +939,7 @@ static void perfTest(void) {
 		ctr2++;
 	}
 
-	// The return value of sprintf becomes the Pascal length byte
-	str[0] =
-		sprintf(str+1,
-		"virtio-gpu\n"
-		"  Mode: %dx%dx%d\n"
-		"  Frame rate with guest blitter: %ld Hz\n"
-		"  Frame rate without guest blitter: %ld Hz",
-		W, H, 1<<(depth-kDepthMode1), ctr1*2, ctr2*2);
-
-	NMInstall(&rec);
-}
-
-static void perfTestNotification(NMRecPtr nmReqPtr) {
-	NMRemove(nmReqPtr);
-	nmReqPtr->nmRefCon = 0;
+	lprintf("%ld Hz with gamma correction, %ld Hz without\n", ctr1*2, ctr2*2);
 }
 
 static OSStatus VBL(void *p1, void *p2) {
