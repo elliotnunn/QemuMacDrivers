@@ -1,4 +1,4 @@
-      [gpu|9p].c                  virtqueue.c            transport-[ppc|68k].c
+      device-*.c                  virtqueue.c            transport-[ppc|68k].c
        device.h                   virtqueue.h                transport.h
 .......................     .......................     .......................
                                                            _________________
