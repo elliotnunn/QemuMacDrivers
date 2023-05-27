@@ -23,7 +23,7 @@ COMMON_PPC = \
 
 device-gpu.so: device-gpu.o blit.o virgl.o debugpollpatch.o dirtyrectpatch.o \
 gammatables.o lateboothook.o ${COMMON_PPC}
-	${CC} -O3 -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
+	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
 
 clean:
 	rm -f *.o *.so
