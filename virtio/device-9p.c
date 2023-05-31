@@ -9,19 +9,13 @@
 #include <string.h>
 
 #include "transport.h"
+#include "virtqueue.h"
 #include "allocator.h"
 #include "lprintf.h"
 
-OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
-	IOCommandContents pb, IOCommandCode code, IOCommandKind kind);
+#include "device.h"
 
-static OSStatus initialize(DriverInitInfo *);
-static OSStatus finalize(DriverFinalInfo *);
-static void queueSizer(uint16_t queue, uint16_t *count, size_t *osize, size_t *isize);
-static void setFields(void *dest, const char *fields, ...);
-static void getFields(const void *src, const char *fields, ...);
-
-#define MSIZE (128*1024)
+#include <stdbool.h>
 
 enum {
 	Tversion = 100, // size[4] Tversion tag[2] msize[4] version[s]
@@ -54,17 +48,47 @@ enum {
 	Rwstat = 127,   // size[4] Rwstat tag[2]
 };
 
+enum {
+	MY_MSIZE = 128*1024,
+	ONLYTAG = 1,
+};
+
+
+#define READ16LE(S) ((255 & (S)[1]) << 8 | (255 & (S)[0]))
+#define READ32LE(S) \
+  ((uint32_t)(255 & (S)[3]) << 24 | (uint32_t)(255 & (S)[2]) << 16 | \
+   (uint32_t)(255 & (S)[1]) << 8 | (uint32_t)(255 & (S)[0]))
+#define WRITE16LE(P, V)                        \
+  ((P)[0] = (0x000000FF & (V)), \
+   (P)[1] = (0x0000FF00 & (V)) >> 8, (P) + 2)
+#define WRITE32LE(P, V)                        \
+  ((P)[0] = (0x000000FF & (V)), \
+   (P)[1] = (0x0000FF00 & (V)) >> 8, \
+   (P)[2] = (0x00FF0000 & (V)) >> 16, \
+   (P)[3] = (0xFF000000 & (V)) >> 24, (P) + 4)
+
+
+static OSStatus initialize(DriverInitInfo *info);
+static OSStatus finalize(DriverFinalInfo *info);
+static bool Version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version);
+static void SetErr(char *msg);
+
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
 	kInitialDriverDescriptor,
-	"\ppci1af4,1009",
-	0x00, 0x10, 0x80, 0x00, // v0.1
-	kDriverIsLoadedUponDiscovery | kDriverIsOpenedUponLoad,
-	"\p.virtio9p",
-	0, 0, 0, 0, 0, 0, 0, 0, // reserved
-	1, // nServices
-	kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, 0x00, 0x10, 0x80, 0x00, //v0.1
+	{"\x0cpci1af4,1009", {0x00, 0x10, 0x80, 0x00}}, // v0.1
+	{kDriverIsLoadedUponDiscovery |
+		kDriverIsOpenedUponLoad,
+		"\x09.virtio9p"},
+	{1, // nServices
+	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
+
+uint32_t msize;
+void *lpage;
+uint32_t ppage;
+char ErrStr[256];
+volatile bool flag;
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
@@ -103,33 +127,40 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
+	lprintf_enable = true;
+
 	OSStatus err;
 
-	err = VirtioInit(&info->deviceEntry);
-	if (err) return err;
+	lprintf("9p: starting\n");
 
+	// No need to signal FAILED if cannot communicate with device
+	if (!VInit(&info->deviceEntry)) {
+		lprintf("9p: failed VInit()\n");
+		return paramErr;
+	};
 
+	if (!VFeaturesOK()) {
+		lprintf("9p: failed VFeaturesOK()\n");
+		return paramErr;
+	}
 
-// 	{
-// 		uint8_t gotversion;
-// 		uint32_t gotmsize;
-// 		uint16_t gotstrlen;
-//
-// 		setFields(VTBuffers[0][0], "41242", 21, Tversion, 0xffff, MSIZE, 8);
-// 		memcpy((char *)VTBuffers[0][0] + 13, "9P2000.u", 8);
-// 		VTSend(0, 0);
-// 		while (!VTDone(0)) {}
-//
-// 		getFields(VTBuffers[0][1], "....1..42", &gotversion, &gotmsize, &gotstrlen);
-// 		if (gotversion != Rversion || gotmsize != MSIZE || gotstrlen != 8 ||
-// 			memcmp((char *)VTBuffers[0][1] + 13, "9P2000.u", 8)) {
-// 			lprintf("error\n");
-// 			lprintf("gotversion %d gotmsize %d gotstrlen %d\n", gotversion, gotmsize, gotstrlen);
-// 			return paramErr;
-// 		}
-//
-// 		lprintf("ok\n");
-// 	}
+	// All our descriptors point into this wired-down page
+	lpage = AllocPages(1, &ppage);
+	if (lpage == NULL) {
+		lprintf("9p: failed AllocPages()\n");
+		return paramErr;
+	}
+
+	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
+	VDriverOK();
+
+	char chosenVers[128];
+
+	if (Version(MY_MSIZE, "9P2000.u", &msize, chosenVers)) {
+		return paramErr;
+	}
+
+	lprintf("version returned %s\n", chosenVers);
 
 	return noErr;
 }
@@ -138,71 +169,61 @@ static OSStatus finalize(DriverFinalInfo *info) {
 	return noErr;
 }
 
-static void queueSizer(uint16_t queue, uint16_t *count, size_t *osize, size_t *isize) {
-	*count = 2;
-	*osize = 128*1024;
-	*isize = 128*1024;
-}
+// These can be synchronous because the File Manager is synchronous.
+// Which also means the tag won't get any use.
+static bool Version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version) {
+	char *b = lpage;
+	size_t slen = strlen(tx_version);
+	uint32_t size = slen + 11;
 
-static void setFields(void *dest, const char *fields, ...) {
-	char *destptr = dest;
-    va_list args;
-	char f;
+	WRITE32LE(b, size);
+	b[4] = Tversion;
+	WRITE16LE(b + 5, ONLYTAG);
+	WRITE32LE(b + 7, tx_msize);
+	WRITE16LE(b + 11, slen);
+	memcpy(b + 13, tx_version, slen);
 
-    va_start(args, fields);
+	flag = false;
+	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){2048, 2048}, NULL);
+	QNotify(0);
+	while (!flag) {}
 
-	while ((f = *fields++) != 0) {
-		if (f == '.') {
-			*destptr++ = 0;
-		} else if (f == '1') {
-			int arg = va_arg(args, int);
-			*destptr++ = arg;
-		} else if (f == '2') {
-			int arg = va_arg(args, int);
-			*destptr++ = arg;
-			*destptr++ = arg >> 8;
-		} else if (f == '4') {
-			uint32_t arg = va_arg(args, uint32_t);
-			*destptr++ = arg;
-			*destptr++ = arg >> 8;
-			*destptr++ = arg >> 16;
-			*destptr++ = arg >> 24;
-		}
+	b = lpage + 2048;
+
+	if (b[4] == Rerror) {
+		SetErr(b);
+		return true;
 	}
 
-    va_end(args);
-}
-
-static void getFields(const void *src, const char *fields, ...) {
-	const char *srcptr = src;
-    va_list args;
-	char f;
-
-    va_start(args, fields);
-
-	while ((f = *fields++) != 0) {
-
-		if (f == '.') {
-			srcptr++;
-		} else if (f == '1') {
-			char *arg = va_arg(args, char *);
-			*arg = *srcptr++;
-		} else if (f == '2') {
-			uint16_t *arg = va_arg(args, uint16_t *);
-			*arg =
-				(uint16_t)srcptr[0] +
-				((uint16_t)srcptr[1] << 8);
-			srcptr += 2;
-		} else if (f == '4') {
-			uint32_t *arg = va_arg(args, uint32_t *);
-			*arg =
-				(uint32_t)srcptr[0] +
-				((uint32_t)srcptr[1] << 8) +
-				((uint32_t)srcptr[2] << 16) +
-				((uint32_t)srcptr[3] << 24);
-			srcptr += 4;
-		}
+	if (rx_msize != NULL) {
+		*rx_msize = READ32LE(b + 7);
 	}
 
-    va_end(args);
+	if (rx_version != NULL) {
+		slen = READ16LE(b + 11);
+		memcpy(rx_version, b + 13, slen);
+		rx_version[slen] = 0;
+	}
+
+	return false;
+}
+
+static void SetErr(char *msg) {
+	uint16_t size = (uint16_t)(msg[7]) | ((uint16_t)(msg[8]) << 16);
+	if (size > sizeof(ErrStr) - 1) {
+		size = sizeof(ErrStr) - 1;
+	}
+	memcpy(ErrStr, msg + 9, size);
+	ErrStr[size] = 0;
+	lprintf("9p error: %s\n", ErrStr);
+}
+
+void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
+	QFree(q, buf);
+	flag = true;
+}
+
+// Device-specific configuration struct has changed
+void DConfigChange(void) {
+
 }
