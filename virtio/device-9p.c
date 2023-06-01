@@ -22,7 +22,7 @@ enum {
 	Rversion = 101, // size[4] Rversion tag[2] msize[4] version[s]
 	Tauth = 102,    // size[4] Tauth tag[2] afid[4] uname[s] aname[s]
 	Rauth = 103,    // size[4] Rauth tag[2] aqid[13]
-	Tattach = 104,  // size[4] Tattach tag[2] fid[4] afid[4] uname[s] aname[s]
+	Tattach = 104,  // size[4] Tattach tag[2] fid[4] afid[4] uname[s] aname[s] ... unix addition n_uname[4]
 	Rattach = 105,  // size[4] Rattach tag[2] qid[13]
 	Terror = 106,   // illegal
 	Rerror = 107,   // size[4] Rerror tag[2] ename[s]
@@ -50,14 +50,25 @@ enum {
 
 enum {
 	MY_MSIZE = 128*1024,
+	NOTAG = 0,
 	ONLYTAG = 1,
 };
 
+struct qid {
+	char type;
+	uint32_t version;
+	uint64_t path;
+};
 
 #define READ16LE(S) ((255 & (S)[1]) << 8 | (255 & (S)[0]))
 #define READ32LE(S) \
   ((uint32_t)(255 & (S)[3]) << 24 | (uint32_t)(255 & (S)[2]) << 16 | \
    (uint32_t)(255 & (S)[1]) << 8 | (uint32_t)(255 & (S)[0]))
+#define READ64LE(S)                                                    \
+  ((uint64_t)(255 & (S)[7]) << 070 | (uint64_t)(255 & (S)[6]) << 060 | \
+   (uint64_t)(255 & (S)[5]) << 050 | (uint64_t)(255 & (S)[4]) << 040 | \
+   (uint64_t)(255 & (S)[3]) << 030 | (uint64_t)(255 & (S)[2]) << 020 | \
+   (uint64_t)(255 & (S)[1]) << 010 | (uint64_t)(255 & (S)[0]) << 000)
 #define WRITE16LE(P, V)                        \
   ((P)[0] = (0x000000FF & (V)), \
    (P)[1] = (0x0000FF00 & (V)) >> 8, (P) + 2)
@@ -66,11 +77,22 @@ enum {
    (P)[1] = (0x0000FF00 & (V)) >> 8, \
    (P)[2] = (0x00FF0000 & (V)) >> 16, \
    (P)[3] = (0xFF000000 & (V)) >> 24, (P) + 4)
+#define WRITE64BE(P, V)                        \
+  ((P)[0] = (0xFF00000000000000 & (V)) >> 070, \
+   (P)[1] = (0x00FF000000000000 & (V)) >> 060, \
+   (P)[2] = (0x0000FF0000000000 & (V)) >> 050, \
+   (P)[3] = (0x000000FF00000000 & (V)) >> 040, \
+   (P)[4] = (0x00000000FF000000 & (V)) >> 030, \
+   (P)[5] = (0x0000000000FF0000 & (V)) >> 020, \
+   (P)[6] = (0x000000000000FF00 & (V)) >> 010, \
+   (P)[7] = (0x00000000000000FF & (V)) >> 000, (P) + 8)
 
 
 static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
 static bool Version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version);
+static bool Auth(uint32_t afid, char *uname, char *aname, struct qid *qid);
+static bool Attach(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct qid *rx_qid);
 static void SetErr(char *msg);
 
 DriverDescription TheDriverDescription = {
@@ -154,13 +176,31 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	char chosenVers[128];
+	if (2 != QInit(0, 2)) {
+		lprintf("9p: failed QInit()\n");
+		return paramErr;
+	}
+	QInterest(0, 1);
 
-	if (Version(MY_MSIZE, "9P2000.u", &msize, chosenVers)) {
+	char vers[128];
+	if (Version(MY_MSIZE, "9P2000.u", &msize, vers)) {
 		return paramErr;
 	}
 
-	lprintf("version returned %s\n", chosenVers);
+	if (strcmp(vers, "9P2000.u")) {
+		lprintf("9p: we offered 9P2000.u, server offered %s, cannot continue\n", vers);
+		return paramErr;
+	}
+
+	lprintf("9p: msize %d\n", (long)msize);
+
+	struct qid root = {0};
+
+	if (Attach(99, 0xffffffff /*afid=NOFID*/, "", "", &root)) {
+		return paramErr;
+	}
+
+	lprintf("qid %d %x %08x%08x\n", root.type, root.version, (uint32_t)(root.path >> 32), (uint32_t)root.path);
 
 	return noErr;
 }
@@ -174,19 +214,19 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static bool Version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version) {
 	char *b = lpage;
 	size_t slen = strlen(tx_version);
-	uint32_t size = slen + 11;
+	uint32_t size = 13 + slen;
 
 	WRITE32LE(b, size);
 	b[4] = Tversion;
-	WRITE16LE(b + 5, ONLYTAG);
+	WRITE16LE(b + 5, NOTAG);
 	WRITE32LE(b + 7, tx_msize);
 	WRITE16LE(b + 11, slen);
 	memcpy(b + 13, tx_version, slen);
 
 	flag = false;
-	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){2048, 2048}, NULL);
+	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){size, 2048}, NULL);
 	QNotify(0);
-	while (!flag) {}
+	while (!flag) {} // Change to WaitForInterrupt
 
 	b = lpage + 2048;
 
@@ -203,6 +243,47 @@ static bool Version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, cha
 		slen = READ16LE(b + 11);
 		memcpy(rx_version, b + 13, slen);
 		rx_version[slen] = 0;
+	}
+
+	return false;
+}
+
+static bool Auth(uint32_t afid, char *uname, char *aname, struct qid *qid) {
+	// actually, don't implement
+}
+
+static bool Attach(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct qid *rx_qid) {
+	char *b = lpage;
+	size_t ulen = strlen(tx_uname), alen = strlen(tx_aname);
+	uint32_t size = 4+1+2+4+4+2+ulen+2+alen+4;
+
+	WRITE32LE(b, size);
+	b[4] = Tattach;
+	WRITE16LE(b+4+1, ONLYTAG);
+	WRITE32LE(b+4+1+2, tx_fid);
+	WRITE32LE(b+4+1+2+4, tx_afid);
+	WRITE16LE(b+4+1+2+4+4, ulen);
+	memcpy(b+4+1+2+4+4+2, tx_uname, ulen);
+	WRITE16LE(b+4+1+2+4+4+2+ulen, alen);
+	memcpy(b+4+1+2+4+4+2+ulen+2, tx_aname, alen);
+	WRITE32LE(b+4+1+2+4+4+2+ulen+2+alen, 0);
+
+	flag = false;
+	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){size, 20}, NULL);
+	QNotify(0);
+	while (!flag) {} // Change to WaitForInterrupt
+
+	b = lpage + 2048;
+
+	if (b[4] == Rerror) {
+		SetErr(b);
+		return true;
+	}
+
+	if (rx_qid != NULL) {
+		rx_qid->type = b[7];
+		rx_qid->version = READ32LE(b+7+1);
+		rx_qid->path = READ64LE(b+7+1+4);
 	}
 
 	return false;
