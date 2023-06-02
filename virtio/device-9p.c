@@ -225,13 +225,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 	Open(rootfid, 0, &root, &iounit);
 	lprintf("iounit %d\n", iounit);
 
-	char big[1000] = {};
 	uint32_t succeeded = 0;
-	Read(rootfid, 0, sizeof(big), big, &succeeded);
-	lprintf("in my buffer at %08x got %d bytes:\n", big, succeeded);
+	Read(rootfid, 0, msize-11, NULL, &succeeded);
 
 	for (int i=0; i<succeeded; i++) {
-		lprintf("%c", big[i] ? big[i] : ',');
+		lprintf("%02x ", (int)(unsigned char)bigBuf[11+i]);
 	}
 	lprintf("\n");
 
