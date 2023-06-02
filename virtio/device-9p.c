@@ -99,6 +99,7 @@ static bool Open(uint32_t tx_fid, uint8_t tx_mode, struct qid *rx_qid, uint32_t 
 static bool C_reate(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct qid *rx_qid, uint32_t *rx_iounit);
 static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_data, uint32_t *done_count);
 static void SetErr(char *msg);
+static int entrySizes(int bytes, const uint32_t *ptrTab, uint32_t *sizeTab);
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -210,12 +211,23 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	lprintf("qid %d %x %08x%08x\n", root.type, root.version, (uint32_t)(root.path >> 32), (uint32_t)root.path);
 
-	char big[256] = {};
+
+	Walk(rootfid, rootfid+1, "builds", &root);
+	lprintf("builds: qid %d %x %08x%08x\n", root.type, root.version, (uint32_t)(root.path >> 32), (uint32_t)root.path);
+
+	uint32_t iounit = 0;
+	Open(rootfid, 0, &root, &iounit);
+	lprintf("iounit %d\n", iounit);
+
+	char big[100] = {};
 	uint32_t succeeded = 0;
+	Read(rootfid, 0, sizeof(big), big, &succeeded);
+	lprintf("in my buffer at %08x got %d bytes:\n", big, succeeded);
 
-	Read(123, 0, sizeof(big), big, &succeeded);
-
-	lprintf("got %d bytes:\n", succeeded);
+	for (int i=0; i<succeeded; i++) {
+		lprintf("%c", big[i] ? big[i] : ',');
+	}
+	lprintf("\n");
 
 	return noErr;
 }
@@ -447,30 +459,10 @@ static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_d
 		lprintf("Prepared %d of requested %d bytes\n", prep.lengthPrepared, count);
 		lprintf("state = %d\n", prep.state);
 
-		int nbufs = 2;
-		uint32_t acctfor = 0;
-		uint32_t *this = physicals + nbufs;
-		uint32_t *that = sizes + nbufs;
-		while (acctfor < prep.lengthPrepared) {
-			nbufs++;
-
-			if (*this % 4096) {
-				*that = 4096 - (*this % 4096);
-			} else {
-				*that = 4096;
-			}
-
-			if (*that > prep.lengthPrepared - acctfor) {
-				*that = prep.lengthPrepared - acctfor;
-			}
-
-			acctfor += *that;
-			this++;
-			that++;
-		}
+		int bufcnt = entrySizes(prep.lengthPrepared, physicals + 2, sizes + 2) + 2;
 
 		lprintf("buf sizes:\n");
-		for (int i=0; i<nbufs; i++) {
+		for (int i=0; i<bufcnt; i++) {
 			lprintf("%08x/%d ", physicals[i], sizes[i]);
 		}
 		lprintf("\n");
@@ -490,7 +482,7 @@ static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_d
 		lprintf("\n");
 
 		flag = false;
-		QSend(0, 1, nbufs-1, physicals, sizes, NULL);
+		QSend(0, 1, bufcnt-1, physicals, sizes, NULL);
 		QNotify(0);
 		while (!flag) {} // Change to WaitForInterrupt
 
@@ -508,6 +500,7 @@ static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_d
 
 		*done_count += got;
 		CheckpointIO(prep.preparationID, 0);
+		break;
 	}
 
 	return false;
@@ -521,6 +514,31 @@ static void SetErr(char *msg) {
 	memcpy(ErrStr, msg + 9, size);
 	ErrStr[size] = 0;
 	lprintf("9p error: %s\n", ErrStr);
+}
+
+static int entrySizes(int bytes, const uint32_t *ptrTab, uint32_t *sizeTab) {
+	int count = 0;
+
+	while (bytes) {
+		// The first entry might go from mid-page to end-page
+		if (*ptrTab % 4096) {
+			*sizeTab = 4096 - (*ptrTab % 4096);
+		} else {
+			*sizeTab = 4096;
+		}
+
+		// The last entry might go from start-page to mid-page
+		if (*sizeTab > bytes) {
+			*sizeTab = bytes;
+		}
+
+		bytes -= *sizeTab;
+		count++;
+		ptrTab++;
+		sizeTab++;
+	}
+
+	return count;
 }
 
 void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
