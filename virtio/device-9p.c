@@ -49,7 +49,6 @@ enum {
 };
 
 enum {
-	MY_MSIZE = 128*1024,
 	NOTAG = 0,
 	ONLYTAG = 1,
 	NOFID = 0xffffffff,
@@ -99,7 +98,10 @@ static bool Open(uint32_t tx_fid, uint8_t tx_mode, struct qid *rx_qid, uint32_t 
 static bool C_reate(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct qid *rx_qid, uint32_t *rx_iounit);
 static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_data, uint32_t *done_count);
 static void SetErr(char *msg);
-static int entrySizes(int bytes, const uint32_t *ptrTab, uint32_t *sizeTab);
+static void putSmlGetBig(void);
+static void putBigGetSml(void);
+static bool allocBigBuffer(uint16_t maxbufs);
+static int pageExtents(const uint32_t *pages, int npages, uint32_t *extbases, uint32_t *extsizes, int maxext);
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -112,10 +114,16 @@ DriverDescription TheDriverDescription = {
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
-uint16_t bufcnt;
+// Buffers for bounded-length calls
+// (Not enough for a 64k Rerror message... who cares)
+
 uint32_t msize;
-void *lpage;
-uint32_t ppage;
+char *smlBuf, *bigBuf;
+
+// Use these as arguments to QSend:
+uint32_t *smlBigAddrs, *bigSmlAddrs, *smlBigSizes, *bigSmlSizes;
+uint16_t bigCnt;
+
 char ErrStr[256];
 volatile bool flag;
 
@@ -173,25 +181,23 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	}
 
-	// All our descriptors point into this wired-down page
-	lpage = AllocPages(1, &ppage);
-	if (lpage == NULL) {
-		lprintf("9p: failed AllocPages()\n");
-		return paramErr;
-	}
-
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	bufcnt = QInit(0, 256);
-	if (bufcnt <= 2) {
+	// More buffers allow us to tolerate more physical mem fragmentation
+	uint16_t viobufs = QInit(0, 256);
+	if (viobufs < 2) {
 		lprintf("9p: failed QInit()\n");
 		return paramErr;
 	}
 	QInterest(0, 1);
 
+	if (!allocBigBuffer(viobufs)) {
+		return paramErr;
+	}
+
 	char vers[128];
-	if (Version(MY_MSIZE, "9P2000.u", &msize, vers)) {
+	if (Version(msize, "9P2000.u", &msize, vers)) {
 		return paramErr;
 	}
 
@@ -239,36 +245,30 @@ static OSStatus finalize(DriverFinalInfo *info) {
 // These can be synchronous because the File Manager is synchronous.
 // Which also means the tag won't get any use.
 static bool Version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version) {
-	char *b = lpage;
 	size_t slen = strlen(tx_version);
 	uint32_t size = 13 + slen;
 
-	WRITE32LE(b, size);
-	b[4] = Tversion;
-	WRITE16LE(b + 5, NOTAG);
-	WRITE32LE(b + 7, tx_msize);
-	WRITE16LE(b + 11, slen);
-	memcpy(b + 13, tx_version, slen);
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tversion;
+	WRITE16LE(smlBuf+5, NOTAG);
+	WRITE32LE(smlBuf+7, tx_msize);
+	WRITE16LE(smlBuf+11, slen);
+	memcpy(smlBuf+13, tx_version, slen);
 
-	flag = false;
-	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){size, 2048}, NULL);
-	QNotify(0);
-	while (!flag) {} // Change to WaitForInterrupt
+	putSmlGetBig();
 
-	b = lpage + 2048;
-
-	if (b[4] == Rerror) {
-		SetErr(b);
+	if (bigBuf[4] == Rerror) {
+		SetErr(bigBuf);
 		return true;
 	}
 
 	if (rx_msize != NULL) {
-		*rx_msize = READ32LE(b + 7);
+		*rx_msize = READ32LE(bigBuf+7);
 	}
 
 	if (rx_version != NULL) {
-		slen = READ16LE(b + 11);
-		memcpy(rx_version, b + 13, slen);
+		slen = READ16LE(bigBuf+11);
+		memcpy(rx_version, bigBuf+13, slen);
 		rx_version[slen] = 0;
 	}
 
@@ -280,37 +280,31 @@ static bool Auth(uint32_t afid, char *uname, char *aname, struct qid *qid) {
 }
 
 static bool Attach(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct qid *rx_qid) {
-	char *b = lpage;
 	size_t ulen = strlen(tx_uname), alen = strlen(tx_aname);
 	uint32_t size = 4+1+2+4+4+2+ulen+2+alen+4;
 
-	WRITE32LE(b, size);
-	b[4] = Tattach;
-	WRITE16LE(b+4+1, ONLYTAG);
-	WRITE32LE(b+4+1+2, tx_fid);
-	WRITE32LE(b+4+1+2+4, tx_afid);
-	WRITE16LE(b+4+1+2+4+4, ulen);
-	memcpy(b+4+1+2+4+4+2, tx_uname, ulen);
-	WRITE16LE(b+4+1+2+4+4+2+ulen, alen);
-	memcpy(b+4+1+2+4+4+2+ulen+2, tx_aname, alen);
-	WRITE32LE(b+4+1+2+4+4+2+ulen+2+alen, 0);
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tattach;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, tx_fid);
+	WRITE32LE(smlBuf+4+1+2+4, tx_afid);
+	WRITE16LE(smlBuf+4+1+2+4+4, ulen);
+	memcpy(smlBuf+4+1+2+4+4+2, tx_uname, ulen);
+	WRITE16LE(smlBuf+4+1+2+4+4+2+ulen, alen);
+	memcpy(smlBuf+4+1+2+4+4+2+ulen+2, tx_aname, alen);
+	WRITE32LE(smlBuf+4+1+2+4+4+2+ulen+2+alen, 0);
 
-	flag = false;
-	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){size, 20}, NULL);
-	QNotify(0);
-	while (!flag) {} // Change to WaitForInterrupt
+	putSmlGetBig();
 
-	b = lpage + 2048;
-
-	if (b[4] == Rerror) {
-		SetErr(b);
+	if (bigBuf[4] == Rerror) {
+		SetErr(bigBuf);
 		return true;
 	}
 
 	if (rx_qid != NULL) {
-		rx_qid->type = b[7];
-		rx_qid->version = READ32LE(b+7+1);
-		rx_qid->path = READ64LE(b+7+1+4);
+		rx_qid->type = bigBuf[7];
+		rx_qid->version = READ32LE(bigBuf+7+1);
+		rx_qid->path = READ64LE(bigBuf+7+1+4);
 	}
 
 	return false;
@@ -318,189 +312,124 @@ static bool Attach(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_a
 
 // Convenient just to enforce "one path element"
 static bool Walk(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct qid *rx_qid) {
-	char *b = lpage;
 	size_t nlen = strlen(tx_name);
 	uint32_t size = 4+1+2+4+4+2+2+nlen;
 
-	WRITE32LE(b, size);
-	b[4] = Twalk;
-	WRITE16LE(b+4+1, ONLYTAG);
-	WRITE32LE(b+4+1+2, tx_fid);
-	WRITE32LE(b+4+1+2+4, tx_newfid);
-	WRITE16LE(b+4+1+2+4+4, 1); // nwname
-	WRITE16LE(b+4+1+2+4+4+2, nlen);
-	   memcpy(b+4+1+2+4+4+2+2, tx_name, nlen);
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Twalk;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, tx_fid);
+	WRITE32LE(smlBuf+4+1+2+4, tx_newfid);
+	WRITE16LE(smlBuf+4+1+2+4+4, 1); // nwname
+	WRITE16LE(smlBuf+4+1+2+4+4+2, nlen);
+	   memcpy(smlBuf+4+1+2+4+4+2+2, tx_name, nlen);
 
-	flag = false;
-	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){size, 2048}, NULL);
-	QNotify(0);
-	while (!flag) {} // Change to WaitForInterrupt
+	putSmlGetBig();
 
-	b = lpage + 2048;
-
-	if (b[4] == Rerror) {
-		SetErr(b);
+	if (bigBuf[4] == Rerror) {
+		SetErr(bigBuf);
 		return true;
 	}
 
 	if (rx_qid != NULL) {
-		rx_qid->type = b[9];
-		rx_qid->version = READ32LE(b+9+1);
-		rx_qid->path = READ64LE(b+9+1+4);
+		rx_qid->type = bigBuf[9];
+		rx_qid->version = READ32LE(bigBuf+9+1);
+		rx_qid->path = READ64LE(bigBuf+9+1+4);
 	}
 
 	return false;
 }
 
 static bool Open(uint32_t tx_fid, uint8_t tx_mode, struct qid *rx_qid, uint32_t *rx_iounit) {
-	char *b = lpage;
 	uint32_t size = 4+1+2+4+1;
 
-	WRITE32LE(b, size);
-	*(b+4) = Topen;
-	WRITE16LE(b+4+1, ONLYTAG);
-	WRITE32LE(b+4+1+2, tx_fid);
-	*(b+4+1+2+4) = tx_mode;
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Topen;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, tx_fid);
+	*(smlBuf+4+1+2+4) = tx_mode;
 
-	flag = false;
-	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){size, 24}, NULL);
-	QNotify(0);
-	while (!flag) {} // Change to WaitForInterrupt
+	putSmlGetBig();
 
-	b = lpage + 2048;
-
-	if (b[4] == Rerror) {
-		SetErr(b);
+	if (bigBuf[4] == Rerror) {
+		SetErr(bigBuf);
 		return true;
 	}
 
 	if (rx_qid != NULL) {
-		rx_qid->type = *(b+7);
-		rx_qid->version = READ32LE(b+7+1);
-		rx_qid->path = READ64LE(b+7+1+4);
+		rx_qid->type = *(bigBuf+7);
+		rx_qid->version = READ32LE(bigBuf+7+1);
+		rx_qid->path = READ64LE(bigBuf+7+1+4);
 	}
 
 	if (rx_iounit != NULL) {
-		*rx_iounit = READ32LE(b+20);
+		*rx_iounit = READ32LE(bigBuf+20);
 	}
 
 	return false;
 }
 
 static bool C_reate(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct qid *rx_qid, uint32_t *rx_iounit) {
-	char *b = lpage;
 	size_t nlen = strlen(tx_name), elen = strlen(tx_extn);
 	uint32_t size = 4+1+2+4+2+nlen+4+1+2+elen;
 
-	WRITE32LE(b, size);
-	*(b+4) = Tcreate;
-	WRITE16LE(b+4+1, ONLYTAG);
-	WRITE32LE(b+4+1+2, tx_fid);
-	WRITE16LE(b+4+1+2+4, nlen);
-	memcpy(b+4+1+2+4+2, tx_name, nlen);
-	WRITE32LE(b+4+1+2+4+2+nlen, tx_perm);
-	*(b+4+1+2+4+2+nlen+4) = tx_mode;
-	WRITE16LE(b+4+1+2+4+2+nlen+4+1, elen);
-	memcpy(b+4+1+2+4+2+nlen+4+1+2, tx_extn, elen);
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tcreate;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, tx_fid);
+	WRITE16LE(smlBuf+4+1+2+4, nlen);
+	memcpy(smlBuf+4+1+2+4+2, tx_name, nlen);
+	WRITE32LE(smlBuf+4+1+2+4+2+nlen, tx_perm);
+	*(smlBuf+4+1+2+4+2+nlen+4) = tx_mode;
+	WRITE16LE(smlBuf+4+1+2+4+2+nlen+4+1, elen);
+	memcpy(smlBuf+4+1+2+4+2+nlen+4+1+2, tx_extn, elen);
 
-	flag = false;
-	QSend(0, 1, 1, (uint32_t[2]){ppage, ppage + 2048}, (uint32_t[2]){size, 24}, NULL);
-	QNotify(0);
-	while (!flag) {} // Change to WaitForInterrupt
+	putSmlGetBig();
 
-	b = lpage + 2048;
-
-	if (b[4] == Rerror) {
-		SetErr(b);
+	if (bigBuf[4] == Rerror) {
+		SetErr(bigBuf);
 		return true;
 	}
 
 	if (rx_qid != NULL) {
-		rx_qid->type = *(b+7);
-		rx_qid->version = READ32LE(b+7+1);
-		rx_qid->path = READ64LE(b+7+1+4);
+		rx_qid->type = *(bigBuf+7);
+		rx_qid->version = READ32LE(bigBuf+7+1);
+		rx_qid->path = READ64LE(bigBuf+7+1+4);
 	}
 
 	if (rx_iounit != NULL) {
-		*rx_iounit = READ32LE(b+20);
+		*rx_iounit = READ32LE(bigBuf+20);
 	}
 
 	return false;
 }
 
-// Ugh! Much complexity to work around here (at least we don't scatter-gather).
+// You can leave the data pointer empty, and peruse bigBuf, if you prefer
 static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_data, uint32_t *done_count) {
-	*done_count = 0;
+	uint32_t size = 4+1+2+4+8+4;
 
-	int maxpages = bufcnt - 2;
+	WRITE32LE(smlBuf, size);
+	        *(smlBuf+4) = Tread;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, tx_fid);
+	WRITE64LE(smlBuf+4+1+2+4, tx_offset);
+	WRITE32LE(smlBuf+4+1+2+4+8, count);
 
-	// actually, limit to the number of virtio buffers we command, bufcnt-2
-	uint32_t physicals[256] = {ppage, ppage + 2048};
-	uint32_t sizes[256] = {23, 11};
+	putSmlGetBig();
 
-	struct IOPreparationTable prep = {
-		.options = kIOLogicalRanges,
-		.addressSpace = kCurrentAddressSpaceID,
-		.granularity = 0,
-		.firstPrepared = 0,
-		.mappingEntryCount = maxpages,
-		.logicalMapping = NULL,
-		.physicalMapping = (void *)(physicals + 2),
-		.rangeInfo = {.range = {.base = rx_data, .length = count}},
-	};
+	if (bigBuf[4] == Rerror) {
+		SetErr(bigBuf);
+		return true;
+	}
 
-	while (*done_count < count) {
-		// Lock down as much of the receive buffer as possible
-		// Bad arguments should never happen
-		if (PrepareMemoryForIO(&prep) != noErr) {
-			return true;
-		}
+	uint32_t got = READ32LE(bigBuf+4+1+2);
 
-		lprintf("Prepared %d of requested %d bytes\n", prep.lengthPrepared, count);
-		lprintf("state = %d\n", prep.state);
+	if (done_count != NULL) {
+		*done_count = got;
+	}
 
-		int bufcnt = entrySizes(prep.lengthPrepared, physicals + 2, sizes + 2) + 2;
-
-		lprintf("buf sizes:\n");
-		for (int i=0; i<bufcnt; i++) {
-			lprintf("%08x/%d ", physicals[i], sizes[i]);
-		}
-		lprintf("\n");
-
-		char *b = lpage;
-		WRITE32LE(b, sizes[0]);
-		*(b+4) = Tread;
-		WRITE16LE(b+4+1, ONLYTAG);
-		WRITE32LE(b+4+1+2, tx_fid);
-		WRITE64LE(b+4+1+2+4, tx_offset);
-		WRITE32LE(b+4+1+2+4+8, prep.lengthPrepared);
-
-		lprintf("message:");
-		for (int i=0; i<sizes[0]; i++) {
-			lprintf(" %02x", b[i]);
-		}
-		lprintf("\n");
-
-		flag = false;
-		QSend(0, 1, bufcnt-1, physicals, sizes, NULL);
-		QNotify(0);
-		while (!flag) {} // Change to WaitForInterrupt
-
-		b = lpage + 2048;
-
-		if (b[4] == Rerror) {
-			lprintf("%c%c%s\n", b[9], b[10], rx_data);
-			// slightly tricky job here...
-			SetErr(b);
-			return true;
-		}
-
-		uint32_t got = READ32LE(b + 7);
-		lprintf("Got %d bytes of the %d prepared\n", got, prep.lengthPrepared);
-
-		*done_count += got;
-		CheckpointIO(prep.preparationID, 0);
-		break;
+	if (rx_data != NULL) {
+		BlockMove(bigBuf+4+1+2+4, rx_data, got);
 	}
 
 	return false;
@@ -516,29 +445,118 @@ static void SetErr(char *msg) {
 	lprintf("9p error: %s\n", ErrStr);
 }
 
-static int entrySizes(int bytes, const uint32_t *ptrTab, uint32_t *sizeTab) {
-	int count = 0;
+static void putSmlGetBig(void) {
+	flag = false;
+	QSend(0, 1, bigCnt, smlBigAddrs, smlBigSizes, NULL);
+	QNotify(0);
+	while (!flag) {} // Change to WaitForInterrupt
+}
 
-	while (bytes) {
-		// The first entry might go from mid-page to end-page
-		if (*ptrTab % 4096) {
-			*sizeTab = 4096 - (*ptrTab % 4096);
-		} else {
-			*sizeTab = 4096;
+static void putBigGetSml(void) {
+	flag = false;
+	QSend(0, bigCnt, 1, bigSmlAddrs, bigSmlSizes, NULL);
+	QNotify(0);
+	while (!flag) {} // Change to WaitForInterrupt
+}
+
+// Set these globals or return false: msize [tr]buf [trbufcnt] physbufs bufsizes
+// Allocate a large system heap buffer laid out in logical space like this:
+//        4085 bytes : fixed-size stuff                     <-- smlBuf
+//          11 bytes : fits 11-byte header of Twrite/Rread  <-- bigBuf
+//  (2^n)*4096 bytes : for payload of Twrite/Rread
+// But the physical layout is a bit more exotic, suitable for QSend to use.
+static bool allocBigBuffer(uint16_t maxbufs) {
+	if (maxbufs > 256) maxbufs = 256;
+
+	// An extra page for the header, so transfers are power of 2
+	size_t fileDataPages = 4096;
+	uint32_t pages[fileDataPages+1]; // regrettably long array
+	char *logical;
+
+	int extcnt;
+	static uint32_t extents[256], extsizes[256];
+
+	for (;; fileDataPages /= 2) {
+		if (fileDataPages == 0) {
+			lprintf(".virtio9p: Not enough memory to start\n");
+			return false;
 		}
 
-		// The last entry might go from start-page to mid-page
-		if (*sizeTab > bytes) {
-			*sizeTab = bytes;
+		lprintf(".virtio9p: Allocating %d+1 pages: ", fileDataPages);
+		logical = AllocPages(fileDataPages+1, pages);
+
+		if (logical == NULL) {
+			lprintf("not enough logical memory\n");
+			continue;
 		}
 
-		bytes -= *sizeTab;
-		count++;
-		ptrTab++;
-		sizeTab++;
+		// Consolidate pages into extents
+		extcnt = pageExtents(pages, fileDataPages+1, extents+1, extsizes+1, maxbufs-2);
+		if (extcnt == -1) {
+			FreePages(logical);
+			lprintf("too physically fragmented\n");
+			continue;
+		}
+
+		break;
 	}
 
-	return count;
+	lprintf("ok\n");
+
+	msize = 11 + 4096*fileDataPages; // Largest message we will tx/rx
+
+	smlBuf = logical;
+	bigBuf = logical + 4096 - 11;
+
+	// Tweak the extent list so it can be viewed differently via diff offsets
+	extents[extcnt+1] = extents[0] = extents[1];
+	extents[1] += 4096 - 11;
+
+	extsizes[extcnt+1] = extsizes[0] = 4096 - 11;
+	extsizes[1] -= 4096 - 11;
+
+	bigCnt = extcnt;
+	smlBigAddrs = extents;
+	bigSmlAddrs = extents + 1;
+	smlBigSizes = extsizes;
+	bigSmlSizes = extsizes + 1;
+
+	lprintf("  msize = %d\n", msize);
+	lprintf("  smlBuf = %#08x, bigBuf = %#08x\n", smlBuf, bigBuf);
+
+	lprintf("  smlBigAddrs/Sizes =");
+	for (int i=0; i<bigCnt+1; i++) {
+		lprintf(" %#08x/%#x", smlBigAddrs[i], smlBigSizes[i]);
+	}
+	lprintf("\n");
+
+	lprintf("  bigSmlAddrs/Sizes =");
+	for (int i=0; i<bigCnt+1; i++) {
+		lprintf(" %#08x/%#x", bigSmlAddrs[i], bigSmlSizes[i]);
+	}
+	lprintf("\n");
+
+	return true;
+}
+
+// Shrink a list of 4096-byte pages to a list of n-byte extents
+// -1 = bad, otherwise a number of extents
+static int pageExtents(const uint32_t *pages, int npages, uint32_t *extbases, uint32_t *extsizes, int maxext) {
+	int extcnt = 0;
+	for (int i=0; i<npages; i++) {
+		if (i>0 && pages[i-1]+4096==pages[i]) {
+			extsizes[extcnt-1] += 4096;
+		} else {
+			if (extcnt == maxext) {
+				return -1; // failure
+			}
+
+			extbases[extcnt] = pages[i];
+			extsizes[extcnt] = 4096;
+			extcnt++;
+		}
+	}
+	return extcnt;
 }
 
 void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
