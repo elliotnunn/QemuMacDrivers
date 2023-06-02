@@ -206,7 +206,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	}
 
-	lprintf("9p: msize %d\n", (long)msize);
+	lprintf(".virtio9p: final msize = %d\n", msize);
 
 	struct qid root = {0};
 	uint32_t rootfid = 99;
