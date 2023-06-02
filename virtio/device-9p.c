@@ -1,10 +1,7 @@
 #include <Devices.h>
 #include <DriverServices.h>
-#include <LowMem.h>
 #include <NameRegistry.h>
 #include <PCI.h>
-#include <Video.h>
-#include <VideoServices.h>
 #include <stdarg.h>
 #include <string.h>
 
