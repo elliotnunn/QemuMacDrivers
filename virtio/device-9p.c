@@ -168,16 +168,16 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	OSStatus err;
 
-	lprintf("9p: starting\n");
+	lprintf(".virtio9p: starting\n");
 
 	// No need to signal FAILED if cannot communicate with device
 	if (!VInit(&info->deviceEntry)) {
-		lprintf("9p: failed VInit()\n");
+		lprintf(".virtio9p: failed VInit()\n");
 		return paramErr;
 	};
 
 	if (!VFeaturesOK()) {
-		lprintf("9p: failed VFeaturesOK()\n");
+		lprintf(".virtio9p: failed VFeaturesOK()\n");
 		return paramErr;
 	}
 
@@ -187,7 +187,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// More buffers allow us to tolerate more physical mem fragmentation
 	uint16_t viobufs = QInit(0, 256);
 	if (viobufs < 2) {
-		lprintf("9p: failed QInit()\n");
+		lprintf(".virtio9p: failed QInit()\n");
 		return paramErr;
 	}
 	QInterest(0, 1);
@@ -202,7 +202,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 
 	if (strcmp(vers, "9P2000.u")) {
-		lprintf("9p: we offered 9P2000.u, server offered %s, cannot continue\n", vers);
+		lprintf(".virtio9p: we offered 9P2000.u, server offered %s, cannot continue\n", vers);
 		return paramErr;
 	}
 
