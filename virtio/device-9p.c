@@ -97,7 +97,7 @@ static bool Walk(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct qid 
 static bool Open(uint32_t tx_fid, uint8_t tx_mode, struct qid *rx_qid, uint32_t *rx_iounit);
 static bool C_reate(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct qid *rx_qid, uint32_t *rx_iounit);
 static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_data, uint32_t *done_count);
-static void SetErr(char *msg);
+static bool checkErr(char *msg);
 static void putSmlGetBig(void);
 static void putBigGetSml(void);
 static bool allocBigBuffer(uint16_t maxbufs);
@@ -257,8 +257,7 @@ static bool Version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, cha
 
 	putSmlGetBig();
 
-	if (bigBuf[4] == Rerror) {
-		SetErr(bigBuf);
+	if (checkErr(bigBuf)) {
 		return true;
 	}
 
@@ -296,8 +295,7 @@ static bool Attach(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_a
 
 	putSmlGetBig();
 
-	if (bigBuf[4] == Rerror) {
-		SetErr(bigBuf);
+	if (checkErr(bigBuf)) {
 		return true;
 	}
 
@@ -326,8 +324,7 @@ static bool Walk(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct qid 
 
 	putSmlGetBig();
 
-	if (bigBuf[4] == Rerror) {
-		SetErr(bigBuf);
+	if (checkErr(bigBuf)) {
 		return true;
 	}
 
@@ -351,8 +348,7 @@ static bool Open(uint32_t tx_fid, uint8_t tx_mode, struct qid *rx_qid, uint32_t 
 
 	putSmlGetBig();
 
-	if (bigBuf[4] == Rerror) {
-		SetErr(bigBuf);
+	if (checkErr(bigBuf)) {
 		return true;
 	}
 
@@ -386,8 +382,7 @@ static bool C_reate(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx
 
 	putSmlGetBig();
 
-	if (bigBuf[4] == Rerror) {
-		SetErr(bigBuf);
+	if (checkErr(bigBuf)) {
 		return true;
 	}
 
@@ -417,8 +412,7 @@ static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_d
 
 	putSmlGetBig();
 
-	if (bigBuf[4] == Rerror) {
-		SetErr(bigBuf);
+	if (checkErr(bigBuf)) {
 		return true;
 	}
 
@@ -435,14 +429,19 @@ static bool Read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, void *rx_d
 	return false;
 }
 
-static void SetErr(char *msg) {
-	uint16_t size = (uint16_t)(msg[7]) | ((uint16_t)(msg[8]) << 16);
+static bool checkErr(char *msg) {
+	if (*(msg + 4) != Rerror) {
+		return false;
+	}
+
+	uint16_t size = READ16LE(msg + 7);
 	if (size > sizeof(ErrStr) - 1) {
 		size = sizeof(ErrStr) - 1;
 	}
 	memcpy(ErrStr, msg + 9, size);
 	ErrStr[size] = 0;
-	lprintf("9p error: %s\n", ErrStr);
+	lprintf(".virtio9p error: %s\n", ErrStr);
+	return true;
 }
 
 static void putSmlGetBig(void) {
