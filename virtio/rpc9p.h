@@ -7,27 +7,23 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-enum {
-	NOFID = 0xffffffff,
-};
-
-struct qid {
+struct Qid9 {
 	uint8_t type;
 	uint32_t version;
 	uint64_t path;
 };
 
-// Single large buffer used by P9read/write
+// Single large buffer used by Read9/write
 // Clobbered by all calls
-extern char *P9buf;
-extern uint32_t P9max;
+extern char *Buf9;
+extern uint32_t Max9;
 
 // Error string (check when a function returns true)
-extern char P9err[256];
+extern char Err9[256];
 
-bool P9init(uint16_t vioq, uint16_t viobuffers);
-bool P9attach(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct qid *rx_qid);
-bool P9walk(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct qid *rx_qid);
-bool P9open(uint32_t tx_fid, uint8_t tx_mode, struct qid *rx_qid, uint32_t *rx_iounit);
-bool P9create(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct qid *rx_qid, uint32_t *rx_iounit);
-bool P9read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, uint32_t *actual_count);
+bool Init9(uint16_t vioq, uint16_t viobuffers);
+bool Attach9(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct Qid9 *rx_qid);
+bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct Qid9 *rx_qid);
+bool Open9(uint32_t tx_fid, uint8_t tx_mode, struct Qid9 *rx_qid, uint32_t *rx_iounit);
+bool Create9(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct Qid9 *rx_qid, uint32_t *rx_iounit);
+bool Read9(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, uint32_t *actual_count);

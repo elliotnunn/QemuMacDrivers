@@ -67,9 +67,9 @@ enum {
    (P)[6] = (0x00FF000000000000 & (V)) >> 060, \
    (P)[7] = (0xFF00000000000000 & (V)) >> 070, (P) + 8)
 
-char *P9buf;
-uint32_t P9max;
-char P9err[256];
+char *Buf9;
+uint32_t Max9;
+char Err9[256];
 
 char *smlBuf, *bigBuf;
 uint32_t *smlBigAddrs, *bigSmlAddrs, *smlBigSizes, *bigSmlSizes;
@@ -77,36 +77,36 @@ uint16_t bigCnt;
 
 volatile bool flag;
 
-static bool P9version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version);
+static bool Version9(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version);
 static bool checkErr(char *msg);
 static void putSmlGetBig(void);
 static void putBigGetSml(void);
 static bool allocBigBuffer(uint16_t maxbufs);
 static int pageExtents(const uint32_t *pages, int npages, uint32_t *extbases, uint32_t *extsizes, int maxext);
 
-bool P9init(uint16_t vioq, uint16_t viobuffers) {
+bool Init9(uint16_t vioq, uint16_t viobuffers) {
 	if (allocBigBuffer(viobuffers)) {
 		return true;
 	}
 
 	char vers[128];
-	if (P9version(P9max+11, "9P2000.u", &P9max, vers)) {
+	if (Version9(Max9+11, "9P2000.u", &Max9, vers)) {
 		return true;
 	}
-	P9max -= 11; // subtract Rread/Twrite header from msize
+	Max9 -= 11; // subtract Rread/Twrite header from msize
 
 	if (strcmp(vers, "9P2000.u")) {
 		lprintf(".virtio9p: we offered 9P2000.u, server offered %s, cannot continue\n", vers);
 		return true;
 	}
 
-	lprintf(".virtio9p: final msize = %d+11\n", P9max);
+	lprintf(".virtio9p: final msize = %d+11\n", Max9);
 
 	return false;
 }
 
 // Keep this internal, as part of our initialization
-static bool P9version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version) {
+static bool Version9(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, char *rx_version) {
 	size_t slen = strlen(tx_version);
 	uint32_t size = 13 + slen;
 
@@ -136,7 +136,7 @@ static bool P9version(uint32_t tx_msize, char *tx_version, uint32_t *rx_msize, c
 	return false;
 }
 
-bool P9attach(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct qid *rx_qid) {
+bool Attach9(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct Qid9 *rx_qid) {
 	size_t ulen = strlen(tx_uname), alen = strlen(tx_aname);
 	uint32_t size = 4+1+2+4+4+2+ulen+2+alen+4;
 
@@ -167,7 +167,7 @@ bool P9attach(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname,
 }
 
 // Convenient just to enforce "one path element"
-bool P9walk(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct qid *rx_qid) {
+bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct Qid9 *rx_qid) {
 	size_t nlen = strlen(tx_name);
 	uint32_t size = 4+1+2+4+4+2+2+nlen;
 
@@ -195,7 +195,7 @@ bool P9walk(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct qid *rx_q
 	return false;
 }
 
-bool P9open(uint32_t tx_fid, uint8_t tx_mode, struct qid *rx_qid, uint32_t *rx_iounit) {
+bool Open9(uint32_t tx_fid, uint8_t tx_mode, struct Qid9 *rx_qid, uint32_t *rx_iounit) {
 	uint32_t size = 4+1+2+4+1;
 
 	WRITE32LE(smlBuf, size);
@@ -223,7 +223,7 @@ bool P9open(uint32_t tx_fid, uint8_t tx_mode, struct qid *rx_qid, uint32_t *rx_i
 	return false;
 }
 
-bool P9create(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct qid *rx_qid, uint32_t *rx_iounit) {
+bool Create9(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct Qid9 *rx_qid, uint32_t *rx_iounit) {
 	size_t nlen = strlen(tx_name), elen = strlen(tx_extn);
 	uint32_t size = 4+1+2+4+2+nlen+4+1+2+elen;
 
@@ -258,7 +258,7 @@ bool P9create(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode,
 }
 
 // You can leave the data pointer empty, and peruse bigBuf, if you prefer
-bool P9read(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, uint32_t *actual_count) {
+bool Read9(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, uint32_t *actual_count) {
 	if (actual_count != NULL) {
 		*actual_count = 0;
 	}
@@ -293,12 +293,12 @@ static bool checkErr(char *msg) {
 	}
 
 	uint16_t size = READ16LE(msg + 7);
-	if (size > sizeof(P9err) - 1) {
-		size = sizeof(P9err) - 1;
+	if (size > sizeof(Err9) - 1) {
+		size = sizeof(Err9) - 1;
 	}
-	memcpy(P9err, msg + 9, size);
-	P9err[size] = 0;
-	lprintf(".virtio9p error: %s\n", P9err);
+	memcpy(Err9, msg + 9, size);
+	Err9[size] = 0;
+	lprintf(".virtio9p error: %s\n", Err9);
 	return true;
 }
 
@@ -360,11 +360,11 @@ static bool allocBigBuffer(uint16_t maxbufs) {
 
 	lprintf("ok\n");
 
-	P9max = 4096*fileDataPages; // Largest message we will tx/rx
+	Max9 = 4096*fileDataPages; // Largest message we will tx/rx
 
 	smlBuf = logical;
 	bigBuf = logical + 4096 - 11;
-	P9buf = bigBuf + 11; // reads/writes go, page-aligned
+	Buf9 = bigBuf + 11; // reads/writes go, page-aligned
 
 	// Tweak the extent list so it can be viewed differently via diff offsets
 	extents[extcnt+1] = extents[0] = extents[1];
@@ -379,7 +379,7 @@ static bool allocBigBuffer(uint16_t maxbufs) {
 	smlBigSizes = extsizes;
 	bigSmlSizes = extsizes + 1;
 
-	lprintf("  msize = %d+11\n", P9max);
+	lprintf("  msize = %d+11\n", Max9);
 	lprintf("  smlBuf = %#08x, bigBuf = %#08x\n", smlBuf, bigBuf);
 
 	lprintf("  smlBigAddrs/Sizes =");

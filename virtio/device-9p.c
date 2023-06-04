@@ -86,32 +86,32 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 	QInterest(0, 1);
 
-	if (P9init(0, viobufs)) {
+	if (Init9(0, viobufs)) {
 		return paramErr;
 	}
 
-	struct qid root = {0};
+	struct Qid9 root = {0};
 	uint32_t rootfid = 99;
 
-	if (P9attach(rootfid, NOFID /*afid=NOFID*/, "", "", &root)) {
+	if (Attach9(rootfid, (uint32_t)~0 /*NOFID*/, "", "", &root)) {
 		return paramErr;
 	}
 
 	lprintf("qid %d %x %08x%08x\n", root.type, root.version, (uint32_t)(root.path >> 32), (uint32_t)root.path);
 
 
-	P9walk(rootfid, rootfid+1, "builds", &root);
+	Walk9(rootfid, rootfid+1, "builds", &root);
 	lprintf("builds: qid %d %x %08x%08x\n", root.type, root.version, (uint32_t)(root.path >> 32), (uint32_t)root.path);
 
 	uint32_t iounit = 0;
-	P9open(rootfid, 0, &root, &iounit);
+	Open9(rootfid, 0, &root, &iounit);
 	lprintf("iounit %d\n", iounit);
 
 	uint32_t succeeded = 0;
-	P9read(rootfid, 0, P9max, &succeeded);
+	Read9(rootfid, 0, Max9, &succeeded);
 
 	for (int i=0; i<succeeded; i++) {
-		lprintf("%02x ", (int)(unsigned char)P9buf[i]);
+		lprintf("%02x ", (int)(unsigned char)Buf9[i]);
 	}
 	lprintf("\n");
 
