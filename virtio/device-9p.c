@@ -1,4 +1,9 @@
+#include <Disks.h>
+#include <Files.h>
+#include <FSM.h>
+#include <Gestalt.h>
 #include <DriverServices.h>
+#include <MixedMode.h>
 
 #include "lprintf.h"
 #include "rpc9p.h"
@@ -9,6 +14,10 @@
 
 static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
+static OSErr CommProc(short message, void *paramBlock, void *globalsPtr);
+static OSErr HFSProc(VCBPtr theVCB, short selectCode, void *paramBlock, void *fsdGlobalPtr, short fsid);
+
+char stack[32*1024];
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -115,9 +124,76 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 	lprintf("\n");
 
+	long fsmver = 0;
+	Gestalt(gestaltFSMVersion, &fsmver);
+	lprintf("File System Manager version %04x\n", fsmver);
+
+	// Bit strange... DQE starts mid-structure, 4 bytes of flags at neg offset
+	struct AdornedDQE {
+		uint32_t flags;
+		DrvQEl dqe;
+	};
+
+	static struct AdornedDQE dqe = {
+		.flags = 0x00080000, // fixed disk
+		.dqe = {
+			.dQFSID = ('9'<<8) | 'p',
+		}
+	};
+
+	AddDrive(info->refNum, 22 /*todo*/, &dqe.dqe);
+	lprintf("DQE qLink %#08x\n", dqe.dqe.qLink);
+
+	static RoutineDescriptor commDesc = BUILD_ROUTINE_DESCRIPTOR(uppFSDCommProcInfo, CommProc);
+	static RoutineDescriptor hfsDesc = BUILD_ROUTINE_DESCRIPTOR(uppHFSCIProcInfo, HFSProc);
+
+	static struct FSDRec fsdesc = {
+		.fsdLength = sizeof (struct FSDRec),
+		.fsdVersion = 1,
+		.fileSystemFSID = ('9'<<8) | 'p',
+		.fileSystemName = "\x09Virtio-9P",
+		.fileSystemCommProc = &commDesc,
+		.fsdHFSCI = {
+			.compInterfProc = &hfsDesc,
+			.stackTop = stack + sizeof (stack),
+			.stackSize = sizeof (stack),
+			.idSector = -1, // networked volume
+		},
+	};
+
+	int fserr = InstallFS(&fsdesc);
+	lprintf("InstallFS returns %d\n", fserr);
+
+	// Enable HFS component (whatever that means)
+	fsdesc.fsdHFSCI.compInterfMask |= fsmComponentEnableMask | hfsCIResourceLoadedMask | hfsCIDoesHFSMask;
+	fserr = SetFSInfo(('9'<<8) | 'p', sizeof fsdesc, &fsdesc);
+	lprintf("SetFSInfo returns %d\n", fserr);
+
+	static struct VolumeMountInfoHeader vmi = {
+		.length = 8,
+		.media = ('9'<<24) | ('p'<<16) | ('9'<<8) | 'p',
+		.flags = 0,
+	};
+
+	static struct IOParam pb = {
+		.ioBuffer = (void *)&vmi,
+	};
+	fserr = PBVolumeMount((void *)&pb);
+	lprintf("PBVolumeMount returns %d\n", fserr);
+
 	return noErr;
 }
 
 static OSStatus finalize(DriverFinalInfo *info) {
 	return noErr;
+}
+
+static OSErr CommProc(short message, void *paramBlock, void *globalsPtr) {
+	lprintf("CommProc message=%#02x paramBlock=%#08x\n", message, paramBlock);
+	return paramErr;
+}
+
+static OSErr HFSProc(VCBPtr theVCB, short selectCode, void *paramBlock, void *fsdGlobalPtr, short fsid) {
+	lprintf("HFSProc selectCode=%#02x paramBlock=%#08x fsid=%#02x\n", selectCode, paramBlock, fsid);
+	return paramErr;
 }
