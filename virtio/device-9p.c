@@ -23,7 +23,7 @@ static OSErr CommProc(short message, struct IOParam *pb, void *globals);
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid);
 static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
 static OSErr MyFlushVol(void);
-static OSErr MyGetVolInfo(struct VolumeParam *pb, struct VCB *vcb);
+static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
 
 char stack[32*1024];
 short drvRefNum;
@@ -387,6 +387,36 @@ static OSErr MyFlushVol(void) {
 	return noErr;
 }
 
-	return extFSErr;
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
+	if (pb->ioNamePtr) {
+		memcpy(pb->ioNamePtr, "\x04Elmo", 5);
+	}
+
+	pb->ioVCrDate = 0;
+	pb->ioVLsMod = 0;
+	pb->ioVAtrb = 0;
+	pb->ioVNmFls = 0;
+	pb->ioVBitMap = 0;
+	pb->ioAllocPtr = 0;
+	pb->ioVNmAlBlks = 0xffff;
+	pb->ioVAlBlkSiz = 512;
+	pb->ioVClpSiz = 512;
+	pb->ioAlBlSt = 0;
+	pb->ioVNxtCNID = 100;
+	pb->ioVFrBlk = 0xffff;
+
+	if (pb->ioTrap & 0x200) {
+		pb->ioVSigWord = 0x4244; // same as HFS
+		pb->ioVDrvInfo = 22;
+		pb->ioVDRefNum = drvRefNum;
+		pb->ioVFSID = CREATOR & 0xffff;
+		pb->ioVBkUp = 0;
+		pb->ioVSeqNum = 0;
+		pb->ioVWrCnt = 0;
+		pb->ioVFilCnt = 1;
+		pb->ioVDirCnt = 1;
+		memset(pb->ioVFndrInfo, 0, sizeof (pb->ioVFndrInfo));
+	}
+
+	return noErr;
 }
