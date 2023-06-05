@@ -20,8 +20,9 @@ enum {
 static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSErr CommProc(short message, struct IOParam *pb, void *globals);
-static OSErr HFSProc(struct VCB *vcb, short selector, void *pb, void *globals, short fsid);
+static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid);
 static OSErr FSMVolumeMount(struct VCB *vcb, struct VolumeParam *pb);
+static OSErr FSMFlushVol(struct VCB *vcb, struct VolumeParam *pb);
 
 char stack[32*1024];
 
@@ -217,7 +218,7 @@ static OSErr CommProc(short message, struct IOParam *pb, void *globals) {
 	return extFSErr;
 }
 
-static OSErr HFSProc(struct VCB *vcb, short selector, void *pb, void *globals, short fsid) {
+static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid) {
 	lprintf("HFSProc selector=%#02x pb=%#08x fsid=%#02x\n", selector, pb, fsid);
 
 	selector &= 0xf0ff; // strip off OS trap modifier bits
@@ -243,7 +244,7 @@ static OSErr HFSProc(struct VCB *vcb, short selector, void *pb, void *globals, s
 		/*a010*/ selector==kFSMAllocate ? NULL :
 		/*a011*/ selector==kFSMGetEOF ? NULL :
 		/*a012*/ selector==kFSMSetEOF ? NULL :
-		/*a013*/ selector==kFSMFlushVol ? NULL :
+		/*a013*/ selector==kFSMFlushVol ? FSMFlushVol :
 		/*a014*/ selector==kFSMGetVol ? NULL :
 		/*a015*/ selector==kFSMSetVol ? NULL :
 		/*a017*/ selector==kFSMEject ? NULL :
@@ -375,5 +376,9 @@ static OSErr FSMVolumeMount(struct VCB *vcb, struct VolumeParam *pb) {
 
 	PostEvent(diskEvt, 22);
 
+	return noErr;
+}
+
+static OSErr FSMFlushVol(struct VCB *vcb, struct VolumeParam *pb) {
 	return noErr;
 }
