@@ -26,6 +26,7 @@ static OSErr MyFlushVol(void);
 static OSErr MyGetVolInfo(struct VolumeParam *pb, struct VCB *vcb);
 
 char stack[32*1024];
+short drvRefNum;
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -76,6 +77,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 
 static OSStatus initialize(DriverInitInfo *info) {
 	lprintf_enable = true;
+
+	drvRefNum = info->refNum;
 
 	OSStatus err;
 
@@ -149,7 +152,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		}
 	};
 
-	AddDrive(info->refNum, 22 /*drive number todo*/, &dqe.dqe);
+	AddDrive(drvRefNum, 22 /*drive number todo*/, &dqe.dqe);
 	lprintf("DQE qLink %#08x\n", dqe.dqe.qLink);
 
 	static RoutineDescriptor commDesc = BUILD_ROUTINE_DESCRIPTOR(uppFSDCommProcInfo, CommProc);
