@@ -23,6 +23,7 @@ static OSErr CommProc(short message, struct IOParam *pb, void *globals);
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid);
 static OSErr MyVolumeMount(struct VCB *vcb, struct VolumeParam *pb);
 static OSErr MyFlushVol(struct VCB *vcb, struct VolumeParam *pb);
+static OSErr MyGetVolInfo(struct VCB *vcb, struct VolumeParam *pb);
 
 char stack[32*1024];
 
@@ -232,7 +233,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		/*a001*/ selector==kFSMClose ? NULL :
 		/*a002*/ selector==kFSMRead ? NULL :
 		/*a003*/ selector==kFSMWrite ? NULL :
-		/*a007*/ selector==kFSMGetVolInfo ? NULL :
+		/*a007*/ selector==kFSMGetVolInfo ? MyGetVolInfo :
 		/*a008*/ selector==kFSMCreate ? NULL :
 		/*a009*/ selector==kFSMDelete ? NULL :
 		/*a00a*/ selector==kFSMOpenRF ? NULL :
@@ -381,4 +382,8 @@ static OSErr MyVolumeMount(struct VCB *vcb, struct VolumeParam *pb) {
 
 static OSErr MyFlushVol(struct VCB *vcb, struct VolumeParam *pb) {
 	return noErr;
+}
+
+static OSErr MyGetVolInfo(struct VCB *vcb, struct VolumeParam *pb) {
+	return extFSErr;
 }
