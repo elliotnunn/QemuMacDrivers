@@ -21,9 +21,9 @@ static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSErr CommProc(short message, struct IOParam *pb, void *globals);
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid);
-static OSErr MyVolumeMount(struct VCB *vcb, struct VolumeParam *pb);
-static OSErr MyFlushVol(struct VCB *vcb, struct VolumeParam *pb);
-static OSErr MyGetVolInfo(struct VCB *vcb, struct VolumeParam *pb);
+static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
+static OSErr MyFlushVol(void);
+static OSErr MyGetVolInfo(struct VolumeParam *pb, struct VCB *vcb);
 
 char stack[32*1024];
 
@@ -223,10 +223,10 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 	lprintf("HFSProc selector=%#02x pb=%#08x fsid=%#02x\n", selector, pb, fsid);
 
 	selector &= 0xf0ff; // strip off OS trap modifier bits
+	// No need to pass on the selector... pb.ioTrap is enough for the "HFS" bit
 
-	// Do some cheeky function pointer casting to keep it all neat
-	// but type-unsafe
-	typedef OSErr (*responderPtr)(struct VCB *vcb, void *pb);
+	// "MyX" funcs have 0/1/2 arguments: unsafe calling convention magic!
+	typedef OSErr (*responderPtr)(void *pb, struct VCB *vcb);
 
 	void *responder =
 		/*a000*/ selector==kFSMOpen ? NULL :
@@ -348,10 +348,10 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		return extFSErr;
 	}
 
-	return ((responderPtr)responder)(vcb, pb);
+	return ((responderPtr)responder)(pb, vcb);
 }
 
-static OSErr MyVolumeMount(struct VCB *vcb, struct VolumeParam *pb) {
+static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
 	OSErr err;
 
 	short sysVCBLength;
@@ -380,10 +380,10 @@ static OSErr MyVolumeMount(struct VCB *vcb, struct VolumeParam *pb) {
 	return noErr;
 }
 
-static OSErr MyFlushVol(struct VCB *vcb, struct VolumeParam *pb) {
+static OSErr MyFlushVol(void) {
 	return noErr;
 }
 
-static OSErr MyGetVolInfo(struct VCB *vcb, struct VolumeParam *pb) {
 	return extFSErr;
+static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 }
