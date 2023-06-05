@@ -21,8 +21,8 @@ static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSErr CommProc(short message, struct IOParam *pb, void *globals);
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid);
-static OSErr FSMVolumeMount(struct VCB *vcb, struct VolumeParam *pb);
-static OSErr FSMFlushVol(struct VCB *vcb, struct VolumeParam *pb);
+static OSErr MyVolumeMount(struct VCB *vcb, struct VolumeParam *pb);
+static OSErr MyFlushVol(struct VCB *vcb, struct VolumeParam *pb);
 
 char stack[32*1024];
 
@@ -244,7 +244,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		/*a010*/ selector==kFSMAllocate ? NULL :
 		/*a011*/ selector==kFSMGetEOF ? NULL :
 		/*a012*/ selector==kFSMSetEOF ? NULL :
-		/*a013*/ selector==kFSMFlushVol ? FSMFlushVol :
+		/*a013*/ selector==kFSMFlushVol ? MyFlushVol :
 		/*a014*/ selector==kFSMGetVol ? NULL :
 		/*a015*/ selector==kFSMSetVol ? NULL :
 		/*a017*/ selector==kFSMEject ? NULL :
@@ -303,7 +303,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		/*003a*/ selector==kFSMGetXCatInfo ? NULL :
 		/*003f*/ selector==kFSMGetVolMountInfoSize ? NULL :
 		/*0040*/ selector==kFSMGetVolMountInfo ? NULL :
-		/*0041*/ selector==kFSMVolumeMount ? FSMVolumeMount :
+		/*0041*/ selector==kFSMVolumeMount ? MyVolumeMount :
 		/*0042*/ selector==kFSMShare ? NULL :
 		/*0043*/ selector==kFSMUnShare ? NULL :
 		/*0044*/ selector==kFSMGetUGEntry ? NULL :
@@ -350,7 +350,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 	return ((responderPtr)responder)(vcb, pb);
 }
 
-static OSErr FSMVolumeMount(struct VCB *vcb, struct VolumeParam *pb) {
+static OSErr MyVolumeMount(struct VCB *vcb, struct VolumeParam *pb) {
 	OSErr err;
 
 	short sysVCBLength;
@@ -379,6 +379,6 @@ static OSErr FSMVolumeMount(struct VCB *vcb, struct VolumeParam *pb) {
 	return noErr;
 }
 
-static OSErr FSMFlushVol(struct VCB *vcb, struct VolumeParam *pb) {
+static OSErr MyFlushVol(struct VCB *vcb, struct VolumeParam *pb) {
 	return noErr;
 }
