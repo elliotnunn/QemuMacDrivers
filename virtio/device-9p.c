@@ -27,6 +27,7 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
 
 char stack[32*1024];
 short drvRefNum;
+unsigned long callcnt;
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -224,6 +225,8 @@ static OSErr CommProc(short message, struct IOParam *pb, void *globals) {
 
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid) {
 	lprintf("HFSProc selector=%#02x pb=%#08x fsid=%#02x\n", selector, pb, fsid);
+
+	callcnt++;
 
 	selector &= 0xf0ff; // strip off OS trap modifier bits
 	// No need to pass on the selector... pb.ioTrap is enough for the "HFS" bit
