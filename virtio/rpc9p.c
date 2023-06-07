@@ -166,19 +166,24 @@ bool Attach9(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, 
 	return false;
 }
 
-// Convenient just to enforce "one path element"
-bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, char *tx_name, struct Qid9 *rx_qid) {
-	size_t nlen = strlen(tx_name);
-	uint32_t size = 4+1+2+4+4+2+2+nlen;
-
-	WRITE32LE(smlBuf, size);
+bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, uint16_t tx_nwname, const char **tx_name, struct Qid9 *rx_qid) {
 	*(smlBuf+4) = Twalk;
 	WRITE16LE(smlBuf+4+1, ONLYTAG);
 	WRITE32LE(smlBuf+4+1+2, tx_fid);
 	WRITE32LE(smlBuf+4+1+2+4, tx_newfid);
-	WRITE16LE(smlBuf+4+1+2+4+4, 1); // nwname
-	WRITE16LE(smlBuf+4+1+2+4+4+2, nlen);
-	   memcpy(smlBuf+4+1+2+4+4+2+2, tx_name, nlen);
+	WRITE16LE(smlBuf+4+1+2+4+4, tx_nwname);
+
+	uint32_t size = 4+1+2+4+4+2;
+	for (uint16_t i=0; i<tx_nwname; i++) {
+		uint16_t len = strlen(*tx_name);
+		WRITE16LE(smlBuf+size, len);
+		size += 2;
+		memcpy(smlBuf+size, *tx_name, len);
+		size += len;
+		tx_name++;
+	}
+
+	WRITE32LE(smlBuf, size);
 
 	putSmlGetBig();
 
