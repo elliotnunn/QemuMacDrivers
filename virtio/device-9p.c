@@ -11,6 +11,7 @@
 #include "virtqueue.h"
 
 #include <stdbool.h> // leave till last, conflicts with Universal Interfaces
+#include <stddef.h>
 #include <string.h>
 
 enum {
@@ -24,10 +25,13 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
 static OSErr MyFlushVol(void);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
+static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cnid);
+static uint32_t qid2cnid(struct Qid9 qid);
 
 char stack[32*1024];
 short drvRefNum;
 unsigned long callcnt;
+struct Qid9 root;
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -111,30 +115,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	}
 
-	struct Qid9 root = {0};
-	uint32_t rootfid = 99;
-
-	if (Attach9(rootfid, (uint32_t)~0 /*NOFID*/, "", "", &root)) {
+	if (Attach9(2 /*special root CNID*/, (uint32_t)~0 /*auth=NOFID*/, "", "", &root)) {
 		return paramErr;
 	}
-
-	lprintf("qid %d %x %08x%08x\n", root.type, root.version, (uint32_t)(root.path >> 32), (uint32_t)root.path);
-
-
-	Walk9(rootfid, rootfid+1, "builds", &root);
-	lprintf("builds: qid %d %x %08x%08x\n", root.type, root.version, (uint32_t)(root.path >> 32), (uint32_t)root.path);
-
-	uint32_t iounit = 0;
-	Open9(rootfid, 0, &root, &iounit);
-	lprintf("iounit %d\n", iounit);
-
-	uint32_t succeeded = 0;
-	Read9(rootfid, 0, Max9, &succeeded);
-
-	for (int i=0; i<succeeded; i++) {
-		lprintf("%02x ", (int)(unsigned char)Buf9[i]);
-	}
-	lprintf("\n");
 
 	long fsmver = 0;
 	Gestalt(gestaltFSMVersion, &fsmver);
@@ -192,6 +175,16 @@ static OSStatus initialize(DriverInitInfo *info) {
 	};
 	fserr = PBVolumeMount((void *)&pb);
 	lprintf("PBVolumeMount returns %d\n", fserr);
+
+	uint32_t cnid=0;
+	browse(2, "\p:builds", &cnid);
+	lprintf("cnid=%d\n", cnid); cnid=0;
+	browse(2, "\p:builds:", &cnid);
+	lprintf("cnid=%d\n", cnid); cnid=0;
+	browse(2, "\pbuilds", &cnid);
+	lprintf("cnid=%d\n", cnid); cnid=0;
+	browse(2, "\p:virtio:9-iccs", &cnid);
+	lprintf("cnid=%d\n", cnid); cnid=0;
 
 	return noErr;
 }
@@ -422,4 +415,94 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 	}
 
 	return noErr;
+}
+
+static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cnid) {
+	// Null termination makes this easier
+	char cpath[256] = {0};
+	memcpy(cpath, paspath+1, paspath[0]);
+
+	lprintf("browse(%d, \"%s\")\n", startID, cpath);
+
+	char *comp=cpath;
+	int plen=strlen(comp);
+
+	bool absolute = (cpath[0] != ':') && (strstr(cpath, ":") != NULL);
+
+	// Ease tokenizing with nulls
+	for (int i=0; i<sizeof cpath; i++) {
+		if (cpath[i] == ':') cpath[i] = 0;
+	}
+
+	if (absolute) {
+		if (strcmp(comp, "Elmo")) {
+			lprintf("Invalid volume name <%s>\n", comp);
+			return bdNamErr;
+		}
+
+		// Cut the disk name off, leaving the colon
+		comp += strlen(comp);
+
+		startID = 2;
+	} else if (startID == 0) {
+		// Find the current directory, which is not a trivial task!
+	} else if (startID == 1) {
+		return bdNamErr; // Can't use parent of root
+	}
+
+	// Convert into an array of path components
+	const char *fname[100];
+	int fcnt=0;
+
+	// Trim empty component from the start
+	if (comp[0] == 0) comp++;
+
+	// Iterate path components
+	for (; comp<cpath+plen; comp+=strlen(comp)+1) {
+		if (comp[0] == 0) {
+			fname[fcnt++] = "..";
+		} else {
+			fname[fcnt++] = comp; // Should convert to UTF-8
+		}
+	}
+
+	lprintf("Walk %d", startID);
+	for (int i=0; i<fcnt; i++) lprintf("/%s", fname[i]);
+	lprintf("\n");
+
+	// TODO: respect the 16-element limitation of Twalk
+	struct Qid9 qids[100];
+	uint16_t qcnt=0;
+	bool bad = Walk9(startID, 3, fcnt, fname, &qcnt, qids);
+	lprintf("browse -> %d/%d\n", qcnt, fcnt);
+
+	if (qcnt<fcnt && !strcmp(fname[qcnt], "..")) {
+		return bdNamErr; // ascended to parent of disk
+	} else if (qcnt<fcnt-1) {
+		return dirNFErr;
+	} else if (qcnt==fcnt-1) {
+		return fnfErr;
+	}
+
+	if (cnid != NULL) {
+		*cnid = qid2cnid(qids[qcnt-1]);
+
+		// Create a duplicate FID for use as the CNID
+		// If the new FID already exists then we trust it is correct,
+		// and ignore the error.
+		Walk9(3, *cnid, 0, NULL, NULL, NULL);
+	}
+
+	// Clunk our temp FID for future use
+	Clunk9(3);
+
+	return noErr;
+}
+
+static uint32_t qid2cnid(struct Qid9 qid) {
+	if (qid.path == root.path) {
+		return 2; // special root CNID
+	} else {
+		return ((qid.path >> 32) ^ qid.path) + 3;
+	}
 }
