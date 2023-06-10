@@ -23,7 +23,7 @@ extern char Err9[256];
 
 bool Init9(uint16_t vioq, uint16_t viobuffers);
 bool Attach9(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct Qid9 *rx_qid);
-bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, uint16_t tx_nwname, const char **tx_name, struct Qid9 *rx_qid);
+bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, uint16_t tx_nwname, const char **tx_name, uint16_t *rx_nwqid, struct Qid9 *rx_qid);
 bool Clunk9(uint32_t tx_fid);
 bool Open9(uint32_t tx_fid, uint8_t tx_mode, struct Qid9 *rx_qid, uint32_t *rx_iounit);
 bool Create9(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct Qid9 *rx_qid, uint32_t *rx_iounit);

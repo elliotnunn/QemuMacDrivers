@@ -166,35 +166,43 @@ bool Attach9(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, 
 	return false;
 }
 
-bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, uint16_t tx_nwname, const char **tx_name, struct Qid9 *rx_qid) {
-	*(smlBuf+4) = Twalk;
-	WRITE16LE(smlBuf+4+1, ONLYTAG);
-	WRITE32LE(smlBuf+4+1+2, tx_fid);
-	WRITE32LE(smlBuf+4+1+2+4, tx_newfid);
-	WRITE16LE(smlBuf+4+1+2+4+4, tx_nwname);
+bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, uint16_t tx_nwname, const char **tx_name, uint16_t *rx_nwqid, struct Qid9 *rx_qid) {
+	*(bigBuf+4) = Twalk;
+	WRITE16LE(bigBuf+4+1, ONLYTAG);
+	WRITE32LE(bigBuf+4+1+2, tx_fid);
+	WRITE32LE(bigBuf+4+1+2+4, tx_newfid);
+	WRITE16LE(bigBuf+4+1+2+4+4, tx_nwname);
 
 	uint32_t size = 4+1+2+4+4+2;
 	for (uint16_t i=0; i<tx_nwname; i++) {
 		uint16_t len = strlen(*tx_name);
-		WRITE16LE(smlBuf+size, len);
+		WRITE16LE(bigBuf+size, len);
 		size += 2;
-		memcpy(smlBuf+size, *tx_name, len);
+		memcpy(bigBuf+size, *tx_name, len);
 		size += len;
 		tx_name++;
 	}
 
-	WRITE32LE(smlBuf, size);
+	WRITE32LE(bigBuf, size);
 
-	putSmlGetBig();
+	putBigGetSml();
 
-	if (checkErr(bigBuf)) {
+	if (checkErr(smlBuf)) {
+		if (rx_nwqid) *rx_nwqid=0;
 		return true;
 	}
 
+	uint16_t got = READ16LE(smlBuf+7);
+
+	if (rx_nwqid) *rx_nwqid=got;
+
 	if (rx_qid != NULL) {
-		rx_qid->type = bigBuf[9];
-		rx_qid->version = READ32LE(bigBuf+9+1);
-		rx_qid->path = READ64LE(bigBuf+9+1+4);
+		for (uint16_t i=0; i<got; i++) {
+			char *thisqid = smlBuf+9+13*i;
+			rx_qid[i].type = *thisqid;
+			rx_qid[i].version = READ32LE(thisqid+1);
+			rx_qid[i].path = READ64LE(thisqid+1+4);
+		}
 	}
 
 	return false;
