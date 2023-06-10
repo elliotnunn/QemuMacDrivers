@@ -200,6 +200,19 @@ bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, uint16_t tx_nwname, const char *
 	return false;
 }
 
+bool Clunk9(uint32_t tx_fid) {
+	uint32_t size = 4+1+2+4;
+
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tclunk;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, tx_fid);
+
+	putSmlGetBig();
+
+	return checkErr(bigBuf);
+}
+
 bool Open9(uint32_t tx_fid, uint8_t tx_mode, struct Qid9 *rx_qid, uint32_t *rx_iounit) {
 	uint32_t size = 4+1+2+4+1;
 
