@@ -418,11 +418,13 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 }
 
 static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cnid) {
+	uint32_t logStartID=startID;
+#define BRLOG(...) \
+	lprintf("browse(%d, \"%.*s\") = ", logStartID, *paspath, paspath+1); lprintf(__VA_ARGS__);
+
 	// Null termination makes this easier
 	char cpath[256] = {0};
 	memcpy(cpath, paspath+1, paspath[0]);
-
-	lprintf("browse(%d, \"%s\")\n", startID, cpath);
 
 	char *comp=cpath;
 	int plen=strlen(comp);
@@ -436,7 +438,7 @@ static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cn
 
 	if (absolute) {
 		if (strcmp(comp, "Elmo")) {
-			lprintf("Invalid volume name <%s>\n", comp);
+			BRLOG("bdNamErr (volume name)\n");
 			return bdNamErr;
 		}
 
@@ -447,6 +449,7 @@ static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cn
 	} else if (startID == 0) {
 		// Find the current directory, which is not a trivial task!
 	} else if (startID == 1) {
+		BRLOG("bdNamErr (parent of root)\n");
 		return bdNamErr; // Can't use parent of root
 	}
 
@@ -474,13 +477,15 @@ static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cn
 	struct Qid9 qids[100];
 	uint16_t qcnt=0;
 	bool bad = Walk9(startID, 3, fcnt, fname, &qcnt, qids);
-	lprintf("browse -> %d/%d\n", qcnt, fcnt);
 
 	if (qcnt<fcnt && !strcmp(fname[qcnt], "..")) {
-		return bdNamErr; // ascended to parent of disk
+		BRLOG("bdNamErr (parent of disk)\n");
+		return bdNamErr;
 	} else if (qcnt<fcnt-1) {
+		BRLOG("dirNFErr\n");
 		return dirNFErr;
 	} else if (qcnt==fcnt-1) {
+		BRLOG("fnfErr\n");
 		return fnfErr;
 	}
 
@@ -495,6 +500,8 @@ static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cn
 
 	// Clunk our temp FID for future use
 	Clunk9(3);
+
+	BRLOG("%d\n", qid2cnid(qids[qcnt-1]));
 
 	return noErr;
 }
