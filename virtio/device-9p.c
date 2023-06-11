@@ -120,6 +120,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	}
 
+	lprintf("attached to root with path %08x%08x\n", (uint32_t)(root.path>>32), (uint32_t)root.path);
+
 	long fsmver = 0;
 	Gestalt(gestaltFSMVersion, &fsmver);
 	lprintf("File System Manager version %04x\n", fsmver);
@@ -199,7 +201,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSErr CommProc(short message, struct IOParam *pb, void *globals) {
-	lprintf("CommProc message=%#02x paramBlock=%#08x\n", message, pb);
+	lprintf("## CommProc message=%#02x paramBlock=%#08x\n", message, pb);
 
 	switch (message) {
 	case ffsNopMessage:
@@ -222,7 +224,7 @@ static OSErr CommProc(short message, struct IOParam *pb, void *globals) {
 }
 
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid) {
-	lprintf("HFSProc selector=%#02x pb=%#08x fsid=%#02x\n", selector, pb, fsid);
+	lprintf("## HFSProc selector=%#02x pb=%#08x fsid=%#02x\n", selector, pb, fsid);
 
 	callcnt++;
 
@@ -348,11 +350,14 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		NULL;
 
 	if (responder == NULL) {
-		lprintf("UNIMPLEMENTED, returning extFSErr\n");
+		lprintf("## Unimplemented, returning extFSErr\n");
 		return extFSErr;
 	}
 
-	return ((responderPtr)responder)(pb, vcb);
+	OSErr result = ((responderPtr)responder)(pb, vcb);
+
+	lprintf("## Result = %d\n", result);
+	return result;
 }
 
 static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
@@ -378,6 +383,7 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
 
 	err = UTAddNewVCB(22, &pb->ioVRefNum, vcb);
 	if (err) return err;
+	lprintf(".virtio9p: mounted volume ref num %d\n", pb->ioVRefNum);
 
 	PostEvent(diskEvt, 22);
 
