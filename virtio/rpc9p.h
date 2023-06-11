@@ -27,8 +27,8 @@ struct Stat9 { // Abbreviated from the 9p2000.u spec
 extern char *Buf9;
 extern uint32_t Max9;
 
-// Error string (check when a function returns true)
-extern char Err9[256];
+// Linux error code (check when a function returns true)
+extern uint32_t Err9;
 
 bool Init9(uint16_t vioq, uint16_t viobuffers);
 bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 *retqid);

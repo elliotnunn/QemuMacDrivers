@@ -267,19 +267,14 @@ bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count
 }
 
 static bool checkErr(char *msg) {
-	enum {Rerror = 107}; // size[4] Rerror tag[2] ename[s]
+	enum {Rlerror = 7}; // size[4] Rlerror tag[2] ecode[4]
 
-	if (*(msg + 4) != Rerror) {
+	if (*(msg + 4) != Rlerror) {
 		return false;
 	}
 
-	uint16_t size = READ16LE(msg + 7);
-	if (size > sizeof(Err9) - 1) {
-		size = sizeof(Err9) - 1;
-	}
-	memcpy(Err9, msg + 9, size);
-	Err9[size] = 0;
-	lprintf(".virtio9p error: %s\n", Err9);
+	Err9 = READ32LE(msg+4+1+2);
+	lprintf(".virtio9p error: %d\n", Err9);
 	return true;
 }
 
