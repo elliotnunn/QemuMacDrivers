@@ -69,7 +69,7 @@ enum {
 
 char *Buf9;
 uint32_t Max9;
-char Err9[256];
+uint32_t Err9;
 
 char *smlBuf, *bigBuf;
 uint32_t *smlBigAddrs, *bigSmlAddrs, *smlBigSizes, *bigSmlSizes;
