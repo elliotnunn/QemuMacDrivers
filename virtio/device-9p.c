@@ -25,6 +25,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
 static OSErr MyFlushVol(void);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
+static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb);
 static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cnid);
 static uint32_t qid2cnid(struct Qid9 qid);
 
@@ -177,14 +178,18 @@ static OSStatus initialize(DriverInitInfo *info) {
 	lprintf("PBVolumeMount returns %d\n", fserr);
 
 	uint32_t cnid=0;
-	browse(2, "\p:builds", &cnid);
-	lprintf("cnid=%d\n", cnid); cnid=0;
-	browse(2, "\p:builds:", &cnid);
-	lprintf("cnid=%d\n", cnid); cnid=0;
-	browse(2, "\pbuilds", &cnid);
-	lprintf("cnid=%d\n", cnid); cnid=0;
-	browse(2, "\p:virtio:9-iccs", &cnid);
-	lprintf("cnid=%d\n", cnid); cnid=0;
+	browse(2, "\pElmo:", &cnid);
+
+	Walk9(2, 20, 0, NULL, NULL, NULL);
+	Lopen9(20, O_RDONLY, NULL, NULL);
+	char name[512];
+	struct Qid9 q;
+	char kind;
+	char ok;
+	for (ok=Readdir9(20, &q, &kind, name); ok==0; ok=Readdir9(-1, &q, &kind, name)) {
+		lprintf("   Child \"%s\" type=%#02x qid=%#x/%#x/%#x \n", name, (unsigned char)kind, (unsigned char)q.type, q.version, (uint32_t)q.path);
+	}
+	lprintf("Result %d\n", ok);
 
 	return noErr;
 }

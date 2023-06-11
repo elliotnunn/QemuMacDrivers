@@ -24,6 +24,32 @@ symlink (?wontfix)
 readlink (?wontfix)
 lock (?wontfix)
 getlock (?wontfix)
+
+Tstatfs = 8
+Tlcreate = 14
+Tsymlink = 16
+Tmknod = 18
+Trename = 20
+Treadlink = 22
+Tgetattr = 24
+Tsetattr = 26
+Txattrwalk = 30
+Txattrcreate = 32
+Tfsync = 50
+Tlock = 52
+Tgetlock = 54
+Tlink = 70
+Tmkdir = 72
+Trenameat = 74
+Tunlinkat = 76
+Tauth = 102
+Tflush = 108
+Topen = 112
+Tcreate = 114
+Twrite = 118
+Tremove = 122
+Tstat = 124
+Twstat = 126
 */
 
 #include <string.h>
@@ -215,6 +241,99 @@ bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, ui
 	}
 
 	return false;
+}
+
+bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retiounit) {
+	enum {Tlopen = 12}; // size[4] Tlopen tag[2] fid[4] flags[4]
+	enum {Rlopen = 13}; // size[4] Rlopen tag[2] qid[13] iounit[4]
+
+	uint32_t size = 4+1+2+4+4;
+
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tlopen;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, fid);
+	WRITE32LE(smlBuf+4+1+2+4, flags);
+
+	putSmlGetBig();
+
+	if (checkErr(bigBuf)) {
+		return true;
+	}
+
+	if (retqid != NULL) {
+		retqid->type = *(bigBuf+4+1+2);
+		retqid->version = READ32LE(bigBuf+4+1+2+1);
+		retqid->path = READ64LE(bigBuf+4+1+2+1+4);
+	}
+
+	if (retiounit != NULL) {
+		*retiounit = READ32LE(bigBuf+4+1+2+13);
+	}
+}
+
+// -1=err, 0=ok, 1=eof
+// use the real fid for the first, then NOFID to iterate
+char Readdir9(uint32_t fid, struct Qid9 *retqid, char *rettype, char retname[512]) {
+	enum {Treaddir = 40}; // size[4] Treaddir tag[2] fid[4] offset[8] count[4]
+	enum {Rreaddir = 41}; // size[4] Rreaddir tag[2] count[4] data[count]
+	// data consists of: qid[13] offset[8] type[1] name[s]
+
+	static uint64_t requestoffset;
+	static uint32_t cursor, count, curfid;
+
+	if (fid!=(uint32_t)NOFID || cursor>=count) {
+		if (fid!=(uint32_t)NOFID) {
+			curfid = fid;
+			requestoffset = 0;
+		}
+
+		cursor = 0;
+
+		uint32_t size = 4+1+2+4+8+4;
+
+		WRITE32LE(smlBuf, size);
+		*(smlBuf+4) = Treaddir;
+		WRITE16LE(smlBuf+4+1, ONLYTAG);
+		WRITE32LE(smlBuf+4+1+2, curfid);
+		WRITE64LE(smlBuf+4+1+2+4, requestoffset);
+		WRITE32LE(smlBuf+4+1+2+4+8, Max9);
+
+		putSmlGetBig();
+
+		if (checkErr(bigBuf)) {
+			return -1;
+		}
+
+		count = READ32LE(bigBuf+7);
+	}
+
+	if (cursor >= count) return 1; // eof
+
+	char *entry = bigBuf+11+cursor;
+
+	requestoffset = READ64LE(entry+13);
+
+	if (retqid != NULL) {
+		retqid->type = *(entry);
+		retqid->version = READ32LE(entry+1);
+		retqid->path = READ64LE(entry+1+4);
+	}
+
+	if (rettype != NULL) {
+		*rettype = *(entry+13+8);
+	}
+
+	if (retname != NULL) {
+		uint16_t nlen = READ16LE(entry+13+8+1);
+		if (nlen > 511) nlen = 511;
+		memcpy(retname, entry+13+8+1+2, nlen);
+		retname[nlen] = 0;
+	}
+
+	cursor += 13+8+1+2+READ16LE(entry+13+8+1);
+
+	return 0;
 }
 
 bool Clunk9(uint32_t fid) {
