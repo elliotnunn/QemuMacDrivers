@@ -13,6 +13,15 @@ struct Qid9 {
 	uint64_t path;
 };
 
+struct Stat9 { // Abbreviated from the 9p2000.u spec
+	struct Qid9 qid;
+	uint32_t mode;
+	uint32_t atime, mtime;
+	uint64_t length;
+	char name[512];
+	char linktarget[512];
+};
+
 // Single large buffer used by Read9/write
 // Clobbered by all calls
 extern char *Buf9;
@@ -25,6 +34,7 @@ bool Init9(uint16_t vioq, uint16_t viobuffers);
 bool Attach9(uint32_t tx_fid, uint32_t tx_afid, char *tx_uname, char *tx_aname, struct Qid9 *rx_qid);
 bool Walk9(uint32_t tx_fid, uint32_t tx_newfid, uint16_t tx_nwname, const char **tx_name, uint16_t *rx_nwqid, struct Qid9 *rx_qid);
 bool Clunk9(uint32_t tx_fid);
+bool Stat9(uint32_t tx_fid, struct Stat9 *rx_stat);
 bool Open9(uint32_t tx_fid, uint8_t tx_mode, struct Qid9 *rx_qid, uint32_t *rx_iounit);
 bool Create9(uint32_t tx_fid, char *tx_name, uint32_t tx_perm, uint8_t tx_mode, char *tx_extn, struct Qid9 *rx_qid, uint32_t *rx_iounit);
 bool Read9(uint32_t tx_fid, uint64_t tx_offset, uint32_t count, uint32_t *actual_count);

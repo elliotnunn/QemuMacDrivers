@@ -221,6 +221,67 @@ bool Clunk9(uint32_t tx_fid) {
 	return checkErr(bigBuf);
 }
 
+bool Stat9(uint32_t tx_fid, struct Stat9 *rx_stat) {
+	uint32_t size = 4+1+2+4;
+
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tstat;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, tx_fid);
+
+	putSmlGetBig();
+
+	if (checkErr(bigBuf)) {
+		return true;
+	}
+
+	// Debug only TODO
+	{
+		uint32_t len=READ32LE(bigBuf);
+		for (int i=0; i<len; i++) {
+			lprintf("%02x", (int)(unsigned char)bigBuf[i]);
+		}
+		lprintf("\n");
+	}
+
+	// Probably worth factoring out a Stat9 deserializer
+	if (rx_stat != NULL) {
+		char *ptr = bigBuf+17;
+		rx_stat->qid.type = *ptr; ptr+=1;
+		rx_stat->qid.version = READ32LE(ptr); ptr+=4;
+		rx_stat->qid.path = READ64LE(ptr); ptr+=8;
+		rx_stat->mode = READ32LE(ptr); ptr+=4;
+		rx_stat->atime = READ32LE(ptr); ptr+=4;
+		rx_stat->mtime = READ32LE(ptr); ptr+=4;
+		rx_stat->length = READ64LE(ptr); ptr+=8;
+
+		uint16_t slen, keep;
+		slen = READ16LE(ptr); ptr+=2;
+		keep = slen;
+		if (keep>511) keep=511;
+		memcpy(rx_stat->name, ptr, keep);
+		rx_stat->name[keep] = 0;
+		ptr += slen;
+
+		ptr += 2 + READ16LE(ptr); // skip uid
+		ptr += 2 + READ16LE(ptr); // skip gid
+		ptr += 2 + READ16LE(ptr); // skip muid
+
+		if (rx_stat->qid.type & 2) {
+			slen = READ16LE(ptr); ptr+=2;
+			keep = slen;
+			if (keep>511) keep=511;
+			memcpy(rx_stat->linktarget, ptr, keep);
+			rx_stat->linktarget[keep] = 0;
+			ptr += slen;
+		} else {
+			rx_stat->linktarget[0] = 0;
+		}
+	}
+
+	return false;
+}
+
 bool Open9(uint32_t tx_fid, uint8_t tx_mode, struct Qid9 *rx_qid, uint32_t *rx_iounit) {
 	uint32_t size = 4+1+2+4+1;
 
