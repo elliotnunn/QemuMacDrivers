@@ -34,7 +34,4 @@ bool Init9(uint16_t vioq, uint16_t viobuffers);
 bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 *retqid);
 bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, uint16_t *retnwqid, struct Qid9 *retqid);
 bool Clunk9(uint32_t fid);
-bool Stat9(uint32_t fid, struct Stat9 *retstat);
-bool Open9(uint32_t fid, uint8_t mode, struct Qid9 *retqid, uint32_t *retiounit);
-bool Create9(uint32_t fid, char *name, uint32_t perm, uint8_t mode, char *extn, struct Qid9 *retqid, uint32_t *retiounit);
 bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count);
