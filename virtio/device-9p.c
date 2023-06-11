@@ -474,10 +474,6 @@ static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cn
 		}
 	}
 
-	lprintf("Walk %d", startID);
-	for (int i=0; i<fcnt; i++) lprintf("/%s", fname[i]);
-	lprintf("\n");
-
 	// TODO: respect the 16-element limitation of Twalk
 	struct Qid9 qids[100];
 	uint16_t qcnt=0;
