@@ -26,7 +26,7 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
 static OSErr MyFlushVol(void);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb);
-static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cnid);
+static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid);
 static uint32_t qid2cnid(struct Qid9 qid);
 
 char stack[32*1024];
@@ -422,10 +422,10 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 	return noErr;
 }
 
-static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cnid) {
-	uint32_t logStartID=startID;
+static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid) {
+	uint32_t logstartcnid=startcnid;
 #define BRLOG(...) \
-	lprintf("browse(%d, \"%.*s\") = ", logStartID, *paspath, paspath+1); lprintf(__VA_ARGS__);
+	lprintf("browse(%d, \"%.*s\") = ", logstartcnid, *paspath, paspath+1); lprintf(__VA_ARGS__);
 
 	// Null termination makes this easier
 	char cpath[256] = {0};
@@ -450,10 +450,10 @@ static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cn
 		// Cut the disk name off, leaving the colon
 		comp += strlen(comp);
 
-		startID = 2;
-	} else if (startID == 0) {
+		startcnid = 2;
+	} else if (startcnid == 0) {
 		// Find the current directory, which is not a trivial task!
-	} else if (startID == 1) {
+	} else if (startcnid == 1) {
 		BRLOG("bdNamErr (parent of root)\n");
 		return bdNamErr; // Can't use parent of root
 	}
@@ -477,7 +477,7 @@ static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cn
 	// TODO: respect the 16-element limitation of Twalk
 	struct Qid9 qids[100];
 	uint16_t qcnt=0;
-	bool bad = Walk9(startID, 3, fcnt, fname, &qcnt, qids);
+	bool bad = Walk9(startcnid, 3, fcnt, fname, &qcnt, qids);
 
 	if (qcnt<fcnt && !strcmp(fname[qcnt], "..")) {
 		BRLOG("bdNamErr (parent of disk)\n");
@@ -490,19 +490,24 @@ static OSErr browse(uint32_t startID, const unsigned char *paspath, uint32_t *cn
 		return fnfErr;
 	}
 
-	if (cnid != NULL) {
-		*cnid = qid2cnid(qids[qcnt-1]);
+	uint32_t newcnid;
+	if (fcnt == 0) {
+		newcnid = startcnid;
+	} else {
+		newcnid = qid2cnid(qids[qcnt-1]);
 
 		// Create a duplicate FID for use as the CNID
 		// If the new FID already exists then we trust it is correct,
 		// and ignore the error.
-		Walk9(3, *cnid, 0, NULL, NULL, NULL);
+		Walk9(3, newcnid, 0, NULL, NULL, NULL);
 	}
+
+	if (retcnid != NULL) *retcnid = newcnid;
 
 	// Clunk our temp FID for future use
 	Clunk9(3);
 
-	BRLOG("%d\n", qid2cnid(qids[qcnt-1]));
+	BRLOG("%#010x\n", newcnid);
 
 	return noErr;
 }
