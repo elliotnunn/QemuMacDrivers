@@ -23,6 +23,7 @@ static OSStatus finalize(DriverFinalInfo *info);
 static OSErr CommProc(short message, struct IOParam *pb, void *globals);
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid);
 static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
+static OSErr MyMountVol(struct VolumeParam *pb, struct VCB *vcb);
 static OSErr MyFlushVol(void);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb);
@@ -247,7 +248,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		/*a00c*/ selector==kFSMGetFileInfo ? NULL :
 		/*a00d*/ selector==kFSMSetFileInfo ? NULL :
 		/*a00e*/ selector==kFSMUnmountVol ? NULL :
-		/*a00f*/ selector==kFSMMountVol ? NULL :
+		/*a00f*/ selector==kFSMMountVol ? MyMountVol :
 		/*a010*/ selector==kFSMAllocate ? NULL :
 		/*a011*/ selector==kFSMGetEOF ? NULL :
 		/*a012*/ selector==kFSMSetEOF ? NULL :
@@ -388,6 +389,10 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
 	PostEvent(diskEvt, 22);
 
 	return noErr;
+}
+
+static OSErr MyMountVol(struct VolumeParam *pb, struct VCB *vcb) {
+	return volOnLinErr;
 }
 
 static OSErr MyFlushVol(void) {
