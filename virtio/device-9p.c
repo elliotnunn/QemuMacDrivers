@@ -29,6 +29,8 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb);
 static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid);
 static uint32_t qid2cnid(struct Qid9 qid);
+static uint32_t pbDirID(void *pb);
+static struct WDCBRec *wdcb(short refnum);
 
 char stack[32*1024];
 short drvRefNum;
@@ -245,7 +247,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		/*a009*/ selector==kFSMDelete ? NULL :
 		/*a00a*/ selector==kFSMOpenRF ? NULL :
 		/*a00b*/ selector==kFSMRename ? NULL :
-		/*a00c*/ selector==kFSMGetFileInfo ? NULL :
+		/*a00c*/ selector==kFSMGetFileInfo ? MyGetFileInfo :
 		/*a00d*/ selector==kFSMSetFileInfo ? NULL :
 		/*a00e*/ selector==kFSMUnmountVol ? NULL :
 		/*a00f*/ selector==kFSMMountVol ? MyMountVol :
@@ -269,7 +271,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		/*0006*/ selector==kFSMDirCreate ? NULL :
 		/*0007*/ selector==kFSMGetWDInfo ? NULL :
 		/*0008*/ selector==kFSMGetFCBInfo ? NULL :
-		/*0009*/ selector==kFSMGetCatInfo ? NULL :
+		/*0009*/ selector==kFSMGetCatInfo ? MyGetFileInfo :
 		/*000a*/ selector==kFSMSetCatInfo ? NULL :
 		/*000b*/ selector==kFSMSetVolInfo ? NULL :
 		/*0010*/ selector==kFSMLockRng ? NULL :
@@ -433,6 +435,91 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 	return noErr;
 }
 
+static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
+	lprintf("GetFile/CatInfo trap=%#04x ioVRefNum=%d ioDirID=%d ioFDirIndex=%d ioName=\"%.*s\"\n",
+		0xffffL & pb->ioTrap, pb->ioVRefNum, pb->ioDirID, pb->ioFDirIndex, pb->ioNamePtr[0], pb->ioNamePtr+1);
+
+	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
+	bool longform = (pb->ioTrap&0x00ff) == 0x0060; // GetCatInfo
+
+	uint32_t cnid = pbDirID(pb);
+	lprintf("base CNID=%#010x\n", cnid);
+
+	bool returnName = false;
+
+	if (longform && pb->ioFDirIndex<0) {
+		lprintf("DirID-alone mode\n");
+		returnName = true;
+	} else if (pb->ioFDirIndex > 0) {
+		lprintf("Indexed mode unimp\n");
+		returnName = true;
+		for (;;) {} // TODO
+	} else {
+		lprintf("Filename mode\n");
+
+		int err = browse(cnid, pb->ioNamePtr, &cnid);
+		if (err) return err;
+	}
+
+	lprintf("Now we have the right CNID but still unimp\n");
+	for (;;) {} // TODO
+
+//
+// 	// -1 meaning file, otherwise meaning count of contained folders
+// 	arity := 0
+// 	if !platPathImaginary(path) {
+// 		listing, listErr := readDir(path)
+// 		if listErr == 0 {
+// 			arity = len(listing)
+// 		} else {
+// 			arity = -1
+// 		}
+// 	}
+//
+// 	if returnIOName && ioNamePtr != 0 {
+// 		if path == platRoot {
+// 			writePstring(ioNamePtr, onlyVolName)
+// 		} else {
+// 			mac, _ := macName(platPathBase(path))
+// 			writePstring(ioNamePtr, mac)
+// 		}
+// 	}
+//
+// 	if arity != -1 { // folder
+// 		writeb(pb+30, 1<<4)                // is a directory
+// 		writel(pb+48, uint32(dirID(path))) // ioDrDirID
+// 		writew(pb+52, uint16(arity))       // ioDrNmFls
+//
+// 		t := mtimeDir(path)
+// 		writel(pb+72, t) // ioFlCrDat
+// 		writel(pb+76, t) // ioFlMdDat
+// 	} else { // file
+// 		fastButInaccurate := ioFDirIndex > 0
+// 		sizeD, finfo := dataForkSizeFinderInfo(path, fastButInaccurate)
+//
+// 		copy(mem[pb+32:], finfo[:])     // ioFlFndrInfo (16b)
+// 		writel(pb+54, sizeD)            // ioFlLgLen
+// 		writel(pb+58, (sizeD+511)&^511) // ioFlPyLen
+//
+// 		sizeR := uint32(len(resourceFork(path)))
+//
+// 		writel(pb+64, sizeR)            // ioFlRLgLen
+// 		writel(pb+68, (sizeR+511)&^511) // ioFlRPyLen
+//
+// 		t := mtimeFile(path)
+// 		writel(pb+72, t) // ioFlCrDat
+// 		writel(pb+76, t) // ioFlMdDat
+// 	}
+//
+// 	if trap&0xff == 0x60 {
+// 		parID := uint32(1) // parent of root
+// 		if path != platRoot {
+// 			parID = uint32(dirID(platPathDir(path)))
+// 		}
+// 		writel(pb+100, parID) // ioFlParID
+// 	}
+}
+
 static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid) {
 	uint32_t logstartcnid=startcnid;
 #define BRLOG(...) \
@@ -529,4 +616,37 @@ static uint32_t qid2cnid(struct Qid9 qid) {
 	} else {
 		return ((qid.path >> 32) ^ qid.path) + 3;
 	}
+}
+
+// Handles one volume only: will need revision
+static uint32_t pbDirID(void *pb) {
+	struct HFileParam *pbcast = pb;
+
+	// HFSDispatch or another hierarchical call: use dirID if nonzero
+	if ((pbcast->ioTrap & 0xff) == 0x60 || (pbcast->ioTrap & 0x200) != 0) {
+		if (pbcast->ioDirID != 0) {
+			return pbcast->ioDirID;
+		}
+	}
+
+	// Otherwise fall back on vRefNum
+	if (pbcast->ioVRefNum == -2) {
+		return 2; // root
+	} else if (pbcast->ioVRefNum == 0) {
+		return wdcb(-32765)->wdDirID; // default
+	} else {
+		return wdcb(pbcast->ioVRefNum)->wdDirID;
+	}
+}
+
+// Conservatively check for this WDCB
+static struct WDCBRec *wdcb(short refnum) {
+	char *table = *(char **)0x372; // unaligned access?
+	int16_t tblSize = *(int16_t *)table;
+	int16_t offset = refnum + 0x7fff;
+	if (offset<2 || offset>tblSize || (offset%16)!=2) {
+		lprintf("bad wdcb refnum %d, will probably crash now\n", refnum);
+		return (void *)0x68f168f1;
+	}
+	return (struct WDCBRec *)(table + offset);
 }
