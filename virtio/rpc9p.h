@@ -39,6 +39,7 @@ bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 
 bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, uint16_t *retnwqid, struct Qid9 *retqid);
 bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retiounit);
 char Readdir9(uint32_t fid, struct Qid9 *retqid, char *rettype, char retname[512]);
+bool Getattr9(uint32_t fid, struct Qid9 *retqid, uint64_t *retsize, uint64_t *rettime);
 bool Clunk9(uint32_t fid);
 bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count);
 

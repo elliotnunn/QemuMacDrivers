@@ -31,7 +31,6 @@ Tsymlink = 16
 Tmknod = 18
 Trename = 20
 Treadlink = 22
-Tgetattr = 24
 Tsetattr = 26
 Txattrwalk = 30
 Txattrcreate = 32
@@ -334,6 +333,49 @@ char Readdir9(uint32_t fid, struct Qid9 *retqid, char *rettype, char retname[512
 	cursor += 13+8+1+2+READ16LE(entry+13+8+1);
 
 	return 0;
+}
+
+// Vastly simplify to qid, size, ctime_sec
+bool Getattr9(uint32_t fid, struct Qid9 *retqid, uint64_t *retsize, uint64_t *rettime) {
+	enum {Tgetattr = 24}; // size[4] Tgetattr tag[2] fid[4] request_mask[8]
+	enum {Rgetattr = 25}; // size[4] Rgetattr tag[2] valid[8] qid[13]
+	                      // mode[4] uid[4] gid[4] nlink[8] rdev[8]
+	                      // size[8] blksize[8] blocks[8] atime_sec[8]
+	                      // atime_nsec[8] mtime_sec[8] mtime_nsec[8]
+	                      // ctime_sec[8] ctime_nsec[8] btime_sec[8]
+	                      // btime_nsec[8] gen[8] data_version[8]
+
+	uint32_t size = 4+1+2+4+8;
+
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tgetattr;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, fid);
+	WRITE64LE(smlBuf+4+1+2+4, 0x200 /*size*/ | 0x80 /*ctime*/);
+
+	putSmlGetBig();
+
+	if (checkErr(bigBuf)) {
+		return true;
+	}
+
+	// Skip checking the valid-mask
+
+	if (retqid != NULL) {
+		retqid->type = bigBuf[15];
+		retqid->version = READ32LE(bigBuf+15+1);
+		retqid->path = READ64LE(bigBuf+15+1+4);
+	}
+
+	if (retsize != NULL) {
+		*retsize = READ64LE(bigBuf+56);
+	}
+
+	if (rettime != NULL) {
+		*rettime = READ64LE(bigBuf+112);
+	}
+
+	return false;
 }
 
 bool Clunk9(uint32_t fid) {
