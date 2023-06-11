@@ -1,3 +1,31 @@
+/*
+Calls TODO:
+write
+statfs
+lopen
+lcreate
+getattr
+setattr
+readdir
+fsync
+mkdir
+renameat
+unlinkat
+
+remove (wontfix use unlinkat instead)
+rename (wontfix use renameat instead)
+flush (wontfix)
+auth (wontfix)
+xattrwalk (wontfix)
+xattrcreate (wontfix)
+mknod (wontfix)
+link (wontfix)
+symlink (?wontfix)
+readlink (?wontfix)
+lock (?wontfix)
+getlock (?wontfix)
+*/
+
 #include <string.h>
 
 #include "allocator.h"
@@ -8,34 +36,6 @@
 #include "rpc9p.h"
 
 enum {
-	Tversion = 100, // size[4] Tversion tag[2] msize[4] version[s]
-	Rversion = 101, // size[4] Rversion tag[2] msize[4] version[s]
-	Tauth = 102,    // size[4] Tauth tag[2] afid[4] uname[s] aname[s]
-	Rauth = 103,    // size[4] Rauth tag[2] aqid[13]
-	Tattach = 104,  // size[4] Tattach tag[2] fid[4] afid[4] uname[s] aname[s] ...UNIX n_uname[4]
-	Rattach = 105,  // size[4] Rattach tag[2] qid[13]
-	Terror = 106,   // illegal
-	Rerror = 107,   // size[4] Rerror tag[2] ename[s]
-	Tflush = 108,   // size[4] Tflush tag[2] oldtag[2]
-	Rflush = 109,   // size[4] Rflush tag[2]
-	Twalk = 110,    // size[4] Twalk tag[2] fid[4] newfid[4] nwname[2] nwname*(wname[s])
-	Rwalk = 111,    // size[4] Rwalk tag[2] nwqid[2] nwqid*(wqid[13])
-	Topen = 112,    // size[4] Topen tag[2] fid[4] mode[1]
-	Ropen = 113,    // size[4] Ropen tag[2] qid[13] iounit[4]
-	Tcreate = 114,  // size[4] Tcreate tag[2] fid[4] name[s] perm[4] mode[1] ...UNIX extension[s]
-	Rcreate = 115,  // size[4] Rcreate tag[2] qid[13] iounit[4]
-	Tread = 116,    // size[4] Tread tag[2] fid[4] offset[8] count[4]
-	Rread = 117,    // size[4] Rread tag[2] count[4] data[count]
-	Twrite = 118,   // size[4] Twrite tag[2] fid[4] offset[8] count[4] data[count]
-	Rwrite = 119,   // size[4] Rwrite tag[2] count[4]
-	Tclunk = 120,   // size[4] Tclunk tag[2] fid[4]
-	Rclunk = 121,   // size[4] Rclunk tag[2]
-	Tremove = 122,  // size[4] Tremove tag[2] fid[4]
-	Rremove = 123,  // size[4] Rremove tag[2]
-	Tstat = 124,    // size[4] Tstat tag[2] fid[4]
-	Rstat = 125,    // size[4] Rstat tag[2] stat[n]
-	Twstat = 126,   // size[4] Twstat tag[2] fid[4] stat[n]
-	Rwstat = 127,   // size[4] Rwstat tag[2]
 	NOTAG = 0,
 	ONLYTAG = 1,
 };
@@ -90,13 +90,13 @@ bool Init9(uint16_t vioq, uint16_t viobuffers) {
 	}
 
 	char vers[128];
-	if (Version9(Max9+11, "9P2000.u", &Max9, vers)) {
+	if (Version9(Max9+11, "9P2000.L", &Max9, vers)) {
 		return true;
 	}
 	Max9 -= 11; // subtract Rread/Twrite header from msize
 
-	if (strcmp(vers, "9P2000.u")) {
-		lprintf(".virtio9p: we offered 9P2000.u, server offered %s, cannot continue\n", vers);
+	if (strcmp(vers, "9P2000.L")) {
+		lprintf(".virtio9p: we offered 9P2000.L, server offered %s, cannot continue\n", vers);
 		return true;
 	}
 
@@ -107,6 +107,9 @@ bool Init9(uint16_t vioq, uint16_t viobuffers) {
 
 // Keep this internal, as part of our initialization
 static bool Version9(uint32_t msize, char *version, uint32_t *retmsize, char *retversion) {
+	enum {Tversion = 100}; // size[4] Tversion tag[2] msize[4] version[s]
+	enum {Rversion = 101}; // size[4] Rversion tag[2] msize[4] version[s]
+
 	size_t slen = strlen(version);
 	uint32_t size = 13 + slen;
 
@@ -137,6 +140,9 @@ static bool Version9(uint32_t msize, char *version, uint32_t *retmsize, char *re
 }
 
 bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 *retqid) {
+	enum {Tattach = 104}; // size[4] Tattach tag[2] fid[4] afid[4] uname[s] aname[s] !UNIX n_uname[4]
+	enum {Rattach = 105}; // size[4] Rattach tag[2] qid[13]
+
 	size_t ulen = strlen(uname), alen = strlen(aname);
 	uint32_t size = 4+1+2+4+4+2+ulen+2+alen+4;
 
@@ -149,7 +155,7 @@ bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 
 	memcpy(smlBuf+4+1+2+4+4+2, uname, ulen);
 	WRITE16LE(smlBuf+4+1+2+4+4+2+ulen, alen);
 	memcpy(smlBuf+4+1+2+4+4+2+ulen+2, aname, alen);
-	WRITE32LE(smlBuf+4+1+2+4+4+2+ulen+2+alen, 0);
+	WRITE32LE(smlBuf+4+1+2+4+4+2+ulen+2+alen, 0); // numeric n_uname
 
 	putSmlGetBig();
 
@@ -167,6 +173,9 @@ bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 
 }
 
 bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, uint16_t *retnwqid, struct Qid9 *retqid) {
+	enum {Twalk = 110}; // size[4] Twalk tag[2] fid[4] newfid[4] nwname[2] nwname*(wname[s])
+	enum {Rwalk = 111}; // size[4] Rwalk tag[2] nwqid[2] nwqid*(wqid[13])
+
 	*(bigBuf+4) = Twalk;
 	WRITE16LE(bigBuf+4+1, ONLYTAG);
 	WRITE32LE(bigBuf+4+1+2, fid);
@@ -209,6 +218,9 @@ bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, ui
 }
 
 bool Clunk9(uint32_t fid) {
+	enum {Tclunk = 120}; // size[4] Tclunk tag[2] fid[4]
+	enum {Rclunk = 121}; // size[4] Rclunk tag[2]
+
 	uint32_t size = 4+1+2+4;
 
 	WRITE32LE(smlBuf, size);
@@ -221,131 +233,11 @@ bool Clunk9(uint32_t fid) {
 	return checkErr(bigBuf);
 }
 
-bool Stat9(uint32_t fid, struct Stat9 *retstat) {
-	uint32_t size = 4+1+2+4;
-
-	WRITE32LE(smlBuf, size);
-	*(smlBuf+4) = Tstat;
-	WRITE16LE(smlBuf+4+1, ONLYTAG);
-	WRITE32LE(smlBuf+4+1+2, fid);
-
-	putSmlGetBig();
-
-	if (checkErr(bigBuf)) {
-		return true;
-	}
-
-	// Debug only TODO
-	{
-		uint32_t len=READ32LE(bigBuf);
-		for (int i=0; i<len; i++) {
-			lprintf("%02x", (int)(unsigned char)bigBuf[i]);
-		}
-		lprintf("\n");
-	}
-
-	// Probably worth factoring out a Stat9 deserializer
-	if (retstat != NULL) {
-		char *ptr = bigBuf+17;
-		retstat->qid.type = *ptr; ptr+=1;
-		retstat->qid.version = READ32LE(ptr); ptr+=4;
-		retstat->qid.path = READ64LE(ptr); ptr+=8;
-		retstat->mode = READ32LE(ptr); ptr+=4;
-		retstat->atime = READ32LE(ptr); ptr+=4;
-		retstat->mtime = READ32LE(ptr); ptr+=4;
-		retstat->length = READ64LE(ptr); ptr+=8;
-
-		uint16_t slen, keep;
-		slen = READ16LE(ptr); ptr+=2;
-		keep = slen;
-		if (keep>511) keep=511;
-		memcpy(retstat->name, ptr, keep);
-		retstat->name[keep] = 0;
-		ptr += slen;
-
-		ptr += 2 + READ16LE(ptr); // skip uid
-		ptr += 2 + READ16LE(ptr); // skip gid
-		ptr += 2 + READ16LE(ptr); // skip muid
-
-		if (retstat->qid.type & 2) {
-			slen = READ16LE(ptr); ptr+=2;
-			keep = slen;
-			if (keep>511) keep=511;
-			memcpy(retstat->linktarget, ptr, keep);
-			retstat->linktarget[keep] = 0;
-			ptr += slen;
-		} else {
-			retstat->linktarget[0] = 0;
-		}
-	}
-
-	return false;
-}
-
-bool Open9(uint32_t fid, uint8_t mode, struct Qid9 *retqid, uint32_t *retiounit) {
-	uint32_t size = 4+1+2+4+1;
-
-	WRITE32LE(smlBuf, size);
-	*(smlBuf+4) = Topen;
-	WRITE16LE(smlBuf+4+1, ONLYTAG);
-	WRITE32LE(smlBuf+4+1+2, fid);
-	*(smlBuf+4+1+2+4) = mode;
-
-	putSmlGetBig();
-
-	if (checkErr(bigBuf)) {
-		return true;
-	}
-
-	if (retqid != NULL) {
-		retqid->type = *(bigBuf+7);
-		retqid->version = READ32LE(bigBuf+7+1);
-		retqid->path = READ64LE(bigBuf+7+1+4);
-	}
-
-	if (retiounit != NULL) {
-		*retiounit = READ32LE(bigBuf+20);
-	}
-
-	return false;
-}
-
-bool Create9(uint32_t fid, char *name, uint32_t perm, uint8_t mode, char *extn, struct Qid9 *retqid, uint32_t *retiounit) {
-	size_t nlen = strlen(name), elen = strlen(extn);
-	uint32_t size = 4+1+2+4+2+nlen+4+1+2+elen;
-
-	WRITE32LE(smlBuf, size);
-	*(smlBuf+4) = Tcreate;
-	WRITE16LE(smlBuf+4+1, ONLYTAG);
-	WRITE32LE(smlBuf+4+1+2, fid);
-	WRITE16LE(smlBuf+4+1+2+4, nlen);
-	memcpy(smlBuf+4+1+2+4+2, name, nlen);
-	WRITE32LE(smlBuf+4+1+2+4+2+nlen, perm);
-	*(smlBuf+4+1+2+4+2+nlen+4) = mode;
-	WRITE16LE(smlBuf+4+1+2+4+2+nlen+4+1, elen);
-	memcpy(smlBuf+4+1+2+4+2+nlen+4+1+2, extn, elen);
-
-	putSmlGetBig();
-
-	if (checkErr(bigBuf)) {
-		return true;
-	}
-
-	if (retqid != NULL) {
-		retqid->type = *(bigBuf+7);
-		retqid->version = READ32LE(bigBuf+7+1);
-		retqid->path = READ64LE(bigBuf+7+1+4);
-	}
-
-	if (retiounit != NULL) {
-		*retiounit = READ32LE(bigBuf+20);
-	}
-
-	return false;
-}
-
 // You can leave the data pointer empty, and peruse bigBuf, if you prefer
 bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count) {
+	enum {Tread = 116}; // size[4] Tread tag[2] fid[4] offset[8] count[4]
+	enum {Rread = 117}; // size[4] Rread tag[2] count[4] data[count]
+
 	if (actual_count != NULL) {
 		*actual_count = 0;
 	}
@@ -375,6 +267,8 @@ bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count
 }
 
 static bool checkErr(char *msg) {
+	enum {Rerror = 107}; // size[4] Rerror tag[2] ename[s]
+
 	if (*(msg + 4) != Rerror) {
 		return false;
 	}
