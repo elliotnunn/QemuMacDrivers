@@ -445,15 +445,54 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 	uint32_t cnid = pbDirID(pb);
 	lprintf("base CNID=%#010x\n", cnid);
 
-	bool returnName = false;
+	uint32_t parent = 0;
+
+	char returnName[512] = {};
 
 	if (longform && pb->ioFDirIndex<0) {
 		lprintf("DirID-alone mode\n");
-		returnName = true;
+
+		uint32_t parent = 1;
+		if (cnid != 2) {
+			browse(cnid, "\p::", &parent);
+		}
+
+		if (cnid == 2) {
+			strcpy(returnName, "Elmo");
+		} else {
+			// Iterate over all of the parent directory to find our name
+			int ok;
+			struct Qid9 qid;
+			Walk9(parent, 3, 0, NULL, NULL, NULL);
+			Lopen9(3, O_RDONLY, NULL, NULL);
+			for (ok=Readdir9(parent, &qid, NULL, returnName);
+				ok==0;
+				ok=Readdir9(-1, &qid, NULL, returnName)) {
+				if (qid2cnid(qid) == cnid) break;
+			}
+			Clunk9(3)
+
+			if (ok!=0) return bdNamErr;
+		}
 	} else if (pb->ioFDirIndex > 0) {
 		lprintf("Indexed mode unimp\n");
-		returnName = true;
-		for (;;) {} // TODO
+
+		parent = cnid;
+
+		int ok;
+		struct Qid9 qid;
+		int n=-1;
+
+		Walk9(parent, 3, 0, NULL, NULL, NULL);
+		Lopen9(3, O_RDONLY, NULL, NULL);
+		for (ok=Readdir9(parent, &qid, NULL, returnName);
+			ok==0;
+			ok=Readdir9(-1, &qid, NULL, returnName)) {
+			if (++n)
+		}
+
+
+
 	} else {
 		lprintf("Filename mode\n");
 
@@ -462,7 +501,20 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 	}
 
 	lprintf("Now we have the right CNID but still unimp\n");
-	for (;;) {} // TODO
+
+	if (name[0] != 0) {
+		int nlen = strlen(name);
+		if (nlen > 31) nlen = 31;
+		pb->ioNamePtr[0] = nlen;
+		memcpy(pb->ioNamePtr+1, name, nlen);
+	}
+
+	// Find the name... that's difficult!
+	if (returnName) {
+		if ()
+	}
+
+	memcpy(pb->ioNamePtr, "\x04Elmo", 5);
 
 //
 // 	// -1 meaning file, otherwise meaning count of contained folders
