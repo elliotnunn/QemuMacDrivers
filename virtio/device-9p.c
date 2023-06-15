@@ -1,3 +1,11 @@
+/*
+Treat 9P filesystem as accessible by path only
+(unfortunately wasting the find-by-CNID ability of HFS+/APFS)
+
+Therefore we need this mapping:
+(CNID) <-> (parent's CNID, name)
+*/
+
 #include <Disks.h>
 #include <Files.h>
 #include <FSM.h>
@@ -5,6 +13,7 @@
 #include <DriverServices.h>
 #include <MixedMode.h>
 
+#include "hashtab.h"
 #include "lprintf.h"
 #include "rpc9p.h"
 #include "transport.h"
@@ -31,11 +40,19 @@ static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *
 static uint32_t qid2cnid(struct Qid9 qid);
 static uint32_t pbDirID(void *pb);
 static struct WDCBRec *wdcb(short refnum);
+static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount);
 
 char stack[32*1024];
 short drvRefNum;
 unsigned long callcnt;
 struct Qid9 root;
+uint32_t cnidCtr = 100;
+
+// in the hash table
+struct record {
+	uint32_t parent;
+	char name[];
+};
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -182,9 +199,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	fserr = PBVolumeMount((void *)&pb);
 	lprintf("PBVolumeMount returns %d\n", fserr);
 
-	uint32_t cnid=0;
-	browse(2, "\pElmo:", &cnid);
-
+// 	uint32_t cnid=0;
+// 	browse(2, "\pElmo:", &cnid);
+//
 	Walk9(2, 20, 0, NULL, NULL, NULL);
 	Lopen9(20, O_RDONLY, NULL, NULL);
 	char name[512];
@@ -195,6 +212,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		lprintf("   Child \"%s\" type=%#02x qid=%#x/%#x/%#x \n", name, (unsigned char)kind, (unsigned char)q.type, q.version, (uint32_t)q.path);
 	}
 	lprintf("Result %d\n", ok);
+
+	HTinstall("\x00\x00\x00\x02", 4, "\x00\x00\x00\x01\x80Elmo", 10);
 
 	return noErr;
 }
@@ -435,108 +454,147 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 	return noErr;
 }
 
+// Files:                                   Directories:
+// -->    12    ioCompletion   pointer      -->    12    ioCompletion  pointer
+// <--    16    ioResult       word         <--    16    ioResult      word
+// <->    18    ioNamePtr      pointer      <->    18    ioNamePtr     pointer
+// -->    22    ioVRefNum      word         -->    22    ioVRefNum     word
+// <--    24    ioFRefNum      word         <--    24    ioFRefNum     word
+// -->    28    ioFDirIndex    word         -->    28    ioFDirIndex   word
+// <--    30    ioFlAttrib     byte         <--    30    ioFlAttrib    byte
+// <--    31    ioACUser       byte         access rights for directory only
+// <--    32    ioFlFndrInfo   16 bytes     <--    32    ioDrUsrWds    16 bytes
+// <->    48    ioDirID        long word    <->    48    ioDrDirID     long word
+// <--    52    ioFlStBlk      word         <--    52    ioDrNmFls     word
+// <--    54    ioFlLgLen      long word
+// <--    58    ioFlPyLen      long word
+// <--    62    ioFlRStBlk     word
+// <--    64    ioFlRLgLen     long word
+// <--    68    ioFlRPyLen     long word
+// <--    72    ioFlCrDat      long word    <--    72    ioDrCrDat    long word
+// <--    76    ioFlMdDat      long word    <--    76    ioDrMdDat    long word
+// <--    80    ioFlBkDat      long word    <--    80    ioDrBkDat    long word
+// <--    84    ioFlXFndrInfo  16 bytes     <--    84    ioDrFndrInfo 16 bytes
+// <--    100   ioFlParID      long word    <--    100    ioDrParID   long word
+// <--    104   ioFlClpSiz     long word
+
 static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
+	enum {MYFID = 3, WALKFID = 4};
+
+	// Hack to allocate a struct with room for the flex array member
+	static struct record lookup = {.name={[511]=0}};
+
 	lprintf("GetFile/CatInfo trap=%#04x ioVRefNum=%d ioDirID=%d ioFDirIndex=%d ioName=\"%.*s\"\n",
 		0xffffL & pb->ioTrap, pb->ioVRefNum, pb->ioDirID, pb->ioFDirIndex, pb->ioNamePtr[0], pb->ioNamePtr+1);
 
 	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
 	bool longform = (pb->ioTrap&0x00ff) == 0x0060; // GetCatInfo
 
+	int idx = pb->ioFDirIndex;
+	if (idx<0 && !longform) idx=0; // make named GetFInfo calls behave right
+
 	uint32_t cnid = pbDirID(pb);
-	lprintf("base CNID=%#010x\n", cnid);
 
-	uint32_t parent = 0;
+	// Navigate to pbDirID (or the equivalent WD) in MYFID
+	char **path; uint16_t pathcnt;
+	bool bad = cnidPath(cnid, &path, &pathcnt);
+	if (bad) return fnfErr;
+	bad = Walk9(2, 3, pathcnt, (const char **)path, NULL, NULL);
+	if (bad) fnfErr;
 
-	char returnName[512] = {};
+	if (idx >= 0) {
+		lprintf("Getting child info\n");
 
-	if (longform && pb->ioFDirIndex<0) {
-		lprintf("DirID-alone mode\n");
+		// Read the directory
+		Walk9(MYFID, WALKFID, 0, NULL, NULL, NULL); // duplicate
+		Lopen9(WALKFID, O_RDONLY, NULL, NULL); // iterate
 
-		uint32_t parent = 1;
-		if (cnid != 2) {
-			browse(cnid, "\p::", &parent);
-		}
-
-		if (cnid == 2) {
-			strcpy(returnName, "Elmo");
-		} else {
-			// Iterate over all of the parent directory to find our name
-			int ok;
-			struct Qid9 qid;
-			Walk9(parent, 3, 0, NULL, NULL, NULL);
-			Lopen9(3, O_RDONLY, NULL, NULL);
-			for (ok=Readdir9(parent, &qid, NULL, returnName);
-				ok==0;
-				ok=Readdir9(-1, &qid, NULL, returnName)) {
-				if (qid2cnid(qid) == cnid) break;
-			}
-			Clunk9(3)
-
-			if (ok!=0) return bdNamErr;
-		}
-	} else if (pb->ioFDirIndex > 0) {
-		lprintf("Indexed mode unimp\n");
-
-		parent = cnid;
+		lookup.parent = cnid;
 
 		int ok;
-		struct Qid9 qid;
-		int n=-1;
-
-		Walk9(parent, 3, 0, NULL, NULL, NULL);
-		Lopen9(3, O_RDONLY, NULL, NULL);
-		for (ok=Readdir9(parent, &qid, NULL, returnName);
-			ok==0;
-			ok=Readdir9(-1, &qid, NULL, returnName)) {
-			if (++n)
+		if (idx>0) {
+			int n=0;
+			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
+				if (pb->ioFDirIndex==++n) break;
+			}
+		} else {
+			char name[512];
+			memcpy(name, pb->ioNamePtr+1, *pb->ioNamePtr);
+			name[*pb->ioNamePtr] = 0;
+			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
+				if (!strcmp(lookup.name, name)) break;
+			}
 		}
 
+		Clunk9(WALKFID);
 
+		if (ok!=0) return fnfErr; // doesn't clunk correctly!
+		lprintf("yes!\n");
 
-	} else {
-		lprintf("Filename mode\n");
+		// Create a CNID if not already there
+		uint32_t *found = HTlookup(&lookup, 4+strlen(lookup.name)+1);
+		if (found == NULL) {
+			cnid = ++cnidCtr;
+			HTinstall(&cnid, sizeof(cnid), &lookup, 4+strlen(lookup.name)+1);
+			HTinstall(&lookup, 4+strlen(lookup.name)+1, &cnid, sizeof(cnid));
+		}
 
-		int err = browse(cnid, pb->ioNamePtr, &cnid);
-		if (err) return err;
+		// Walk MYFID to the child
+		const char *component = lookup.name;
+		Walk9(MYFID, MYFID, 1, &component, NULL, NULL);
 	}
 
-	lprintf("Now we have the right CNID but still unimp\n");
+	// MYFID and cnid point to the correct file
+	struct record *detail = HTlookup(&cnid, sizeof(cnid));
 
-	if (name[0] != 0) {
-		int nlen = strlen(name);
-		if (nlen > 31) nlen = 31;
-		pb->ioNamePtr[0] = nlen;
-		memcpy(pb->ioNamePtr+1, name, nlen);
+	// Return the filename
+	if (idx!=0 && pb->ioNamePtr!=NULL) {
+		if (detail == NULL) lprintf("BAD LOOKUP\n");
+		*pb->ioNamePtr = strlen(detail->name);
+		memcpy(pb->ioNamePtr+1, detail->name, strlen(detail->name));
 	}
 
-	// Find the name... that's difficult!
-	if (returnName) {
-		if ()
+	uint64_t size, time;
+	struct Qid9 qid;
+	bad = Getattr9(MYFID, &qid, &size, &time);
+	if (bad) return permErr;
+
+	pb->ioDirID = cnid; // alias ioDrDirID
+	pb->ioFlParID = detail->parent; // alias ioDrDirID
+
+	if (qid.type & 0x80) { // directory
+		int n=0;
+		Lopen9(MYFID, O_RDONLY, NULL, NULL); // iterate
+		while (Readdir9(MYFID, NULL, NULL, NULL) == 0) {
+			n++;
+		}
+
+		pb->ioFlAttrib = 0x10;
+		pb->ioFlFndrInfo = (struct FInfo){}; // alias ioDrUsrWds
+		pb->ioFlStBlk = n; // alias ioDrNmFls
+		pb->ioFlCrDat = 0; // alias ioDrCrDat
+		pb->ioFlMdDat = 0; // alias ioDrMdDat
+		pb->ioFlBkDat = 0; // alias ioDrBkDat
+		pb->ioFlXFndrInfo = (struct FXInfo){0}; // alias ioDrFndrInfo
+	} else { // file
+		pb->ioFlAttrib = 0;
+		pb->ioACUser = 0;
+		pb->ioFlFndrInfo = (struct FInfo){0};
+		pb->ioFlStBlk = 0;
+		pb->ioFlLgLen = 0;
+		pb->ioFlPyLen = 0;
+		pb->ioFlRStBlk = 0;
+		pb->ioFlRLgLen = 0;
+		pb->ioFlRPyLen = 0;
+		pb->ioFlCrDat = 0;
+		pb->ioFlMdDat = 0;
+		pb->ioFlBkDat = 0;
+		pb->ioFlXFndrInfo = (struct FXInfo){0};
+		pb->ioFlClpSiz = 0;
 	}
 
-	memcpy(pb->ioNamePtr, "\x04Elmo", 5);
+	Clunk9(MYFID);
 
-//
-// 	// -1 meaning file, otherwise meaning count of contained folders
-// 	arity := 0
-// 	if !platPathImaginary(path) {
-// 		listing, listErr := readDir(path)
-// 		if listErr == 0 {
-// 			arity = len(listing)
-// 		} else {
-// 			arity = -1
-// 		}
-// 	}
-//
-// 	if returnIOName && ioNamePtr != 0 {
-// 		if path == platRoot {
-// 			writePstring(ioNamePtr, onlyVolName)
-// 		} else {
-// 			mac, _ := macName(platPathBase(path))
-// 			writePstring(ioNamePtr, mac)
-// 		}
-// 	}
-//
 // 	if arity != -1 { // folder
 // 		writeb(pb+30, 1<<4)                // is a directory
 // 		writel(pb+48, uint32(dirID(path))) // ioDrDirID
@@ -561,14 +619,6 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 // 		t := mtimeFile(path)
 // 		writel(pb+72, t) // ioFlCrDat
 // 		writel(pb+76, t) // ioFlMdDat
-// 	}
-//
-// 	if trap&0xff == 0x60 {
-// 		parID := uint32(1) // parent of root
-// 		if path != platRoot {
-// 			parID = uint32(dirID(platPathDir(path)))
-// 		}
-// 		writel(pb+100, parID) // ioFlParID
 // 	}
 }
 
@@ -701,4 +751,37 @@ static struct WDCBRec *wdcb(short refnum) {
 		return (void *)0x68f168f1;
 	}
 	return (struct WDCBRec *)(table + offset);
+}
+
+// Return true if bad
+static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount) {
+	lprintf("CNID %d = \"", cnid);
+
+	*retcount = 0;
+
+	static char *comps[256];
+	int compcnt=0;
+	static char blob[2048];
+	char *blobptr = blob;
+
+	while (cnid != 2) {
+		struct record *rec = HTlookup(&cnid, sizeof(cnid));
+		if (rec == NULL) {
+			lprintf("FAIL\n");
+			return true; // fail
+		}
+
+		cnid = rec->parent;
+
+		comps[sizeof(comps)/sizeof(*comps) - ++compcnt] = blobptr;
+		strcpy(blobptr, rec->name);
+		blobptr += strlen(blobptr)+1;
+
+		lprintf("/%s", rec->name);
+	}
+
+	*retlist = &comps[sizeof(comps)/sizeof(*comps) - compcnt];
+	*retcount = compcnt;
+	lprintf("\"\n");
+	return false;
 }

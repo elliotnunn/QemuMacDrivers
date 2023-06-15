@@ -102,6 +102,9 @@ uint16_t bigCnt;
 
 volatile bool flag;
 
+static uint32_t curreadfid = (uint32_t)NOFID;
+#define INVAL_READDIR() {curreadfid = (uint32_t)NOFID;}
+
 static bool Version9(uint32_t msize, char *version, uint32_t *retmsize, char *retversion);
 static bool checkErr(char *msg);
 static void putSmlGetBig(void);
@@ -168,6 +171,8 @@ bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 
 	enum {Tattach = 104}; // size[4] Tattach tag[2] fid[4] afid[4] uname[s] aname[s] !UNIX n_uname[4]
 	enum {Rattach = 105}; // size[4] Rattach tag[2] qid[13]
 
+	INVAL_READDIR();
+
 	size_t ulen = strlen(uname), alen = strlen(aname);
 	uint32_t size = 4+1+2+4+4+2+ulen+2+alen+4;
 
@@ -200,6 +205,8 @@ bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 
 bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, uint16_t *retnwqid, struct Qid9 *retqid) {
 	enum {Twalk = 110}; // size[4] Twalk tag[2] fid[4] newfid[4] nwname[2] nwname*(wname[s])
 	enum {Rwalk = 111}; // size[4] Rwalk tag[2] nwqid[2] nwqid*(wqid[13])
+
+	INVAL_READDIR();
 
 	*(bigBuf+4) = Twalk;
 	WRITE16LE(bigBuf+4+1, ONLYTAG);
@@ -246,6 +253,8 @@ bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retioun
 	enum {Tlopen = 12}; // size[4] Tlopen tag[2] fid[4] flags[4]
 	enum {Rlopen = 13}; // size[4] Rlopen tag[2] qid[13] iounit[4]
 
+	INVAL_READDIR();
+
 	uint32_t size = 4+1+2+4+4;
 
 	WRITE32LE(smlBuf, size);
@@ -272,29 +281,28 @@ bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retioun
 }
 
 // -1=err, 0=ok, 1=eof
-// use the real fid for the first, then NOFID to iterate
+// global storage invalidated by INVAL_READDIR()
 char Readdir9(uint32_t fid, struct Qid9 *retqid, char *rettype, char retname[512]) {
 	enum {Treaddir = 40}; // size[4] Treaddir tag[2] fid[4] offset[8] count[4]
 	enum {Rreaddir = 41}; // size[4] Rreaddir tag[2] count[4] data[count]
 	// data consists of: qid[13] offset[8] type[1] name[s]
 
 	static uint64_t requestoffset;
-	static uint32_t cursor, count, curfid;
+	static uint32_t cursor, count;
 
-	if (fid!=(uint32_t)NOFID || cursor>=count) {
-		if (fid!=(uint32_t)NOFID) {
-			curfid = fid;
-			requestoffset = 0;
-		}
+	if (fid != curreadfid) {
+		curreadfid = fid;
+		requestoffset = 0;
+		count = 0;
+	}
 
-		cursor = 0;
-
+	if (cursor>=count) {
 		uint32_t size = 4+1+2+4+8+4;
 
 		WRITE32LE(smlBuf, size);
 		*(smlBuf+4) = Treaddir;
 		WRITE16LE(smlBuf+4+1, ONLYTAG);
-		WRITE32LE(smlBuf+4+1+2, curfid);
+		WRITE32LE(smlBuf+4+1+2, curreadfid);
 		WRITE64LE(smlBuf+4+1+2+4, requestoffset);
 		WRITE32LE(smlBuf+4+1+2+4+8, Max9);
 
@@ -304,10 +312,12 @@ char Readdir9(uint32_t fid, struct Qid9 *retqid, char *rettype, char retname[512
 			return -1;
 		}
 
+		cursor = 0;
 		count = READ32LE(bigBuf+7);
-	}
 
-	if (cursor >= count) return 1; // eof
+
+		if (count==0) return 1; // eof
+	}
 
 	char *entry = bigBuf+11+cursor;
 
@@ -344,6 +354,8 @@ bool Getattr9(uint32_t fid, struct Qid9 *retqid, uint64_t *retsize, uint64_t *re
 	                      // atime_nsec[8] mtime_sec[8] mtime_nsec[8]
 	                      // ctime_sec[8] ctime_nsec[8] btime_sec[8]
 	                      // btime_nsec[8] gen[8] data_version[8]
+
+	INVAL_READDIR();
 
 	uint32_t size = 4+1+2+4+8;
 
@@ -382,6 +394,8 @@ bool Clunk9(uint32_t fid) {
 	enum {Tclunk = 120}; // size[4] Tclunk tag[2] fid[4]
 	enum {Rclunk = 121}; // size[4] Rclunk tag[2]
 
+	INVAL_READDIR();
+
 	uint32_t size = 4+1+2+4;
 
 	WRITE32LE(smlBuf, size);
@@ -398,6 +412,8 @@ bool Clunk9(uint32_t fid) {
 bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count) {
 	enum {Tread = 116}; // size[4] Tread tag[2] fid[4] offset[8] count[4]
 	enum {Rread = 117}; // size[4] Rread tag[2] count[4] data[count]
+
+	INVAL_READDIR();
 
 	if (actual_count != NULL) {
 		*actual_count = 0;
