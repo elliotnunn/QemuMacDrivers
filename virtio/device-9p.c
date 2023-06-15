@@ -580,8 +580,10 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 		pb->ioFlStBlk = n; // alias ioDrNmFls
 		pb->ioFlCrDat = 0; // alias ioDrCrDat
 		pb->ioFlMdDat = 0; // alias ioDrMdDat
-		pb->ioFlBkDat = 0; // alias ioDrBkDat
-		pb->ioFlXFndrInfo = (struct FXInfo){0}; // alias ioDrFndrInfo
+		if (longform) {
+			pb->ioFlBkDat = 0; // alias ioDrBkDat
+			pb->ioFlXFndrInfo = (struct FXInfo){0}; // alias ioDrFndrInfo
+		}
 	} else { // file
 		pb->ioFlAttrib = 0;
 		pb->ioACUser = 0;
@@ -594,9 +596,11 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 		pb->ioFlRPyLen = 0;
 		pb->ioFlCrDat = 0;
 		pb->ioFlMdDat = 0;
-		pb->ioFlBkDat = 0;
-		pb->ioFlXFndrInfo = (struct FXInfo){0};
-		pb->ioFlClpSiz = 0;
+		if (longform) {
+			pb->ioFlBkDat = 0;
+			pb->ioFlXFndrInfo = (struct FXInfo){0};
+			pb->ioFlClpSiz = 0;
+		}
 	}
 
 	Clunk9(MYFID);
