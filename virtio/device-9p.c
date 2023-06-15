@@ -570,6 +570,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 
 	pb->ioDirID = cnid; // alias ioDrDirID
 	pb->ioFlParID = detail->parent; // alias ioDrDirID
+	pb->ioFRefNum = 0;
 
 	if (qid.type & 0x80) { // directory
 		int n=-2; // to get rid of . and ..
