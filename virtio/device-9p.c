@@ -214,7 +214,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 	lprintf("Result %d\n", ok);
 
-	HTinstall("\x00\x00\x00\x02", 4, "\x00\x00\x00\x01\x80Elmo", 10);
+	char elmo[9] = {0,0,0,1,'E','l','m','o',0};
+	HTinstall("\x00\x00\x00\x02", 4, elmo, sizeof(elmo));
 
 	return noErr;
 }
