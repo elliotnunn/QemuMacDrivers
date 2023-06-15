@@ -12,6 +12,16 @@ static const char *errname(short err);
 // No need to worry about the "usual" fields like ioTrap
 static const char *minilang(const char *pb, unsigned short selector, int pre) {
 	switch ((long)selector * (pre ? -1 : 1)) {
+	case -0xa007: // GetVolInfo
+		return "ioNamePtr18s ioVRefNum22w ioVolIndex28w";
+	case 0xa007:
+		return "ioNamePtr18s ioVCrDate30l ioVLsBkUp34l ioVAtrb38w ioVNmFls40w ioVDirSt42w ioVBlLn44w ioVNmAlBlks46w ioVAlBlkSiz48l ioVClpSiz52l ioAlBlSt56w ioVNxtFNum58l ioVFrBlk62w";
+	case -0xa00a: // SetCatInfo
+		return "ioNamePtr18s ioVRefNum22w ioFlAttrib30b ioFlFndrInfo32w ioDirID48l ioFlCrDat72l ioFlMdDat76l ioFlBkDat80l ioFlXFndrInfo84l ioFlClpSiz104l";
+	case 0xa00a:
+		return "ioNamePtr18s";
+	case -0xa00f: // MountVol
+		return "ioVRefNum22w";
 	case -0xa00c: // GetFileInfo
 		if (*(short *)(pb+28) <= 0) {
 			return "ioNamePtr18s ioVRefNum22w ioFDirIndex28w";
@@ -25,13 +35,22 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 		} else {
 			return "ioNamePtr18s " FINFOCOMMON;
 		}
+	case -0xa013: // FlushVol
+		return "ioNamePtr18s ioVRefNum22w";
+	case -0x0006: // DirCreate
+		return "ioNamePtr18s ioVRefNum22w ioDirID48l";
+	case 0x0006:
+		return "ioDirID48l";
+	case -0x0007: // GetWDInfo
+		return "ioVRefNum22w ioWDIndex26w ioWDProcID28l";
+	case 0x0007:
+		return "ioNamePtr18s ioVRefNum22w ioWDProcID28l ioWDVRefNum32w";
 	case -0x0009: // GetCatInfo
 		if (*(short *)(pb+28) == 0) {
 			return "ioNamePtr18s ioVRefNum22w ioFDirIndex28w ioDirID48l";
 		} else {
 			return "ioVRefNum22w ioFDirIndex28w ioDirID48l";
 		}
-
 	case 0x0009:
 #		define CATINFOCOMMON "ioFRefNum24w ioFlAttrib30b ioFlFndrInfo32l ioDirID48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l ioFlBkDat80l ioFlXFndrInfo84l ioFlParID100l ioFlClpSiz100l";
 		if (*(short *)(pb+28) == 0) {
@@ -39,6 +58,14 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 		} else {
 			return "ioNamePtr18s " CATINFOCOMMON;
 		}
+	case -0x001b: // MakeFSSpec
+		return "ioNamePtr18s ioVRefNum22w ioDirID48l";
+	case 0x001b:
+		return "ioMisc28l";
+	case -0x0030: // GetVolParms
+		return "ioFileName18l ioVRefNum22w ioReqCount36l";
+	case 0x0030:
+		return "ioBuffer32l ioActCount40l";
 	}
 	return "";
 }
