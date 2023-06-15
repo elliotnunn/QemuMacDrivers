@@ -604,32 +604,6 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 	}
 
 	Clunk9(MYFID);
-
-// 	if arity != -1 { // folder
-// 		writeb(pb+30, 1<<4)                // is a directory
-// 		writel(pb+48, uint32(dirID(path))) // ioDrDirID
-// 		writew(pb+52, uint16(arity))       // ioDrNmFls
-//
-// 		t := mtimeDir(path)
-// 		writel(pb+72, t) // ioFlCrDat
-// 		writel(pb+76, t) // ioFlMdDat
-// 	} else { // file
-// 		fastButInaccurate := ioFDirIndex > 0
-// 		sizeD, finfo := dataForkSizeFinderInfo(path, fastButInaccurate)
-//
-// 		copy(mem[pb+32:], finfo[:])     // ioFlFndrInfo (16b)
-// 		writel(pb+54, sizeD)            // ioFlLgLen
-// 		writel(pb+58, (sizeD+511)&^511) // ioFlPyLen
-//
-// 		sizeR := uint32(len(resourceFork(path)))
-//
-// 		writel(pb+64, sizeR)            // ioFlRLgLen
-// 		writel(pb+68, (sizeR+511)&^511) // ioFlRPyLen
-//
-// 		t := mtimeFile(path)
-// 		writel(pb+72, t) // ioFlCrDat
-// 		writel(pb+76, t) // ioFlMdDat
-// 	}
 }
 
 static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid) {
