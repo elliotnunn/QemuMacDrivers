@@ -539,7 +539,6 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 		Clunk9(WALKFID);
 
 		if (ok!=0) return fnfErr; // doesn't clunk correctly!
-		lprintf("yes!\n");
 
 		// Create a CNID if not already there
 		uint32_t *found = HTlookup(&lookup, 4+strlen(lookup.name)+1);
