@@ -16,12 +16,12 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 		return "ioNamePtr18s ioVRefNum22w ioVolIndex28w";
 	case 0xa007:
 		return "ioNamePtr18s ioVCrDate30l ioVLsBkUp34l ioVAtrb38w ioVNmFls40w ioVDirSt42w ioVBlLn44w ioVNmAlBlks46w ioVAlBlkSiz48l ioVClpSiz52l ioAlBlSt56w ioVNxtFNum58l ioVFrBlk62w";
-	case -0xa00a: // SetCatInfo
-		return "ioNamePtr18s ioVRefNum22w ioFlAttrib30b ioFlFndrInfo32w ioDirID48l ioFlCrDat72l ioFlMdDat76l ioFlBkDat80l ioFlXFndrInfo84l ioFlClpSiz104l";
-	case 0xa00a:
-		return "ioNamePtr18s";
 	case -0xa00f: // MountVol
 		return "ioVRefNum22w";
+	case -0x000a: // SetCatInfo
+		return "ioNamePtr18s ioVRefNum22w ioFlAttrib30b ioFlFndrInfo32w ioDirID48l ioFlCrDat72l ioFlMdDat76l ioFlBkDat80l ioFlXFndrInfo84l ioFlClpSiz104l";
+	case 0x000a:
+		return "ioNamePtr18s";
 	case -0xa00c: // GetFileInfo
 		if (*(short *)(pb+28) <= 0) {
 			return "ioNamePtr18s ioVRefNum22w ioFDirIndex28w";
