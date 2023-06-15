@@ -15,6 +15,7 @@ Therefore we need this mapping:
 
 #include "hashtab.h"
 #include "lprintf.h"
+#include "paramblkprint.h"
 #include "rpc9p.h"
 #include "transport.h"
 #include "virtqueue.h"
@@ -246,7 +247,7 @@ static OSErr CommProc(short message, struct IOParam *pb, void *globals) {
 }
 
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid) {
-	lprintf("## HFSProc selector=%#02x pb=%#08x fsid=%#02x\n", selector, pb, fsid);
+	lprintf("%s", PBPrint(pb, selector, 1));
 
 	callcnt++;
 
@@ -371,14 +372,19 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		/*007f*/ selector==kFSMIterateForks ? NULL :
 		NULL;
 
+	OSErr result;
+
 	if (responder == NULL) {
-		lprintf("## Unimplemented, returning extFSErr\n");
-		return extFSErr;
+		result = extFSErr;
+	} else {
+		result = ((responderPtr)responder)(pb, vcb);
 	}
 
-	OSErr result = ((responderPtr)responder)(pb, vcb);
+	// pb.ioResult for the PBPrint
+	*(short *)((char *)pb + 16) = result;
 
-	lprintf("## Result = %d\n", result);
+	lprintf("%s", PBPrint(pb, selector, 0));
+
 	return result;
 }
 
@@ -405,7 +411,6 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
 
 	err = UTAddNewVCB(22, &pb->ioVRefNum, vcb);
 	if (err) return err;
-	lprintf(".virtio9p: mounted volume ref num %d\n", pb->ioVRefNum);
 
 	PostEvent(diskEvt, 22);
 
@@ -483,9 +488,6 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 
 	// Hack to allocate a struct with room for the flex array member
 	static struct record lookup = {.name={[511]=0}};
-
-	lprintf("GetFile/CatInfo trap=%#04x ioVRefNum=%d ioDirID=%d ioFDirIndex=%d ioName=\"%.*s\"\n",
-		0xffffL & pb->ioTrap, pb->ioVRefNum, pb->ioDirID, pb->ioFDirIndex, pb->ioNamePtr[0], pb->ioNamePtr+1);
 
 	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
 	bool longform = (pb->ioTrap&0x00ff) == 0x0060; // GetCatInfo
@@ -758,7 +760,7 @@ static struct WDCBRec *wdcb(short refnum) {
 
 // Return true if bad
 static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount) {
-	lprintf("CNID %d = \"", cnid);
+	lprintf("cnidPath(%d) = \"", cnid);
 
 	*retcount = 0;
 
