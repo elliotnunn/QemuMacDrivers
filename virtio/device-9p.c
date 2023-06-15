@@ -523,6 +523,8 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 		if (idx>0) {
 			int n=0;
 			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
+				if (!strcmp(lookup.name, ".") || !strcmp(lookup.name, ".."))
+					continue;
 				if (pb->ioFDirIndex==++n) break;
 			}
 		} else {
@@ -571,7 +573,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 	pb->ioFlParID = detail->parent; // alias ioDrDirID
 
 	if (qid.type & 0x80) { // directory
-		int n=0;
+		int n=-2; // to get rid of . and ..
 		Lopen9(MYFID, O_RDONLY, NULL, NULL); // iterate
 		while (Readdir9(MYFID, NULL, NULL, NULL) == 0) {
 			n++;
