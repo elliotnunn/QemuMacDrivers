@@ -1,0 +1,346 @@
+#include <ctype.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "paramblkprint.h"
+
+static const char *minilang(const char *pb, unsigned short selector, int pre);
+static const char *callname(unsigned short selector);
+static const char *errname(short err);
+
+// No need to worry about the "usual" fields like ioTrap
+static const char *minilang(const char *pb, unsigned short selector, int pre) {
+	switch ((long)selector * (pre ? -1 : 1)) {
+	case -0xa00c: // GetFileInfo
+		if (*(short *)(pb+28) <= 0) {
+			return "ioNamePtr18s ioVRefNum22w ioFDirIndex28w";
+		} else {
+			return "ioVRefNum22w ioFDirIndex28w";
+		}
+	case 0xa00c:
+#		define FINFOCOMMON "ioFRefNum24s ioFlAttrib30b ioFlFndrInfo32l ioFlNum48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l";
+		if (*(short *)(pb+28) <= 0) {
+			return FINFOCOMMON;
+		} else {
+			return "ioNamePtr18s " FINFOCOMMON;
+		}
+	case -0x0009: // GetCatInfo
+		if (*(short *)(pb+28) == 0) {
+			return "ioNamePtr18s ioVRefNum22w ioFDirIndex28w ioDirID48l";
+		} else {
+			return "ioVRefNum22w ioFDirIndex28w ioDirID48l";
+		}
+
+	case 0x0009:
+#		define CATINFOCOMMON "ioFRefNum24w ioFlAttrib30b ioFlFndrInfo32l ioDirID48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l ioFlBkDat80l ioFlXFndrInfo84l ioFlParID100l ioFlClpSiz100l";
+		if (*(short *)(pb+28) == 0) {
+			return CATINFOCOMMON;
+		} else {
+			return "ioNamePtr18s " CATINFOCOMMON;
+		}
+	}
+	return "";
+}
+
+char *PBPrint(void *pb, unsigned short selector, int pre) {
+	static char blob[4096];
+	blob[0] = 0;
+	char *str = blob;
+
+#	define SPRINTF(...) str += sprintf(str, __VA_ARGS__)
+#	define NEWLINE() SPRINTF(pre ? "\n--> " : "\n<-- ");
+
+	if (pre) {
+		char name[128] = {};
+		strcpy(name, callname(selector));
+		if ((selector*0x200) == 0 && name[0] == 'H')
+			memmove(name, name+1, 127); // cut off the H
+		for (int i=0; i<sizeof(name); i++)
+			name[i] = toupper(name[i]);
+		SPRINTF("   %s:", name);
+	}
+	NEWLINE();
+
+	char program[1024] = {};
+	char *prog = program;
+	strcpy(program, pre ? "ioTrap6w " : "ioResult16e ");
+	strcat(program, minilang(pb, selector, pre));
+
+	while (*prog) {
+		// Field name string
+		int n=0;
+		while (('a'<=prog[n] && prog[n]<='z') || ('A'<=prog[n] && prog[n]<='Z')) n++;
+		SPRINTF("%-12.*s", n, prog);
+		prog += n;
+
+		// Offset
+		unsigned int offset = 0;
+		while ('0'<=*prog && *prog<='9') {
+			offset = offset*10 + *prog++ - '0';
+		}
+
+		// Get field size and print field
+		switch (*prog++) {
+		case 'l':
+			SPRINTF("%04x%04x",
+				*(unsigned short *)(pb+offset), *(unsigned short *)(pb+offset+2));
+			break;
+		case 'w':
+			SPRINTF("%04x", *(unsigned short *)(pb+offset));
+			break;
+		case 'b':
+			SPRINTF("%02x", *(unsigned char *)(pb+offset));
+			break;
+		case 'e':
+			SPRINTF("%d %s",
+				*(short *)(pb+offset), errname(*(short *)(pb+offset)));
+			break;
+		case 's':
+			{
+				unsigned char *pstring = *(unsigned char **)((char *)pb+offset);
+				SPRINTF("%08x", (uintptr_t)pstring);
+				if (pstring && (uintptr_t)pstring<*(uintptr_t *)0x39c) // check MemTop!
+					SPRINTF(" \"%.*s\"", pstring[0], pstring+1);
+			}
+			break;
+		default:
+			SPRINTF("unimplemented field");
+			break;
+		}
+		NEWLINE();
+
+		while (*prog == ' ') prog++;
+	}
+
+	// Strip off all but the last newline
+	while (str[-1] != '\n') {
+		str[-1] = 0;
+		str--;
+	}
+
+	// Strip off the first newline
+	str = blob;
+	while (str[0] == '\n') str++;
+	return str;
+}
+
+static const char *callname(unsigned short selector) {
+	switch (selector & 0xf0ff) {
+		case 0xa000: return "HOpen";
+		case 0xa001: return "Close";
+		case 0xa002: return "Read";
+		case 0xa003: return "Write";
+		case 0xa007: return "HGetVolInfo";
+		case 0xa008: return "HCreate";
+		case 0xa009: return "HDelete";
+		case 0xa00a: return "HOpenRF";
+		case 0xa00b: return "HRename";
+		case 0xa00c: return "HGetFileInfo";
+		case 0xa00d: return "HSetFileInfo";
+		case 0xa00e: return "UnmountVol";
+		case 0xa00f: return "MountVol";
+		case 0xa010: return "Allocate";
+		case 0xa011: return "GetEOF";
+		case 0xa012: return "SetEOF";
+		case 0xa013: return "FlushVol";
+		case 0xa014: return "HGetVol";
+		case 0xa015: return "HSetVol";
+		case 0xa017: return "Eject";
+		case 0xa018: return "GetFPos";
+		case 0xa035: return "Offline";
+		case 0xa041: return "SetFilLock";
+		case 0xa042: return "RstFilLock";
+		case 0xa043: return "SetFilType";
+		case 0xa044: return "SetFPos";
+		case 0xa045: return "FlushFile";
+		case 0x0001: return "OpenWD";
+		case 0x0002: return "CloseWD";
+		case 0x0005: return "CatMove";
+		case 0x0006: return "DirCreate";
+		case 0x0007: return "GetWDInfo";
+		case 0x0008: return "GetFCBInfo";
+		case 0x0009: return "GetCatInfo";
+		case 0x000a: return "SetCatInfo";
+		case 0x000b: return "SetVolInfo";
+		case 0x0010: return "LockRng";
+		case 0x0011: return "UnlockRng";
+		case 0x0012: return "XGetVolInfo";
+		case 0x0014: return "CreateFileIDRef";
+		case 0x0015: return "DeleteFileIDRef";
+		case 0x0016: return "ResolveFileIDRef";
+		case 0x0017: return "ExchangeFiles";
+		case 0x0018: return "CatSearch";
+		case 0x001a: return "OpenDF";
+		case 0x001b: return "MakeFSSpec";
+		case 0x0020: return "DTGetPath";
+		case 0x0021: return "DTCloseDown";
+		case 0x0022: return "DTAddIcon";
+		case 0x0023: return "DTGetIcon";
+		case 0x0024: return "DTGetIconInfo";
+		case 0x0025: return "DTAddAPPL";
+		case 0x0026: return "DTRemoveAPPL";
+		case 0x0027: return "DTGetAPPL";
+		case 0x0028: return "DTSetComment";
+		case 0x0029: return "DTRemoveComment";
+		case 0x002a: return "DTGetComment";
+		case 0x002b: return "DTFlush";
+		case 0x002c: return "DTReset";
+		case 0x002d: return "DTGetInfo";
+		case 0x002e: return "DTOpenInform";
+		case 0x002f: return "DTDelete";
+		case 0x0030: return "GetVolParms";
+		case 0x0031: return "GetLogInInfo";
+		case 0x0032: return "GetDirAccess";
+		case 0x0033: return "SetDirAccess";
+		case 0x0034: return "MapID";
+		case 0x0035: return "MapName";
+		case 0x0036: return "CopyFile";
+		case 0x0037: return "MoveRename";
+		case 0x0038: return "OpenDeny";
+		case 0x0039: return "OpenRFDeny";
+		case 0x003a: return "GetXCatInfo";
+		case 0x003f: return "GetVolMountInfoSize";
+		case 0x0040: return "GetVolMountInfo";
+		case 0x0041: return "VolumeMount";
+		case 0x0042: return "Share";
+		case 0x0043: return "UnShare";
+		case 0x0044: return "GetUGEntry";
+		case 0x0060: return "GetForeignPrivs";
+		case 0x0061: return "SetForeignPrivs";
+		case 0x001d: return "GetVolumeInfo";
+		case 0x001e: return "SetVolumeInfo";
+		case 0x0051: return "ReadFork";
+		case 0x0052: return "WriteFork";
+		case 0x0053: return "GetForkPosition";
+		case 0x0054: return "SetForkPosition";
+		case 0x0055: return "GetForkSize";
+		case 0x0056: return "SetForkSize";
+		case 0x0057: return "AllocateFork";
+		case 0x0058: return "FlushFork";
+		case 0x0059: return "CloseFork";
+		case 0x005a: return "GetForkCBInfo";
+		case 0x005b: return "CloseIterator";
+		case 0x005c: return "GetCatalogInfoBulk";
+		case 0x005d: return "CatalogSearch";
+		case 0x006e: return "MakeFSRef";
+		case 0x0070: return "CreateFileUnicode";
+		case 0x0071: return "CreateDirUnicode";
+		case 0x0072: return "DeleteObject";
+		case 0x0073: return "MoveObject";
+		case 0x0074: return "RenameUnicode";
+		case 0x0075: return "ExchangeObjects";
+		case 0x0076: return "GetCatalogInfo";
+		case 0x0077: return "SetCatalogInfo";
+		case 0x0078: return "OpenIterator";
+		case 0x0079: return "OpenFork";
+		case 0x007a: return "MakeFSRefUnicode";
+		case 0x007c: return "CompareFSRefs";
+		case 0x007d: return "CreateFork";
+		case 0x007e: return "DeleteFork";
+		case 0x007f: return "IterateForks";
+		default: return "(Unknown)";
+	}
+}
+
+static const char *errname(short err) {
+	switch (err) {
+		case 0: return "noErr";
+		case -1: return "qErr";
+		case -2: return "vTypErr";
+		case -3: return "corErr";
+		case -4: return "unimpErr";
+		case -5: return "SlpTypeErr";
+		case -17: return "controlErr";
+		case -18: return "statusErr";
+		case -19: return "readErr";
+		case -20: return "writErr";
+		case -21: return "badUnitErr";
+		case -22: return "unitEmptyErr";
+		case -23: return "openErr";
+		case -24: return "closErr";
+		case -25: return "dRemovErr";
+		case -26: return "dInstErr";
+		case -27: return "abortErr";
+		case -28: return "notOpenErr";
+		case -29: return "unitTblFullErr";
+		case -30: return "dceExtErr";
+		case -33: return "dirFulErr";
+		case -34: return "dskFulErr";
+		case -35: return "nsvErr";
+		case -36: return "ioErr";
+		case -37: return "bdNamErr";
+		case -38: return "fnOpnErr";
+		case -39: return "eofErr";
+		case -40: return "posErr";
+		case -41: return "mFulErr";
+		case -42: return "tmfoErr";
+		case -43: return "fnfErr";
+		case -44: return "wPrErr";
+		case -45: return "fLckdErr";
+		case -46: return "vLckdErr";
+		case -47: return "fBsyErr";
+		case -48: return "dupFNErr";
+		case -49: return "opWrErr";
+		case -50: return "paramErr";
+		case -51: return "rfNumErr";
+		case -52: return "gfpErr";
+		case -53: return "volOffLinErr";
+		case -54: return "permErr";
+		case -55: return "volOnLinErr";
+		case -56: return "nsDrvErr";
+		case -57: return "noMacDskErr";
+		case -58: return "extFSErr";
+		case -59: return "fsRnErr";
+		case -60: return "badMDBErr";
+		case -61: return "wrPermErr";
+		case -64: return "noDriveErr";
+		case -65: return "offLinErr";
+		case -66: return "noNybErr";
+		case -67: return "noAdrMkErr";
+		case -68: return "dataVerErr";
+		case -69: return "badCksmErr";
+		case -70: return "badBtSlpErr";
+		case -71: return "noDtaMkErr";
+		case -75: return "cantStepErr";
+		case -76: return "tk0BadErr";
+		case -77: return "initIWMErr";
+		case -78: return "twoSideErr";
+		case -79: return "spdAdjErr";
+		case -80: return "seekErr";
+		case -81: return "sectNFErr";
+		case -82: return "fmt1Err";
+		case -83: return "fmt2Err";
+		case -84: return "verErr";
+		case -85: return "clkRdErr";
+		case -86: return "clkWrErr";
+		case -87: return "prWrErr";
+		case -88: return "prInitErr";
+		case -89: return "rcvrErr";
+		case -91: return "ddpSktErr";
+		case -92: return "ddpLenErr";
+		case -93: return "noBridgeErr";
+		case -94: return "lapProtErr";
+		case -99: return "memROZErr";
+		case -100: return "noScrapErr";
+		case -102: return "noTypeErr";
+		case -108: return "memFullErr";
+		case -109: return "nilHandleErr";
+		case -110: return "memAdrErr";
+		case -111: return "memWZErr";
+		case -112: return "memPurErr";
+		case -113: return "memAZErr";
+		case -114: return "memPCErr";
+		case -115: return "memBCErr";
+		case -116: return "memSCErr";
+		case -117: return "memLockedErr";
+		case -120: return "dirNFErr";
+		case -121: return "tmwdoErr";
+		case -122: return "badMovErr";
+		case -123: return "wrgVolTypErr";
+		case -124: return "volGoneErr";
+		case -125: return "updPixMemErr";
+		case -128: return "userCanceledErr";
+		default: return "(unknown)";
+	}
+}
