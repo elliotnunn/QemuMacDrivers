@@ -495,11 +495,14 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 
 	uint32_t cnid = pbDirID(pb);
 
+	// Preemptively clunk (TODO remove need)
+	Clunk9(MYFID);
+
 	// Navigate to pbDirID (or the equivalent WD) in MYFID
 	char **path; uint16_t pathcnt;
 	bool bad = cnidPath(cnid, &path, &pathcnt);
 	if (bad) return fnfErr;
-	bad = Walk9(2, 3, pathcnt, (const char **)path, NULL, NULL);
+	bad = Walk9(2, MYFID, pathcnt, (const char **)path, NULL, NULL);
 	if (bad) fnfErr;
 
 	if (idx >= 0) {
