@@ -8,6 +8,8 @@ TODO: make opportunistically resizable (will need SysTask time hook)
 
 #include "hashtab.h"
 
+#include "lprintf.h"
+
 struct entry {
 	struct entry *next;
 	void *key;
@@ -23,6 +25,11 @@ char *bump = blob;
 static unsigned long hash(void *key, short klen);
 
 void HTinstall(void *key, short klen, void *val, short vlen) {
+	if (klen == 4)
+		lprintf("HTInstall %08x -> %08x.%s\n", *(unsigned long *)key, *(unsigned long *)val, (char *)val+4);
+	else
+		lprintf("HTInstall %08x.%s -> %08x\n", *(unsigned long *)key, (char *)key+4, *(unsigned long *)val);
+
 	struct entry **root = &table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
 
 	for (struct entry *e=*root; e!=NULL; e=e->next) {
@@ -65,11 +72,22 @@ void HTinstall(void *key, short klen, void *val, short vlen) {
 void *HTlookup(void *key, short klen) {
 	struct entry *root = table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
 
+	if (klen == 4)
+		lprintf("HTLookup %08x -> ", *(unsigned long *)key);
+	else
+		lprintf("HTLookup %08x.%s -> ", *(unsigned long *)key, (char *)key+4);
+
 	for (struct entry *e=root; e!=NULL; e=e->next) {
 		if (e->klen == klen && !memcmp(e->key, key, klen)) {
+			if (klen == 4)
+				lprintf("%08x.%s\n", *(unsigned long *)e->val, (char *)e->val+4);
+			else
+				lprintf("%08x\n", *(unsigned long *)e->val);
 			return e->val;
 		}
 	}
+
+	lprintf("not found\n");
 
 	return NULL;
 }
