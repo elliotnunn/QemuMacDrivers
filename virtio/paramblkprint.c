@@ -19,7 +19,7 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 	case -0xa00f: // MountVol
 		return "ioVRefNum22w";
 	case -0x000a: // SetCatInfo
-		return "ioNamePtr18s ioVRefNum22w ioFlAttrib30b ioFlFndrInfo32w ioDirID48l ioFlCrDat72l ioFlMdDat76l ioFlBkDat80l ioFlXFndrInfo84l ioFlClpSiz104l";
+		return "ioNamePtr18s ioVRefNum22w ioFlAttrib30b ioFlFndrInfo32l ioDirID48l ioFlCrDat72l ioFlMdDat76l ioFlBkDat80l ioFlXFndrInfo84l ioFlClpSiz104l";
 	case 0x000a:
 		return "ioNamePtr18s";
 	case -0xa00c: // GetFileInfo
