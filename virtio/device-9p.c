@@ -427,9 +427,11 @@ static OSErr MyFlushVol(void) {
 }
 
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
-	if (pb->ioNamePtr) {
+	if (pb->ioNamePtr!=NULL && pb->ioVolIndex==0) {
 		memcpy(pb->ioNamePtr, "\x04Elmo", 5);
 	}
+
+	pb->ioVRefNum = -2;
 
 	pb->ioVCrDate = 0;
 	pb->ioVLsMod = 0;
@@ -437,12 +439,12 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 	pb->ioVNmFls = 0;
 	pb->ioVBitMap = 0;
 	pb->ioAllocPtr = 0;
-	pb->ioVNmAlBlks = 0xffff;
+	pb->ioVNmAlBlks = 31744;
 	pb->ioVAlBlkSiz = 512;
 	pb->ioVClpSiz = 512;
 	pb->ioAlBlSt = 0;
 	pb->ioVNxtCNID = 100;
-	pb->ioVFrBlk = 0xffff;
+	pb->ioVFrBlk = 31744;
 
 	if (pb->ioTrap & 0x200) {
 		pb->ioVSigWord = 0x4244; // same as HFS
