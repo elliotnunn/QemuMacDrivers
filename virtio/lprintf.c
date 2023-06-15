@@ -10,11 +10,11 @@ int lprintf_enable;
 void lprintf(const char *fmt, ...) {
 	if (!lprintf_enable) return;
 
-	static char buf[256];
+	static char buf[4096];
 	va_list aptr;
 
 	va_start(aptr, fmt);
-	vsprintf(buf, fmt, aptr);
+	vsnprintf(buf, sizeof(buf), fmt, aptr);
 	va_end(aptr);
 
 	// Convert \r and \n to \r\n
