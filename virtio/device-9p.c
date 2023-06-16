@@ -11,6 +11,7 @@ Therefore we need this mapping:
 #include <FSM.h>
 #include <Gestalt.h>
 #include <DriverServices.h>
+#include <Memory.h>
 #include <MixedMode.h>
 
 #include "hashtab.h"
@@ -60,6 +61,7 @@ short drvRefNum;
 unsigned long callcnt;
 struct Qid9 root;
 uint32_t cnidCtr = 100;
+static Handle finderwin;
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -208,6 +210,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 	char elmo[9] = {0,0,0,1,'E','l','m','o',0};
 	HTinstall("\x00\x00\x00\x02", 4, elmo, sizeof(elmo));
 
+	finderwin = NewHandleSysClear(2);
+
 	return noErr;
 }
 
@@ -336,7 +340,7 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 // <--    40    ioActCount    long    length of vol parms data
 
 static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb) {
-	static const struct GetVolParmsInfoBuffer buf = {
+	struct GetVolParmsInfoBuffer buf = {
 		.vMVersion = 1, // goes up to version 4
 		.vMAttrib = 0
 			| (1<<bNoMiniFndr)
@@ -345,8 +349,9 @@ static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb) {
 			| (1<<bNoBootBlks)
 			| (1<<bHasExtFSVol)
 			| (1<<bHasFileIDs)
+			| (1<<bLocalWList)
 			,
-		.vMLocalHand = NULL, // bLocalWList indicates this is a real handle
+		.vMLocalHand = finderwin,
 		.vMServerAdr = 0, // might be used for uniqueness checking -- ?set uniq
 	};
 
