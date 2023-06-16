@@ -54,6 +54,7 @@ static uint32_t qid2cnid(struct Qid9 qid);
 static uint32_t pbDirID(void *pb);
 static struct WDCBRec *wdcb(short refnum);
 static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount);
+static void cnidPrint(uint32_t cnid);
 static struct handler handler(unsigned short selector);
 
 char stack[32*1024];
@@ -419,7 +420,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 
 		int ok;
 		if (idx>0) {
-			lprintf("--> indexed file mode\n");
+			lprintf("   GCI indexed mode\n");
 			int n=0;
 			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
 				if (!strcmp(lookup.name, ".") || !strcmp(lookup.name, ".."))
@@ -427,7 +428,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 				if (pb->ioFDirIndex==++n) break;
 			}
 		} else {
-			lprintf("--> named file mode\n");
+			lprintf("   GCI named mode\n");
 			char name[512];
 			memcpy(name, pb->ioNamePtr+1, *pb->ioNamePtr);
 			name[*pb->ioNamePtr] = 0;
@@ -453,6 +454,13 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 		// Walk MYFID to the child
 		const char *component = lookup.name;
 		Walk9(MYFID, MYFID, 1, &component, NULL, NULL);
+	} else {
+		lprintf("   GCI ID mode\n");
+	}
+
+	// Here's some tricky debugging
+	if (lprintf_enable) {
+		lprintf("   GCI found "); cnidPrint(cnid); lprintf("\n");
 	}
 
 	// MYFID and cnid point to the correct file
@@ -675,6 +683,21 @@ static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount) {
 	*retcount = compcnt;
 // 	lprintf("\"\n");
 	return false;
+}
+
+static void cnidPrint(uint32_t cnid) {
+	char **path; uint16_t pathcnt;
+
+	bool bad = cnidPath(cnid, &path, &pathcnt);
+
+	if (bad) {
+		lprintf("bad");
+		return;
+	}
+
+	for (uint32_t i=0; i<pathcnt; i++) {
+		lprintf("/%s", path[i]);
+	}
 }
 
 // This makes it easy to have a selector return noErr without a function
