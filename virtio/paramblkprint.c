@@ -19,7 +19,7 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 	case -0xa00f: // MountVol
 		return "ioVRefNum22w";
 	case -0x000a: // SetCatInfo
-		return "ioNamePtr18s ioVRefNum22w ioFlAttrib30b ioFlFndrInfo32l ioDirID48l ioFlCrDat72l ioFlMdDat76l ioFlBkDat80l ioFlXFndrInfo84l ioFlClpSiz104l";
+		return "ioNamePtr18s ioVRefNum22w ioFlAttrib30b ioFlFndrInfo32x ioDirID48l ioFlCrDat72l ioFlMdDat76l ioFlBkDat80l ioFlXFndrInfo84x ioFlClpSiz104l";
 	case 0x000a:
 		return "ioNamePtr18s";
 	case -0xa00c: // GetFileInfo
@@ -29,7 +29,7 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 			return "ioVRefNum22w ioFDirIndex28w";
 		}
 	case 0xa00c:
-#		define FINFOCOMMON "ioFRefNum24s ioFlAttrib30b ioFlFndrInfo32l ioFlNum48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l";
+#		define FINFOCOMMON "ioFRefNum24s ioFlAttrib30b ioFlFndrInfo32x ioFlNum48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l";
 		if (*(short *)(pb+28) <= 0) {
 			return FINFOCOMMON;
 		} else {
@@ -52,7 +52,7 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 			return "ioVRefNum22w ioFDirIndex28w ioDirID48l";
 		}
 	case 0x0009:
-#		define CATINFOCOMMON "ioFRefNum24w ioFlAttrib30b ioFlFndrInfo32l ioDirID48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l ioFlBkDat80l ioFlXFndrInfo84l ioFlParID100l ioFlClpSiz100l";
+#		define CATINFOCOMMON "ioFRefNum24w ioFlAttrib30b ioFlFndrInfo32x ioDirID48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l ioFlBkDat80l ioFlXFndrInfo84x ioFlParID100l ioFlClpSiz100l";
 		if (*(short *)(pb+28) == 0) {
 			return CATINFOCOMMON;
 		} else {
@@ -109,6 +109,9 @@ char *PBPrint(void *pb, unsigned short selector, int pre) {
 
 		// Get field size and print field
 		switch (*prog++) {
+		case 'x':
+			for (int i=0; i<16; i+=2) SPRINTF("%04x ", *(unsigned short *)(pb+offset+i));
+			break;
 		case 'l':
 			SPRINTF("%04x%04x",
 				*(unsigned short *)(pb+offset), *(unsigned short *)(pb+offset+2));
