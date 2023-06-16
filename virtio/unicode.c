@@ -584,7 +584,7 @@ void mr31name(unsigned char *roman, char *utf8) {
 		if (dest > roman+32-5) dest = roman+32-5;
 
 		char append[] = "#9999";
-		sprintf(append+1, "%04X", hash);
+		sprintf(append+1, "%04x", hash);
 		memcpy(dest, append, 5);
 		dest += 5;
 	}
