@@ -283,7 +283,8 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
 	vcb->vcbClpSiz = 512;
 	vcb->vcbNxtCNID = 100;
 	vcb->vcbFreeBks = 0xffff;
-	memcpy(vcb->vcbVN, "\x04Elmo", 5);
+	char n[] = {4, 'E', 'l', 'm', 'o'};
+	memcpy(vcb->vcbVN, n, 5);
 	vcb->vcbFSID = CREATOR & 0xffff;
 	vcb->vcbFilCnt = 1;
 	vcb->vcbDirCnt = 1;
