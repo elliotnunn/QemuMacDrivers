@@ -19,6 +19,7 @@ Therefore we need this mapping:
 #include "paramblkprint.h"
 #include "rpc9p.h"
 #include "transport.h"
+#include "unicode.h"
 #include "virtqueue.h"
 
 #include <stdbool.h> // leave till last, conflicts with Universal Interfaces
@@ -430,11 +431,10 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 			}
 		} else {
 			lprintf("   GCI named mode\n");
-			char name[512];
-			memcpy(name, pb->ioNamePtr+1, *pb->ioNamePtr);
-			name[*pb->ioNamePtr] = 0;
 			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
-				if (!strcmp(lookup.name, name)) break;
+				unsigned char roman[32];
+				mr31name(roman, lookup.name);
+				if (!memcmp(pb->ioNamePtr, roman, roman[0]+1)) break;
 			}
 		}
 
@@ -470,8 +470,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 	// Return the filename
 	if (idx!=0 && pb->ioNamePtr!=NULL) {
 		if (detail == NULL) lprintf("BAD LOOKUP\n");
-		*pb->ioNamePtr = strlen(detail->name);
-		memcpy(pb->ioNamePtr+1, detail->name, strlen(detail->name));
+		mr31name(pb->ioNamePtr, detail->name);
 	}
 
 	uint64_t size, time;
