@@ -434,7 +434,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
 				unsigned char roman[32];
 				mr31name(roman, lookup.name);
-				if (!memcmp(pb->ioNamePtr, roman, roman[0]+1)) break;
+				if (RelString(pb->ioNamePtr, roman, 0, 1) == 0) break;
 			}
 		}
 
