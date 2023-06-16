@@ -688,16 +688,18 @@ static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount) {
 static void cnidPrint(uint32_t cnid) {
 	char **path; uint16_t pathcnt;
 
-	bool bad = cnidPath(cnid, &path, &pathcnt);
+	while (cnid != 2) {
+		struct record *rec = HTlookup(&cnid, sizeof(cnid));
+		if (rec == NULL) {
+			lprintf("(DANGLING)");
+			return;
+		}
 
-	if (bad) {
-		lprintf("bad");
-		return;
-	}
+		lprintf("%s<-", rec->name);
 
-	for (uint32_t i=0; i<pathcnt; i++) {
-		lprintf("/%s", path[i]);
+		cnid = rec->parent;
 	}
+	lprintf("(root)");
 }
 
 // This makes it easy to have a selector return noErr without a function
