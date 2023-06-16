@@ -624,6 +624,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 	}
 
 	Clunk9(MYFID);
+	return noErr;
 }
 
 static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid) {
