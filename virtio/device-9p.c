@@ -36,6 +36,7 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
 static OSErr MyMountVol(struct VolumeParam *pb, struct VCB *vcb);
 static OSErr MyFlushVol(void);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
+static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb);
 static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid);
 static uint32_t qid2cnid(struct Qid9 qid);
@@ -321,7 +322,7 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		/*002d*/ selector==kFSMDTGetInfo ? NULL :
 		/*002e*/ selector==kFSMDTOpenInform ? NULL :
 		/*002f*/ selector==kFSMDTDelete ? NULL :
-		/*0030*/ selector==kFSMGetVolParms ? NULL :
+		/*0030*/ selector==kFSMGetVolParms ? MyGetVolParms :
 		/*0031*/ selector==kFSMGetLogInInfo ? NULL :
 		/*0032*/ selector==kFSMGetDirAccess ? NULL :
 		/*0033*/ selector==kFSMSetDirAccess ? NULL :
@@ -459,6 +460,36 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 		memset(pb->ioVFndrInfo, 0, sizeof (pb->ioVFndrInfo));
 	}
 
+	return noErr;
+}
+
+// -->    12    ioCompletion  long    optional completion routine ptr
+// <--    16    ioResult      word    error result code
+// -->    18    ioFileName    long    volume name specifier
+// -->    22    ioVRefNum     word    volume refNum
+// <--    32    ioBuffer      long    ptr to vol parms data
+// -->    36    ioReqCount    long    size of buffer area
+// <--    40    ioActCount    long    length of vol parms data
+
+static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb) {
+	static const struct GetVolParmsInfoBuffer buf = {
+		.vMVersion = 1, // goes up to version 4
+		.vMAttrib = 0
+			| (1<<bNoMiniFndr)
+			| (1<<bNoLclSync)
+			| (1<<bTrshOffLine)
+			| (1<<bNoBootBlks)
+			| (1<<bHasExtFSVol)
+			| (1<<bHasFileIDs)
+			,
+		.vMLocalHand = NULL, // bLocalWList indicates this is a real handle
+		.vMServerAdr = 0, // might be used for uniqueness checking -- ?set uniq
+	};
+
+	short s = pb->ioReqCount;
+	if (s > 14) s = 14; // not the whole struct, just the v1 part
+	memcpy(pb->ioBuffer, &buf, s);
+	pb->ioActCount = s;
 	return noErr;
 }
 

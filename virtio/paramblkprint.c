@@ -63,9 +63,9 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 	case 0x001b:
 		return "ioMisc28l";
 	case -0x0030: // GetVolParms
-		return "ioFileName18l ioVRefNum22w ioReqCount36l";
+		return "ioFileName18l ioVRefNum22w ioBuffer32l ioReqCount36l";
 	case 0x0030:
-		return "ioBuffer32l ioActCount40l";
+		return "ioActCount40l";
 	}
 	return "";
 }
