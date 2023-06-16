@@ -446,6 +446,8 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 			cnid = ++cnidCtr;
 			HTinstall(&cnid, sizeof(cnid), &lookup, 4+strlen(lookup.name)+1);
 			HTinstall(&lookup, 4+strlen(lookup.name)+1, &cnid, sizeof(cnid));
+		} else {
+			cnid = *found;
 		}
 
 		// Walk MYFID to the child
