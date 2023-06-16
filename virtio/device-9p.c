@@ -199,21 +199,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 		.ioBuffer = (void *)&vmi,
 	};
 	fserr = PBVolumeMount((void *)&pb);
-	lprintf("PBVolumeMount returns %d\n", fserr);
-
-// 	uint32_t cnid=0;
-// 	browse(2, "\pElmo:", &cnid);
-//
-	Walk9(2, 20, 0, NULL, NULL, NULL);
-	Lopen9(20, O_RDONLY, NULL, NULL);
-	char name[512];
-	struct Qid9 q;
-	char kind;
-	char ok;
-	for (ok=Readdir9(20, &q, &kind, name); ok==0; ok=Readdir9(-1, &q, &kind, name)) {
-		lprintf("   Child \"%s\" type=%#02x qid=%#x/%#x/%#x \n", name, (unsigned char)kind, (unsigned char)q.type, q.version, (uint32_t)q.path);
-	}
-	lprintf("Result %d\n", ok);
 
 	char elmo[9] = {0,0,0,1,'E','l','m','o',0};
 	HTinstall("\x00\x00\x00\x02", 4, elmo, sizeof(elmo));
@@ -542,8 +527,6 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 	if (bad) fnfErr;
 
 	if (idx >= 0) {
-		lprintf("Getting child info\n");
-
 		// Read the directory
 		Walk9(MYFID, WALKFID, 0, NULL, NULL, NULL); // duplicate
 		Lopen9(WALKFID, O_RDONLY, NULL, NULL); // iterate
@@ -552,6 +535,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 
 		int ok;
 		if (idx>0) {
+			lprintf("--> indexed file mode\n");
 			int n=0;
 			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
 				if (!strcmp(lookup.name, ".") || !strcmp(lookup.name, ".."))
@@ -559,6 +543,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 				if (pb->ioFDirIndex==++n) break;
 			}
 		} else {
+			lprintf("--> named file mode\n");
 			char name[512];
 			memcpy(name, pb->ioNamePtr+1, *pb->ioNamePtr);
 			name[*pb->ioNamePtr] = 0;
@@ -774,7 +759,7 @@ static struct WDCBRec *wdcb(short refnum) {
 
 // Return true if bad
 static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount) {
-	lprintf("cnidPath(%d) = \"", cnid);
+// 	lprintf("cnidPath(%d) = \"", cnid);
 
 	*retcount = 0;
 
@@ -786,7 +771,7 @@ static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount) {
 	while (cnid != 2) {
 		struct record *rec = HTlookup(&cnid, sizeof(cnid));
 		if (rec == NULL) {
-			lprintf("FAIL\n");
+// 			lprintf("FAIL\n");
 			return true; // fail
 		}
 
@@ -796,11 +781,11 @@ static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount) {
 		strcpy(blobptr, rec->name);
 		blobptr += strlen(blobptr)+1;
 
-		lprintf("/%s", rec->name);
+// 		lprintf("/%s", rec->name);
 	}
 
 	*retlist = &comps[sizeof(comps)/sizeof(*comps) - compcnt];
 	*retcount = compcnt;
-	lprintf("\"\n");
+// 	lprintf("\"\n");
 	return false;
 }
