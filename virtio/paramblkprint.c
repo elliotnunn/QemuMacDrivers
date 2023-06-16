@@ -76,7 +76,7 @@ char *PBPrint(void *pb, unsigned short selector, int pre) {
 	char *str = blob;
 
 #	define SPRINTF(...) str += sprintf(str, __VA_ARGS__)
-#	define NEWLINE() SPRINTF(pre ? "\n--> " : "\n<-- ");
+#	define NEWLINE() SPRINTF(pre ? "\n -> " : "\n<-  ");
 
 	if (pre) {
 		char name[128] = {};
