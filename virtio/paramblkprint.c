@@ -11,11 +11,11 @@ static const char *errname(short err);
 
 // No need to worry about the "usual" fields like ioTrap
 static const char *minilang(const char *pb, unsigned short selector, int pre) {
-	switch ((long)selector * (pre ? -1 : 1)) {
+	switch (((long)selector & 0xf0ff) * (pre ? -1 : 1)) {
 	case -0xa007: // GetVolInfo
 		return "ioNamePtr18s ioVRefNum22w ioVolIndex28w";
 	case 0xa007:
-		return "ioNamePtr18s ioVCrDate30l ioVLsBkUp34l ioVAtrb38w ioVNmFls40w ioVDirSt42w ioVBlLn44w ioVNmAlBlks46w ioVAlBlkSiz48l ioVClpSiz52l ioAlBlSt56w ioVNxtFNum58l ioVFrBlk62w";
+		return "ioNamePtr18s ioVCrDate30l ioVLsBkUp34l ioVAtrb38w ioVNmFls40w ioVDirSt42w ioVBlLn44w ioVNmAlBlks46w ioVAlBlkSiz48l ioVClpSiz52l ioAlBlSt56w ioVNxtFNum58l ioVFrBlk62w H ioVSigWord64w ioVDrvInfo66w ioVDRefNum68w ioVFSID70w ioVBkUp72l ioVSeqNum76w ioVWrCnt78l ioVFilCnt82l ioVDirCnt86l ioVFndrInfo90X";
 	case -0xa00f: // MountVol
 		return "ioVRefNum22w";
 	case -0x000a: // SetCatInfo
@@ -81,11 +81,11 @@ char *PBPrint(void *pb, unsigned short selector, int pre) {
 	if (pre) {
 		char name[128] = {};
 		strcpy(name, callname(selector));
-		if ((selector*0x200) == 0 && name[0] == 'H')
+		if ((selector&0x200) == 0 && name[0] == 'H')
 			memmove(name, name+1, 127); // cut off the H
 		for (int i=0; i<sizeof(name); i++)
 			name[i] = toupper(name[i]);
-		SPRINTF("   %s:", name);
+		SPRINTF("   %s: %p", name, pb);
 	}
 	NEWLINE();
 
@@ -95,6 +95,13 @@ char *PBPrint(void *pb, unsigned short selector, int pre) {
 	strcat(program, minilang(pb, selector, pre));
 
 	while (*prog) {
+		if (prog[0]=='H' && prog[1]==' ') {
+			prog += 2;
+			if ((selector&0x200) == 0) {
+				break; // stop here for hierarchical call
+			}
+		}
+
 		// Field name string
 		int n=0;
 		while (('a'<=prog[n] && prog[n]<='z') || ('A'<=prog[n] && prog[n]<='Z')) n++;
