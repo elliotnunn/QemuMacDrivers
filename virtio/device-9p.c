@@ -14,6 +14,7 @@ Therefore we need this mapping:
 #include <Memory.h>
 #include <MixedMode.h>
 
+#include "extfs.h"
 #include "hashtab.h"
 #include "lprintf.h"
 #include "paramblkprint.h"
@@ -207,6 +208,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 		.flags = 0,
 	};
 
+	// Let's install a hook on ToExtFS... I'd like to work without the FSM
+	InstallExtFS();
+
 	static struct IOParam pb = {
 		.ioBuffer = (void *)&vmi,
 	};
@@ -244,6 +248,11 @@ static OSErr CommProc(short message, struct IOParam *pb, void *globals) {
 		return noErr;
 	}
 
+	return extFSErr;
+}
+
+long ExtFS(void *pb, long selector) {
+	lprintf("ExtFS(%p, ioTrap=%04x, d0=%08x)\n", pb, *((unsigned short *)pb + 3), selector);
 	return extFSErr;
 }
 
