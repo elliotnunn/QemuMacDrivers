@@ -2,6 +2,8 @@
 // Functions return true on failure.
 // Takes over the Virtio interface, implements DNotified and DConfigChange.
 
+// Track use of FID 0-31 and automatically clunk when reuse is attempted
+
 #pragma once
 
 #include <stdint.h>

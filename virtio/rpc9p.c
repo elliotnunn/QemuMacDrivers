@@ -100,6 +100,8 @@ char *smlBuf, *bigBuf;
 uint32_t *smlBigAddrs, *bigSmlAddrs, *smlBigSizes, *bigSmlSizes;
 uint16_t bigCnt;
 
+static uint32_t openfids;
+
 volatile bool flag;
 
 static uint32_t curreadfid = (uint32_t)NOFID;
@@ -222,6 +224,8 @@ bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, ui
 
 	lprintf("Twalk(fid=%lu nfid=%lu wname=\"", fid, newfid);
 
+	if (fid < 32 && (openfids & (1<<fid))) Clunk9(fid);
+
 	*(bigBuf+4) = Twalk;
 	WRITE16LE(bigBuf+4+1, ONLYTAG);
 	WRITE32LE(bigBuf+4+1+2, fid);
@@ -261,6 +265,8 @@ bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, ui
 			retqid[i] = READQID(smlBuf+9+13*i);
 		}
 	}
+
+	if (fid < 32) openfids |= 1<<fid;
 
 	return false;
 }
@@ -409,6 +415,8 @@ bool Clunk9(uint32_t fid) {
 	enum {Rclunk = 121}; // size[4] Rclunk tag[2]
 
 	INVAL_READDIR();
+
+	if (fid < 32) openfids &= ~(1<<fid);
 
 	uint32_t size = 4+1+2+4;
 
