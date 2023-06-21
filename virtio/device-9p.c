@@ -511,7 +511,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	int pathlen=strlen(cpath);
 
 	bool pathAbsolute = ((cpath[0] != ':') && (strstr(cpath, ":") != NULL))
-		|| (cnid == 1)};
+		|| (cnid == 1);
 
 	// Tokenize
 	for (int i=0; i<sizeof cpath; i++) {
