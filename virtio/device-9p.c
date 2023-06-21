@@ -26,6 +26,9 @@ Therefore we need this mapping:
 #include <stddef.h>
 #include <string.h>
 
+#define c2pstr(p, c) {uint8_t l=strlen(c); p[0]=l; memcpy(p+1, c, l);}
+#define p2cstr(c, p) {uint8_t l=p[0]; memcpy(c, p+1, l); c[l]=0;}
+
 enum {
 	CREATOR = (0x0613<<16) | ('9'<<8) | 'p',
 };
@@ -38,7 +41,7 @@ struct handler {
 
 // in the hash table
 struct record {
-	uint32_t parent;
+	int32_t parent;
 	char name[];
 };
 
@@ -50,19 +53,19 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
 static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb);
-static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid);
-static uint32_t qid2cnid(struct Qid9 qid);
-static uint32_t pbDirID(void *pb);
+static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
+static int32_t pbDirID(void *pb);
 static struct WDCBRec *wdcb(short refnum);
-static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount);
-static void cnidPrint(uint32_t cnid);
+static int walkToCNID(int32_t cnid, uint32_t fid);
+static int32_t makeCNID(int32_t parent, char *name);
+static void cnidPrint(int32_t cnid);
 static struct handler handler(unsigned short selector);
 
 char stack[32*1024];
 short drvRefNum;
 unsigned long callcnt;
 struct Qid9 root;
-uint32_t cnidCtr = 100;
+int32_t cnidCtr = 100;
 static Handle finderwin;
 
 DriverDescription TheDriverDescription = {
@@ -284,8 +287,7 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
 	vcb->vcbClpSiz = 512;
 	vcb->vcbNxtCNID = 100;
 	vcb->vcbFreeBks = 0xffff;
-	char n[] = {4, 'E', 'l', 'm', 'o'};
-	memcpy(vcb->vcbVN, n, 5);
+	c2pstr(vcb->vcbVN, "Elmo");
 	vcb->vcbFSID = CREATOR & 0xffff;
 	vcb->vcbFilCnt = 1;
 	vcb->vcbDirCnt = 1;
@@ -300,7 +302,7 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
 
 static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 	if (pb->ioNamePtr!=NULL && pb->ioVolIndex==0) {
-		memcpy(pb->ioNamePtr, "\x04Elmo", 5);
+		c2pstr(pb->ioNamePtr, "Elmo");
 	}
 
 	pb->ioVRefNum = -2;
@@ -390,10 +392,7 @@ static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb) {
 // <--    104   ioFlClpSiz     long word
 
 static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
-	enum {MYFID = 3, WALKFID = 4};
-
-	// Hack to allocate a struct with room for the flex array member
-	static struct record lookup = {.name={[511]=0}};
+	enum {MYFID=3, LISTFID=4};
 
 	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
 	bool longform = (pb->ioTrap&0x00ff) == 0x0060; // GetCatInfo
@@ -401,63 +400,41 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 	int idx = pb->ioFDirIndex;
 	if (idx<0 && !longform) idx=0; // make named GetFInfo calls behave right
 
-	uint32_t cnid = pbDirID(pb);
+	int32_t cnid = pbDirID(pb);
 
-	// Preemptively clunk (TODO remove need)
-	Clunk9(MYFID);
+	if (idx > 0) {
+		lprintf("   GCI index mode\n");
 
-	// Navigate to pbDirID (or the equivalent WD) in MYFID
-	char **path; uint16_t pathcnt;
-	bool bad = cnidPath(cnid, &path, &pathcnt);
-	if (bad) return fnfErr;
-	bad = Walk9(2, MYFID, pathcnt, (const char **)path, NULL, NULL);
-	if (bad) fnfErr;
+		if (walkToCNID(cnid, MYFID) < 0) return fnfErr;
 
-	if (idx >= 0) {
 		// Read the directory
-		Walk9(MYFID, WALKFID, 0, NULL, NULL, NULL); // duplicate
-		Lopen9(WALKFID, O_RDONLY, NULL, NULL); // iterate
+		Walk9(MYFID, LISTFID, 0, NULL, NULL, NULL); // duplicate
+		Lopen9(LISTFID, O_RDONLY, NULL, NULL); // iterate
 
-		lookup.parent = cnid;
-
-		int ok;
-		if (idx>0) {
-			lprintf("   GCI indexed mode\n");
-			int n=0;
-			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
-				if (!strcmp(lookup.name, ".") || !strcmp(lookup.name, ".."))
-					continue;
-				if (pb->ioFDirIndex==++n) break;
-			}
-		} else {
-			lprintf("   GCI named mode\n");
-			while ((ok=Readdir9(WALKFID, NULL, NULL, lookup.name)) == 0) {
-				unsigned char roman[32];
-				mr31name(roman, lookup.name);
-				if (RelString(pb->ioNamePtr, roman, 0, 1) == 0) break;
-			}
+		char utf8[512];
+		int err;
+		int n=0;
+		while ((err=Readdir9(LISTFID, NULL, NULL, utf8)) == 0) {
+			if (!strcmp(utf8, ".") || !strcmp(utf8, ".."))
+				continue;
+			if (pb->ioFDirIndex==++n) break;
 		}
 
-		Clunk9(WALKFID);
+		if (err!=0) return fnfErr;
 
-		if (ok!=0) return fnfErr; // doesn't clunk correctly!
-
-		// Create a CNID if not already there
-		uint32_t *found = HTlookup(&lookup, 4+strlen(lookup.name)+1);
-		if (found == NULL) {
-			cnid = ++cnidCtr;
-			HTinstall(&cnid, sizeof(cnid), &lookup, 4+strlen(lookup.name)+1);
-			HTinstall(&lookup, 4+strlen(lookup.name)+1, &cnid, sizeof(cnid));
-		} else {
-			cnid = *found;
-		}
-
-		// Walk MYFID to the child
-		const char *component = lookup.name;
-		Walk9(MYFID, MYFID, 1, &component, NULL, NULL);
+		cnid = makeCNID(cnid, utf8);
+		Walk9(MYFID, MYFID, 1, (const char *[]){utf8}, NULL, NULL);
+	} else if (idx == 0) {
+		lprintf("   GCI name mode\n");
+		cnid = browse(MYFID, cnid, pb->ioNamePtr);
+		if (cnid < 0) return cnid;
 	} else {
 		lprintf("   GCI ID mode\n");
+		cnid = browse(MYFID, cnid, "\p");
+		if (cnid < 0) return cnid;
 	}
+
+	// MYFID and cnid now both valid
 
 	// Here's some tricky debugging
 	if (lprintf_enable) {
@@ -466,17 +443,16 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 
 	// MYFID and cnid point to the correct file
 	struct record *detail = HTlookup(&cnid, sizeof(cnid));
+	if (detail == NULL) lprintf("BAD LOOKUP\n");
 
 	// Return the filename
 	if (idx!=0 && pb->ioNamePtr!=NULL) {
-		if (detail == NULL) lprintf("BAD LOOKUP\n");
 		mr31name(pb->ioNamePtr, detail->name);
 	}
 
 	uint64_t size, time;
 	struct Qid9 qid;
-	bad = Getattr9(MYFID, &qid, &size, &time);
-	if (bad) return permErr;
+	if (Getattr9(MYFID, &qid, &size, &time)) return permErr;
 
 	pb->ioDirID = cnid; // alias ioDrDirID
 	pb->ioFlParID = detail->parent; // alias ioDrDirID
@@ -517,110 +493,96 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
 		}
 	}
 
-	Clunk9(MYFID);
 	return noErr;
 }
 
-static OSErr browse(uint32_t startcnid, const unsigned char *paspath, uint32_t *retcnid) {
-	uint32_t logstartcnid=startcnid;
-#define BRLOG(...) \
-	lprintf("browse(%d, \"%.*s\") = ", logstartcnid, *paspath, paspath+1); lprintf(__VA_ARGS__);
+// As a utility routine, be careful to clean up our FIDs
+static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
+	enum {LISTFID=5};
 
-	// Null termination makes this easier
-	char cpath[256] = {0};
-	memcpy(cpath, paspath+1, paspath[0]);
+	// Disallow nulls before we convert to C string
+	for (int i=0; i<paspath[0]; i++) {
+		if (paspath[i+1]==0) return bdNamErr;
+	}
 
-	char *comp=cpath;
-	int plen=strlen(comp);
+	// Null termination makes tokenisation easier (just convert : to null)
+	char cpath[256];
+	p2cstr(cpath, paspath);
+	int pathlen=strlen(cpath);
 
-	bool absolute = (cpath[0] != ':') && (strstr(cpath, ":") != NULL);
+	bool pathAbsolute = (cpath[0] != ':') && (strstr(cpath, ":") != NULL);
 
-	// Ease tokenizing with nulls
+	// Tokenize
 	for (int i=0; i<sizeof cpath; i++) {
 		if (cpath[i] == ':') cpath[i] = 0;
 	}
 
-	if (absolute) {
-		if (strcmp(comp, "Elmo")) {
-			BRLOG("bdNamErr (volume name)\n");
+	char *comp=cpath;
+	if (pathAbsolute) {
+		// Reenable this volname check once we support multiple volumes
+		if (false && strcmp(comp, "Elmo")) {
 			return bdNamErr;
 		}
 
-		// Cut the disk name off, leaving the colon
+		// Cut the disk name off, leaving the leading colon
 		comp += strlen(comp);
 
-		startcnid = 2;
-	} else if (startcnid == 0) {
-		// Find the current directory, which is not a trivial task!
-	} else if (startcnid == 1) {
-		BRLOG("bdNamErr (parent of root)\n");
-		return bdNamErr; // Can't use parent of root
+		cnid = 2;
+	} else if (cnid <= 2) {
+		cnid = 2;
 	}
 
-	// Convert into an array of path components
-	const char *fname[100];
-	int fcnt=0;
+	// Walk to that CNID
+	if (walkToCNID(cnid, fid) < 0) return fnfErr;
 
 	// Trim empty component from the start
+	// so that ":subdir" doesn't become ".." but "::subdir" does
 	if (comp[0] == 0) comp++;
 
-	// Iterate path components
-	for (; comp<cpath+plen; comp+=strlen(comp)+1) {
+	// Compare each path component with the filesystem
+	for (; comp<cpath+pathlen; comp+=strlen(comp)+1) {
 		if (comp[0] == 0) {
-			fname[fcnt++] = "..";
+			// Consecutive colons are like ".."
+			struct record *rec = HTlookup(&cnid, sizeof(cnid));
+			if (rec == NULL) {
+				lprintf("DANGLING CNID!");
+				return fnfErr;
+			}
+
+			if (Walk9(fid, fid, 1, (const char *[]){".."}, NULL, NULL))
+				return fnfErr;
 		} else {
-			fname[fcnt++] = comp; // Should convert to UTF-8
+			unsigned char want[32], got[32];
+			char gotutf8[512];
+			if (strlen(comp) > 31) return bdNamErr;
+			c2pstr(want, comp);
+
+			// Read the directory
+			Walk9(fid, LISTFID, 0, NULL, NULL, NULL); // duplicate
+			Lopen9(LISTFID, O_RDONLY, NULL, NULL);
+
+			// Need to list the directory and see what matches!
+			// (A shortcut might be to query the CNID table)
+			int err;
+			while ((err=Readdir9(LISTFID, NULL, NULL, gotutf8)) == 0) {
+				mr31name(got, gotutf8);
+				if (RelString(want, got, 0, 1) == 0) break;
+			}
+			Clunk9(LISTFID);
+			if (err) return fnfErr; // Or dirNFErr?
+
+			// We were promised that this exists
+			Walk9(fid, fid, 1, (const char *[]){gotutf8}, NULL, NULL);
+
+			cnid = makeCNID(cnid, gotutf8);
 		}
 	}
 
-	// TODO: respect the 16-element limitation of Twalk
-	struct Qid9 qids[100];
-	uint16_t qcnt=0;
-	bool bad = Walk9(startcnid, 3, fcnt, fname, &qcnt, qids);
-
-	if (qcnt<fcnt && !strcmp(fname[qcnt], "..")) {
-		BRLOG("bdNamErr (parent of disk)\n");
-		return bdNamErr;
-	} else if (qcnt<fcnt-1) {
-		BRLOG("dirNFErr\n");
-		return dirNFErr;
-	} else if (qcnt==fcnt-1) {
-		BRLOG("fnfErr\n");
-		return fnfErr;
-	}
-
-	uint32_t newcnid;
-	if (fcnt == 0) {
-		newcnid = startcnid;
-	} else {
-		newcnid = qid2cnid(qids[qcnt-1]);
-
-		// Create a duplicate FID for use as the CNID
-		// If the new FID already exists then we trust it is correct,
-		// and ignore the error.
-		Walk9(3, newcnid, 0, NULL, NULL, NULL);
-	}
-
-	if (retcnid != NULL) *retcnid = newcnid;
-
-	// Clunk our temp FID for future use
-	Clunk9(3);
-
-	BRLOG("%#010x\n", newcnid);
-
-	return noErr;
-}
-
-static uint32_t qid2cnid(struct Qid9 qid) {
-	if (qid.path == root.path) {
-		return 2; // special root CNID
-	} else {
-		return ((qid.path >> 32) ^ qid.path) + 3;
-	}
+	return cnid;
 }
 
 // Handles one volume only: will need revision
-static uint32_t pbDirID(void *pb) {
+static int32_t pbDirID(void *pb) {
 	struct HFileParam *pbcast = pb;
 
 	// HFSDispatch or another hierarchical call: use dirID if nonzero
@@ -652,40 +614,55 @@ static struct WDCBRec *wdcb(short refnum) {
 	return (struct WDCBRec *)(table + offset);
 }
 
-// Return true if bad
-static bool cnidPath(uint32_t cnid, char ***retlist, uint16_t *retcount) {
-// 	lprintf("cnidPath(%d) = \"", cnid);
+// If positive, return the "type" field from the qid
+// If negative, an error
+static int walkToCNID(int32_t cnid, uint32_t fid) {
+	char *components[256];
+	char **compptr = &components[256]; // fully descending
+	int compcnt = 0;
 
-	*retcount = 0;
-
-	static char *comps[256];
-	int compcnt=0;
 	static char blob[2048];
-	char *blobptr = blob;
+	char *blobptr = blob; // empty ascending
+
+	static struct Qid9 qids[256];
 
 	while (cnid != 2) {
 		struct record *rec = HTlookup(&cnid, sizeof(cnid));
-		if (rec == NULL) {
-// 			lprintf("FAIL\n");
-			return true; // fail
-		}
+		if (rec == NULL) return -1;
 
-		cnid = rec->parent;
-
-		comps[sizeof(comps)/sizeof(*comps) - ++compcnt] = blobptr;
+		*--compptr = blobptr;
+		compcnt++;
 		strcpy(blobptr, rec->name);
 		blobptr += strlen(blobptr)+1;
 
-// 		lprintf("/%s", rec->name);
+		cnid = rec->parent;
 	}
 
-	*retlist = &comps[sizeof(comps)/sizeof(*comps) - compcnt];
-	*retcount = compcnt;
-// 	lprintf("\"\n");
-	return false;
+	bool bad = Walk9(2, fid, compcnt, (const char **)compptr, NULL/*numok*/, qids);
+	if (bad) return -1;
+
+	return (int)(unsigned char)qids[compcnt-1].type;
 }
 
-static void cnidPrint(uint32_t cnid) {
+// Need a perfect UTF-8 filename match, which must therefore come from readdir
+static int32_t makeCNID(int32_t parent, char *name) {
+	// Big, so keep outside stack. Hack to make space for flexible array member.
+	static struct record lookup = {.name={[511]=0}};
+
+	// Already exists in our db?
+	lookup.parent = parent;
+	strcpy(lookup.name, name);
+	int32_t *existing = HTlookup(&lookup, sizeof(struct record)+strlen(lookup.name)+1);
+	if (existing != NULL) return *existing;
+
+	// No, we must create the entry
+	int32_t cnid = ++cnidCtr;
+	HTinstall(&cnid, sizeof(cnid), &lookup, 4+strlen(lookup.name)+1);
+	HTinstall(&lookup, 4+strlen(lookup.name)+1, &cnid, sizeof(cnid));
+	return cnid;
+}
+
+static void cnidPrint(int32_t cnid) {
 	char **path; uint16_t pathcnt;
 
 	while (cnid != 2) {
