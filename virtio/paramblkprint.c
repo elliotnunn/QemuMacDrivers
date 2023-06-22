@@ -70,15 +70,15 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 	return "";
 }
 
-char *PBPrint(void *pb, unsigned short selector, int pre) {
+char *PBPrint(void *pb, unsigned short selector, short errcode) {
 	static char blob[4096];
 	blob[0] = 0;
 	char *str = blob;
 
 #	define SPRINTF(...) str += sprintf(str, __VA_ARGS__)
-#	define NEWLINE() SPRINTF(pre ? "\n -> " : "\n<-  ");
+#	define NEWLINE() SPRINTF(errcode>0 ? "\n -> " : "\n<-  ");
 
-	if (pre) {
+	if (errcode>0) {
 		char name[128] = {};
 		strcpy(name, callname(selector));
 		if ((selector&0x200) == 0 && name[0] == 'H')
@@ -89,10 +89,15 @@ char *PBPrint(void *pb, unsigned short selector, int pre) {
 	}
 	NEWLINE();
 
+	if (errcode<=0) {
+		SPRINTF("OSErr       %d %s", errcode, errname(errcode));
+		NEWLINE();
+	}
+
 	char program[1024] = {};
 	char *prog = program;
-	strcpy(program, pre ? "ioTrap6w " : "ioResult16e ");
-	strcat(program, minilang(pb, selector, pre));
+	if (errcode>0) strcpy(program, "ioTrap6w ");
+	strcat(program, minilang(pb, selector, errcode>0));
 
 	while (*prog) {
 		if (prog[0]=='H' && prog[1]==' ') {
@@ -128,10 +133,6 @@ char *PBPrint(void *pb, unsigned short selector, int pre) {
 			break;
 		case 'b':
 			SPRINTF("%02x", *(unsigned char *)(pb+offset));
-			break;
-		case 'e':
-			SPRINTF("%d %s",
-				*(short *)(pb+offset), errname(*(short *)(pb+offset)));
 			break;
 		case 's':
 			{

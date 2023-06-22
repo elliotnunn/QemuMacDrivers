@@ -252,11 +252,15 @@ static OSErr CommProc(short message, struct IOParam *pb, void *globals) {
 }
 
 long ExtFS(void *pb, long selector) {
-	lprintf("ExtFS(%p, ioTrap=%04x, d0=%08x)\n", pb, *((unsigned short *)pb + 3), selector);
-	return extFSErr;
-}
+	unsigned short trap = ((struct IOParam *)pb)->ioTrap;
 
-static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid) {
+	// Use the selector format of the File System Manager
+	if ((trap & 0xff) == 0x60) { // HFSDispatch
+		selector = (selector & 0xff) | (trap & 0xf00);
+	} else {
+		selector = trap;
+	}
+
 	lprintf("%s", PBPrint(pb, selector, 1));
 
 	callcnt++;
@@ -272,12 +276,13 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		result = ((handlerFunc)h.func)(pb);
 	}
 
-	// pb.ioResult for the PBPrint
-	*(short *)((char *)pb + 16) = result;
-
-	lprintf("%s", PBPrint(pb, selector, 0));
+	lprintf("%s", PBPrint(pb, selector, result));
 
 	return result;
+}
+
+static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid) {
+	return extFSErr;
 }
 
 static OSErr MyVolumeMount(struct VolumeParam *pb) {
