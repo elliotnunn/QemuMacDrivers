@@ -48,9 +48,7 @@ struct record {
 
 static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
-static OSErr CommProc(short message, struct IOParam *pb, void *globals);
-static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid);
-static OSErr MyVolumeMount(struct VolumeParam *pb);
+static OSErr MyMountVol(struct IOParam *pb);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb);
 static OSErr MyGetVolParms(struct HIOParam *pb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb);
@@ -157,10 +155,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	lprintf("attached to root with path %08x%08x\n", (uint32_t)(root.path>>32), (uint32_t)root.path);
 
-	long fsmver = 0;
-	Gestalt(gestaltFSMVersion, &fsmver);
-	lprintf("File System Manager version %04x\n", fsmver);
-
 	// Bit strange... DQE starts mid-structure, 4 bytes of flags at neg offset
 	struct AdornedDQE {
 		uint32_t flags;
@@ -175,46 +169,14 @@ static OSStatus initialize(DriverInitInfo *info) {
 	};
 
 	AddDrive(drvRefNum, 22 /*drive number todo*/, &dqe.dqe);
-	lprintf("DQE qLink %#08x\n", dqe.dqe.qLink);
 
-	static RoutineDescriptor commDesc = BUILD_ROUTINE_DESCRIPTOR(uppFSDCommProcInfo, CommProc);
-	static RoutineDescriptor hfsDesc = BUILD_ROUTINE_DESCRIPTOR(uppHFSCIProcInfo, HFSProc);
-
-	static struct FSDRec fsdesc = {
-		.fsdLength = sizeof (struct FSDRec),
-		.fsdVersion = 1,
-		.fileSystemFSID = CREATOR & 0xffff,
-		.fileSystemName = "\x09Virtio-9P",
-		.fileSystemCommProc = &commDesc,
-		.fsdHFSCI = {
-			.compInterfProc = &hfsDesc,
-			.stackTop = stack + sizeof (stack),
-			.stackSize = sizeof (stack),
-			.idSector = -1, // networked volume
-		},
-	};
-
-	int fserr = InstallFS(&fsdesc);
-	lprintf("InstallFS returns %d\n", fserr);
-
-	// Enable HFS component (whatever that means)
-	fsdesc.fsdHFSCI.compInterfMask |= fsmComponentEnableMask | hfsCIResourceLoadedMask | hfsCIDoesHFSMask;
-	fserr = SetFSInfo(CREATOR & 0xffff, sizeof fsdesc, &fsdesc);
-	lprintf("SetFSInfo returns %d\n", fserr);
-
-	static struct VolumeMountInfoHeader vmi = {
-		.length = 8,
-		.media = CREATOR,
-		.flags = 0,
-	};
-
-	// Let's install a hook on ToExtFS... I'd like to work without the FSM
+	// Hook ToExtFS
 	InstallExtFS();
 
 	static struct IOParam pb = {
-		.ioBuffer = (void *)&vmi,
+		.ioVRefNum = 22,
 	};
-	fserr = PBVolumeMount((void *)&pb);
+	PBMountVol((void *)&pb);
 
 	char elmo[9] = {0,0,0,1,'E','l','m','o',0};
 	HTinstall("\x00\x00\x00\x02", 4, elmo, sizeof(elmo));
@@ -226,29 +188,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 static OSStatus finalize(DriverFinalInfo *info) {
 	return noErr;
-}
-
-static OSErr CommProc(short message, struct IOParam *pb, void *globals) {
-	lprintf("## CommProc message=%#02x paramBlock=%#08x\n", message, pb);
-
-	switch (message) {
-	case ffsNopMessage:
-		return noErr;
-	case ffsGetIconMessage:
-		return afpItemNotFound;
-	case ffsIDDiskMessage:
-		return (pb->ioVRefNum == 22) ? noErr : extFSErr;
-	case ffsLoadMessage:
-		return noErr; // The HFS interface thingy is always loaded
-	case ffsUnloadMessage:
-		return noErr; // Haha no, because we aren't disk based
-	case ffsIDVolMountMessage:
-		return (((struct VolumeMountInfoHeader *)pb->ioBuffer)->media == CREATOR) ? noErr : extFSErr;
-	case ffsInformMessage:
-		return noErr;
-	}
-
-	return extFSErr;
 }
 
 long ExtFS(void *pb, long selector) {
@@ -281,11 +220,13 @@ long ExtFS(void *pb, long selector) {
 	return result;
 }
 
-static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid) {
-	return extFSErr;
-}
+static OSErr MyMountVol(struct IOParam *pb) {
+	if (pb->ioVRefNum != 22) return extFSErr;
 
-static OSErr MyVolumeMount(struct VolumeParam *pb) {
+	static int done;
+	if (done) return volOnLinErr;
+	done = 1;
+
 	OSErr err;
 	struct VCB *vcb;
 
@@ -710,7 +651,7 @@ static struct handler handler(unsigned short selector) {
 	case kFSMGetFileInfo: return (struct handler){MyGetFileInfo};
 	case kFSMSetFileInfo: return (struct handler){NULL, extFSErr};
 	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
-	case kFSMMountVol: return (struct handler){NULL, volOnLinErr};
+	case kFSMMountVol: return (struct handler){MyMountVol};
 	case kFSMAllocate: return (struct handler){NULL, extFSErr};
 	case kFSMGetEOF: return (struct handler){NULL, extFSErr};
 	case kFSMSetEOF: return (struct handler){NULL, extFSErr};
@@ -773,7 +714,7 @@ static struct handler handler(unsigned short selector) {
 	case kFSMGetXCatInfo: return (struct handler){NULL, extFSErr};
 	case kFSMGetVolMountInfoSize: return (struct handler){NULL, extFSErr};
 	case kFSMGetVolMountInfo: return (struct handler){NULL, extFSErr};
-	case kFSMVolumeMount: return (struct handler){MyVolumeMount};
+	case kFSMVolumeMount: return (struct handler){NULL, extFSErr};
 	case kFSMShare: return (struct handler){NULL, extFSErr};
 	case kFSMUnShare: return (struct handler){NULL, extFSErr};
 	case kFSMGetUGEntry: return (struct handler){NULL, extFSErr};
