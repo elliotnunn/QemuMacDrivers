@@ -50,10 +50,10 @@ static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSErr CommProc(short message, struct IOParam *pb, void *globals);
 static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *globals, short fsid);
-static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb);
-static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb);
-static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb);
-static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb);
+static OSErr MyVolumeMount(struct VolumeParam *pb);
+static OSErr MyGetVolInfo(struct HVolumeParam *pb);
+static OSErr MyGetVolParms(struct HIOParam *pb);
+static OSErr MyGetFileInfo(struct HFileInfo *pb);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *pb);
 static struct WDCBRec *wdcb(short refnum);
@@ -268,8 +268,8 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 		result = h.err;
 	} else {
 		// Unsafe calling convention magic
-		typedef OSErr (*handlerFunc)(void *pb, struct VCB *vcb);
-		result = ((handlerFunc)h.func)(pb, vcb);
+		typedef OSErr (*handlerFunc)(void *pb);
+		result = ((handlerFunc)h.func)(pb);
 	}
 
 	// pb.ioResult for the PBPrint
@@ -280,8 +280,9 @@ static OSErr HFSProc(struct VCB *vcb, unsigned short selector, void *pb, void *g
 	return result;
 }
 
-static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
+static OSErr MyVolumeMount(struct VolumeParam *pb) {
 	OSErr err;
+	struct VCB *vcb;
 
 	short sysVCBLength;
 	err = UTAllocateVCB(&sysVCBLength, &vcb, 0 /*addSize*/);
@@ -309,7 +310,7 @@ static OSErr MyVolumeMount(struct VolumeParam *pb, struct VCB *vcb) {
 	return noErr;
 }
 
-static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
+static OSErr MyGetVolInfo(struct HVolumeParam *pb) {
 	if (pb->ioNamePtr!=NULL && pb->ioVolIndex==0) {
 		c2pstr(pb->ioNamePtr, "Elmo");
 	}
@@ -353,7 +354,7 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb, struct VCB *vcb) {
 // -->    36    ioReqCount    long    size of buffer area
 // <--    40    ioActCount    long    length of vol parms data
 
-static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb) {
+static OSErr MyGetVolParms(struct HIOParam *pb) {
 	struct GetVolParmsInfoBuffer buf = {
 		.vMVersion = 1, // goes up to version 4
 		.vMAttrib = 0
@@ -400,7 +401,7 @@ static OSErr MyGetVolParms(struct HIOParam *pb, struct VCB *vcb) {
 // <--    100   ioFlParID      long word    <--    100    ioDrParID   long word
 // <--    104   ioFlClpSiz     long word
 
-static OSErr MyGetFileInfo(struct HFileInfo *pb, struct VCB *vcb) {
+static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 	enum {MYFID=3, LISTFID=4};
 
 	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
