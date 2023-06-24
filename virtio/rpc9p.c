@@ -222,7 +222,7 @@ bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, ui
 
 	INVAL_READDIR();
 
-	if (fid < 32 && fid != newfid && (openfids & (1<<newfid))) Clunk9(newfid);
+	if (newfid < 32 && fid != newfid && (openfids & (1<<newfid))) Clunk9(newfid);
 
 	lprintf("Twalk(fid=%lu nfid=%lu wname=\"", fid, newfid);
 
@@ -266,7 +266,7 @@ bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, ui
 		}
 	}
 
-	if (fid < 32) openfids |= 1<<newfid;
+	if (newfid < 32) openfids |= 1<<newfid;
 
 	return false;
 }
