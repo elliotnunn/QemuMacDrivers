@@ -60,10 +60,10 @@ static int32_t makeCNID(int32_t parent, char *name);
 static void cnidPrint(int32_t cnid);
 static struct handler handler(unsigned short selector);
 
-short drvRefNum;
-unsigned long callcnt;
-struct Qid9 root;
-int32_t cnidCtr = 100;
+static short drvRefNum;
+static unsigned long callcnt;
+static struct Qid9 root;
+static int32_t cnidCtr = 100;
 static Handle finderwin;
 
 DriverDescription TheDriverDescription = {

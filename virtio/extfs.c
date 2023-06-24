@@ -39,7 +39,7 @@ static char patch68k[] = {
 	0x4e, 0xf9, 0x88, 0x88, 0x88, 0x88, // 44       jmp     nexthook          ; next FS
 };
 
-char stack[12*1024];
+static char stack[12*1024];
 
 void InstallExtFS(void) {
 	*(char **)(patch68k + 0x0c) = stack + sizeof(stack) - 4;
