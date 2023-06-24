@@ -1,14 +1,16 @@
-// Delicately hook the "ToExtFS" global.
-// Do not call twice!
+/*
+Hook the ToExtFS vector, which is called for traps on non-HFS(+) volumes
+
+- The ExtFS function is NOT defined in extfs.c: you define your own.
+- Return extFSErr to pass through to the next filesystem.
+- ExtFS will be run on a separate stack from the calling application.
+*/
 
 #pragma once
 
-#include <Types.h>
-
-// Implemented by the callee
+// Do not call this twice!
 void InstallExtFS(void);
 
-// Implemented by the caller, not to be confused with the lowmem global
-// If passing through then MUST return the original selector
-// pb from a0, selector from d0
 long ExtFS(void *pb, long selector);
+
+long ExtFSStackUsed(void);

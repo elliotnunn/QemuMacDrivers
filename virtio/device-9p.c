@@ -60,7 +60,6 @@ static int32_t makeCNID(int32_t parent, char *name);
 static void cnidPrint(int32_t cnid);
 static struct handler handler(unsigned short selector);
 
-char stack[32*1024];
 short drvRefNum;
 unsigned long callcnt;
 struct Qid9 root;
