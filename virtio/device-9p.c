@@ -58,6 +58,7 @@ static struct WDCBRec *wdcb(short refnum);
 static int walkToCNID(int32_t cnid, uint32_t fid);
 static int32_t makeCNID(int32_t parent, char *name);
 static void cnidPrint(int32_t cnid);
+static struct DrvQEl *findDrive(short drvNum);
 static struct handler handler(unsigned short selector);
 
 static short drvRefNum;
@@ -65,6 +66,7 @@ static unsigned long callcnt;
 static struct Qid9 root;
 static int32_t cnidCtr = 100;
 static Handle finderwin;
+static short drvNum;
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -167,14 +169,14 @@ static OSStatus initialize(DriverInitInfo *info) {
 		}
 	};
 
-	AddDrive(drvRefNum, 22 /*drive number todo*/, &dqe.dqe);
+	drvNum=4; // lower numbers reserved
+	while (findDrive(drvNum) != NULL) drvNum++;
+	AddDrive(drvRefNum, drvNum, &dqe.dqe);
 
 	// Hook ToExtFS
 	InstallExtFS();
 
-	static struct IOParam pb = {
-		.ioVRefNum = 22,
-	};
+	struct IOParam pb = {.ioVRefNum = drvNum};
 	PBMountVol((void *)&pb);
 
 	char elmo[9] = {0,0,0,1,'E','l','m','o',0};
@@ -220,7 +222,7 @@ long ExtFS(void *pb, long selector) {
 }
 
 static OSErr MyMountVol(struct IOParam *pb) {
-	if (pb->ioVRefNum != 22) return extFSErr;
+	if (pb->ioVRefNum != drvNum) return extFSErr;
 
 	static int done;
 	if (done) return volOnLinErr;
@@ -247,10 +249,10 @@ static OSErr MyMountVol(struct IOParam *pb) {
 	vcb->vcbFilCnt = 1;
 	vcb->vcbDirCnt = 1;
 
-	err = UTAddNewVCB(22, &pb->ioVRefNum, vcb);
+	err = UTAddNewVCB(drvNum, &pb->ioVRefNum, vcb);
 	if (err) return err;
 
-	PostEvent(diskEvt, 22);
+	PostEvent(diskEvt, drvNum);
 
 	return noErr;
 }
@@ -277,7 +279,7 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb) {
 
 	if (pb->ioTrap & 0x200) {
 		pb->ioVSigWord = 0x4244; // same as HFS
-		pb->ioVDrvInfo = 22;
+		pb->ioVDrvInfo = drvNum;
 		pb->ioVDRefNum = drvRefNum;
 		pb->ioVFSID = CREATOR & 0xffff;
 		pb->ioVBkUp = 0;
@@ -633,6 +635,14 @@ static void cnidPrint(int32_t cnid) {
 		cnid = rec->parent;
 	}
 	lprintf("(root)");
+}
+
+static struct DrvQEl *findDrive(short drvNum) {
+        struct DrvQEl *drv;
+        for (drv=(void *)GetDrvQHdr()->qHead; drv!=NULL; drv=(void *)drv->qLink) {
+                if (drv->dQDrive == drvNum) return drv;
+        }
+        return NULL;
 }
 
 // This makes it easy to have a selector return noErr without a function
