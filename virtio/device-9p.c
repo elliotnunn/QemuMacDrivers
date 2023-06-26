@@ -46,6 +46,11 @@ struct record {
 	char name[];
 };
 
+struct flagdqe {
+	uint32_t flags; // 4 bytes of flags at neg offset
+	DrvQEl dqe; // AddDrive points here
+};
+
 static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSErr MyMountVol(struct IOParam *pb);
@@ -67,6 +72,10 @@ static struct Qid9 root;
 static int32_t cnidCtr = 100;
 static Handle finderwin;
 static short drvNum;
+static struct flagdqe dqe = {
+	.flags = 0x00080000, // fixed disk
+	.dqe = {.dQFSID = CREATOR & 0xffff,},
+};
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -155,19 +164,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 
 	lprintf("attached to root with path %08x%08x\n", (uint32_t)(root.path>>32), (uint32_t)root.path);
-
-	// Bit strange... DQE starts mid-structure, 4 bytes of flags at neg offset
-	struct AdornedDQE {
-		uint32_t flags;
-		DrvQEl dqe;
-	};
-
-	static struct AdornedDQE dqe = {
-		.flags = 0x00080000, // fixed disk
-		.dqe = {
-			.dQFSID = CREATOR & 0xffff,
-		}
-	};
 
 	drvNum=4; // lower numbers reserved
 	while (findDrive(drvNum) != NULL) drvNum++;
