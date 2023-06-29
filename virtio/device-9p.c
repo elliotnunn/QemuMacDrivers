@@ -29,6 +29,7 @@ Therefore we need this mapping:
 
 #define c2pstr(p, c) {uint8_t l=strlen(c); p[0]=l; memcpy(p+1, c, l);}
 #define p2cstr(c, p) {uint8_t l=p[0]; memcpy(c, p+1, l); c[l]=0;}
+#define pstrcpy(d, s) memcpy(d, s, 1+(unsigned char)s[0])
 
 enum {
 	CREATOR = (0x0613<<16) | ('9'<<8) | 'p',
@@ -72,6 +73,7 @@ static struct Qid9 root;
 static int32_t cnidCtr = 100;
 static Handle finderwin;
 static short drvNum;
+static bool mounted;
 static struct flagdqe dqe = {
 	.flags = 0x00080000, // fixed disk
 	.dqe = {.dQFSID = CREATOR & 0xffff,},
@@ -178,6 +180,12 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	lprintf("attached to root with path %08x%08x\n", (uint32_t)(root.path>>32), (uint32_t)root.path);
 
+	char diskname[27] = {};
+	RegPropertyValueSize size = sizeof(diskname);
+	RegistryPropertyGet(&info->deviceEntry, "mount", diskname, &size);
+	if (diskname[0] == 0) strcpy(diskname, "Virtual HD");
+	c2pstr(vcb.vcbVN, diskname);
+
 	drvNum=4; // lower numbers reserved
 	while (findDrive(drvNum) != NULL) drvNum++;
 	AddDrive(drvRefNum, drvNum, &dqe.dqe);
@@ -187,11 +195,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	struct IOParam pb = {.ioVRefNum = drvNum};
 	PBMountVol((void *)&pb);
-
-	char elmo[9] = {0,0,0,1,'E','l','m','o',0};
-	HTinstall("\x00\x00\x00\x02", 4, elmo, sizeof(elmo));
-
-	finderwin = NewHandleSysClear(2);
 
 	return noErr;
 }
@@ -232,27 +235,29 @@ long ExtFS(void *pb, long selector) {
 
 static OSErr MyMountVol(struct IOParam *pb) {
 	if (pb->ioVRefNum != drvNum) return extFSErr;
+	if (mounted) return volOnLinErr;
 
-	static int done;
-	if (done) return volOnLinErr;
-	done = 1;
+	int32_t rootcnid = 2;
+	static struct record rootrec = {.parent=1, .name={[28]=0}};
+	p2cstr(rootrec.name, vcb.vcbVN);
+	HTinstall(&rootcnid, sizeof(rootcnid), &rootrec, sizeof(rootrec)+strlen(rootrec.name)+1);
+
+	finderwin = NewHandleSysClear(2);
 
 	OSErr err;
-
-	// Values copied from SheepShaver
-	c2pstr(vcb.vcbVN, "Elmo");
 
 	err = UTAddNewVCB(drvNum, &pb->ioVRefNum, &vcb);
 	if (err) return err;
 
 	PostEvent(diskEvt, drvNum);
 
+	mounted = true;
 	return noErr;
 }
 
 static OSErr MyGetVolInfo(struct HVolumeParam *pb) {
 	if (pb->ioNamePtr!=NULL && pb->ioVolIndex==0) {
-		c2pstr(pb->ioNamePtr, "Elmo");
+		pstrcpy(pb->ioNamePtr, vcb.vcbVN);
 	}
 
 	pb->ioVRefNum = -2;
@@ -470,9 +475,10 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 
 	char *comp=cpath;
 	if (pathAbsolute) {
-		// Reenable this volname check once we support multiple volumes
-		if (false && strcmp(comp, "Elmo")) {
-			return bdNamErr;
+		unsigned char pas[256];
+		c2pstr(pas, comp)
+		if (RelString(pas, vcb.vcbVN, 0, 1) != 0) {
+			return extFSErr;
 		}
 
 		// Cut the disk name off, leaving the leading colon
