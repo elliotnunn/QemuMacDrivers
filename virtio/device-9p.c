@@ -76,6 +76,19 @@ static struct flagdqe dqe = {
 	.flags = 0x00080000, // fixed disk
 	.dqe = {.dQFSID = CREATOR & 0xffff,},
 };
+static struct VCB vcb = {
+	.vcbSigWord = kHFSSigWord,
+	.vcbNmFls = 1234,
+	.vcbNmRtDirs = 6, // "number of directories in root" -- why?
+	.vcbNmAlBlks = 0xf000,
+	.vcbAlBlkSiz = 512,
+	.vcbClpSiz = 512,
+	.vcbNxtCNID = 100,
+	.vcbFreeBks = 0xe000,
+	.vcbFSID = CREATOR & 0xffff,
+	.vcbFilCnt = 1,
+	.vcbDirCnt = 1,
+};
 
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
@@ -225,27 +238,11 @@ static OSErr MyMountVol(struct IOParam *pb) {
 	done = 1;
 
 	OSErr err;
-	struct VCB *vcb;
-
-	short sysVCBLength;
-	err = UTAllocateVCB(&sysVCBLength, &vcb, 0 /*addSize*/);
-	if (err) return err;
 
 	// Values copied from SheepShaver
-	vcb->vcbSigWord = 0x4244; // same as HFS
-	vcb->vcbNmFls = 1;
-	vcb->vcbNmRtDirs = 1;
-	vcb->vcbNmAlBlks = 0xffff;
-	vcb->vcbAlBlkSiz = 512;
-	vcb->vcbClpSiz = 512;
-	vcb->vcbNxtCNID = 100;
-	vcb->vcbFreeBks = 0xffff;
-	c2pstr(vcb->vcbVN, "Elmo");
-	vcb->vcbFSID = CREATOR & 0xffff;
-	vcb->vcbFilCnt = 1;
-	vcb->vcbDirCnt = 1;
+	c2pstr(vcb.vcbVN, "Elmo");
 
-	err = UTAddNewVCB(drvNum, &pb->ioVRefNum, vcb);
+	err = UTAddNewVCB(drvNum, &pb->ioVRefNum, &vcb);
 	if (err) return err;
 
 	PostEvent(diskEvt, drvNum);
