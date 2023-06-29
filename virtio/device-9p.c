@@ -33,6 +33,7 @@ Therefore we need this mapping:
 
 enum {
 	CREATOR = (0x0613<<16) | ('9'<<8) | 'p',
+	ROOTFID = 2,
 };
 
 // of a File Manager call
@@ -174,7 +175,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	}
 
-	if (Attach9(2 /*special root CNID*/, (uint32_t)~0 /*auth=NOFID*/, "", "", &root)) {
+	if (Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", &root)) {
 		return paramErr;
 	}
 
@@ -595,7 +596,7 @@ static int walkToCNID(int32_t cnid, uint32_t fid) {
 		cnid = rec->parent;
 	}
 
-	bool bad = Walk9(2, fid, compcnt, (const char **)compptr, NULL/*numok*/, qids);
+	bool bad = Walk9(ROOTFID, fid, compcnt, (const char **)compptr, NULL/*numok*/, qids);
 	if (bad) return -1;
 
 	return (int)(unsigned char)qids[compcnt-1].type;
