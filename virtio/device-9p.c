@@ -36,7 +36,7 @@ Therefore we need this mapping:
 #define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1));
 
 enum {
-	CREATOR = (0x0613<<16) | ('9'<<8) | 'p',
+	FSID = ('9'<<8) | 'p',
 	ROOTFID = 2,
 	WDLO = -32767,
 	WDHI = -4096,
@@ -87,7 +87,7 @@ static short drvNum;
 static bool mounted;
 static struct flagdqe dqe = {
 	.flags = 0x00080000, // fixed disk
-	.dqe = {.dQFSID = CREATOR & 0xffff,},
+	.dqe = {.dQFSID = FSID},
 };
 static struct VCB vcb = {
 	.vcbSigWord = kHFSSigWord,
@@ -98,7 +98,7 @@ static struct VCB vcb = {
 	.vcbClpSiz = 512,
 	.vcbNxtCNID = 100,
 	.vcbFreeBks = 0xe000,
-	.vcbFSID = CREATOR & 0xffff,
+	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
 };
