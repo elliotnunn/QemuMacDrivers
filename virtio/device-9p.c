@@ -204,6 +204,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	struct IOParam pb = {.ioVRefNum = drvNum};
 	PBMountVol((void *)&pb);
 
+	if (vcb.vcbVRefNum & 1)
+		strcpy(lprintf_prefix, "                              ");
+
 	return noErr;
 }
 
@@ -222,6 +225,7 @@ long ExtFS(void *pb, long selector) {
 	}
 
 	lprintf("%s", PBPrint(pb, selector, 1));
+	strcat(lprintf_prefix, "     ");
 
 	callcnt++;
 
@@ -236,6 +240,7 @@ long ExtFS(void *pb, long selector) {
 		result = ((handlerFunc)h.func)(pb);
 	}
 
+	lprintf_prefix[strlen(lprintf_prefix) - 5] = 0;
 	lprintf("%s", PBPrint(pb, selector, result));
 
 	return result;
@@ -393,7 +398,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 
 	if (idx > 0) {
 		if (!determineNum(pb)) return extFSErr;
-		lprintf("   GCI index mode\n");
+		lprintf("GCI index mode\n");
 
 		if (walkToCNID(cnid, MYFID) < 0) return fnfErr;
 
@@ -416,12 +421,12 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 		Walk9(MYFID, MYFID, 1, (const char *[]){utf8}, NULL, NULL);
 	} else if (idx == 0) {
 		if (!determineNumStr(pb)) return extFSErr;
-		lprintf("   GCI name mode\n");
+		lprintf("GCI name mode\n");
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
 		if (cnid < 0) return cnid;
 	} else {
 		if (!determineNum(pb)) return extFSErr;
-		lprintf("   GCI ID mode\n");
+		lprintf("GCI ID mode\n");
 		cnid = browse(MYFID, cnid, "\p");
 		if (cnid < 0) return cnid;
 	}
@@ -430,7 +435,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 
 	// Here's some tricky debugging
 	if (lprintf_enable) {
-		lprintf("   GCI found "); cnidPrint(cnid); lprintf("\n");
+		lprintf("GCI found "); cnidPrint(cnid); lprintf("\n");
 	}
 
 	// MYFID and cnid point to the correct file

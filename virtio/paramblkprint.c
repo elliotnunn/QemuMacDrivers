@@ -85,7 +85,7 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 			memmove(name, name+1, 127); // cut off the H
 		for (int i=0; i<sizeof(name); i++)
 			name[i] = toupper(name[i]);
-		SPRINTF("   %s: %p", name, pb);
+		SPRINTF("%s: %p", name, pb);
 	}
 	NEWLINE();
 
