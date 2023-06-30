@@ -26,6 +26,7 @@ Therefore we need this mapping:
 
 #include <stdbool.h> // leave till last, conflicts with Universal Interfaces
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #define c2pstr(p, c) {uint8_t l=strlen(c); p[0]=l; memcpy(p+1, c, l);}
@@ -73,6 +74,7 @@ static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short drvNum);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
+static void autoVolName(unsigned char *pas);
 static struct handler handler(unsigned short selector);
 
 static short drvRefNum;
@@ -191,8 +193,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 	char diskname[27] = {};
 	RegPropertyValueSize size = sizeof(diskname);
 	RegistryPropertyGet(&info->deviceEntry, "mount", diskname, &size);
-	if (diskname[0] == 0) strcpy(diskname, "Virtual HD");
-	c2pstr(vcb.vcbVN, diskname);
+	if (diskname[0] != 0) {
+		c2pstr(vcb.vcbVN, diskname);
+	} else {
+		autoVolName(vcb.vcbVN);
+	}
 
 	drvNum=4; // lower numbers reserved
 	while (findDrive(drvNum) != NULL) drvNum++;
@@ -746,6 +751,26 @@ static char determineNum(void *_pb) {
 		} else {
 			return 0;
 		}
+	}
+}
+
+static void autoVolName(unsigned char *pas) {
+	for (int i=1;; i++) {
+		strcpy((char *)pas+1, "Virtio HD");
+		if (i > 1) sprintf((char *)pas+10, " %d", i);
+		pas[0] = strlen((char *)pas+1);
+
+		// Find a volume with a matching name
+		struct VCB *v = (struct VCB *)GetVCBQHdr()->qHead;
+		while (v != NULL) {
+			if (RelString(pas, v->vcbVN, 0, 1) == 0) {
+				break;
+			}
+			v = (struct VCB *)v->qLink;
+		}
+
+		// None? Good.
+		if (v == NULL) return;
 	}
 }
 
