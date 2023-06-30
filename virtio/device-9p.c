@@ -392,8 +392,8 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 	int32_t cnid = pbDirID(pb);
 
 	if (idx > 0) {
-		lprintf("   GCI index mode\n");
 		if (!determineNum(pb)) return extFSErr;
+		lprintf("   GCI index mode\n");
 
 		if (walkToCNID(cnid, MYFID) < 0) return fnfErr;
 
@@ -415,13 +415,13 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 		cnid = makeCNID(cnid, utf8);
 		Walk9(MYFID, MYFID, 1, (const char *[]){utf8}, NULL, NULL);
 	} else if (idx == 0) {
-		lprintf("   GCI name mode\n");
 		if (!determineNumStr(pb)) return extFSErr;
+		lprintf("   GCI name mode\n");
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
 		if (cnid < 0) return cnid;
 	} else {
-		lprintf("   GCI ID mode\n");
 		if (!determineNum(pb)) return extFSErr;
+		lprintf("   GCI ID mode\n");
 		cnid = browse(MYFID, cnid, "\p");
 		if (cnid < 0) return cnid;
 	}

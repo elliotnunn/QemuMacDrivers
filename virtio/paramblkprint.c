@@ -94,61 +94,64 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 		NEWLINE();
 	}
 
-	char program[1024] = {};
-	char *prog = program;
-	if (errcode>0) strcpy(program, "ioTrap6w ");
-	strcat(program, minilang(pb, selector, errcode>0));
+	// Don't show the rest of the block if there was an err
+	if (errcode>=0) {
+		char program[1024] = {};
+		char *prog = program;
+		if (errcode>0) strcpy(program, "ioTrap6w ");
+		strcat(program, minilang(pb, selector, errcode>0));
 
-	while (*prog) {
-		if (prog[0]=='H' && prog[1]==' ') {
-			prog += 2;
-			if ((selector&0x200) == 0) {
-				break; // stop here for hierarchical call
+		while (*prog) {
+			if (prog[0]=='H' && prog[1]==' ') {
+				prog += 2;
+				if ((selector&0x200) == 0) {
+					break; // stop here for hierarchical call
+				}
 			}
-		}
 
-		// Field name string
-		int n=0;
-		while (('a'<=prog[n] && prog[n]<='z') || ('A'<=prog[n] && prog[n]<='Z')) n++;
-		SPRINTF("%-12.*s", n, prog);
-		prog += n;
+			// Field name string
+			int n=0;
+			while (('a'<=prog[n] && prog[n]<='z') || ('A'<=prog[n] && prog[n]<='Z')) n++;
+			SPRINTF("%-12.*s", n, prog);
+			prog += n;
 
-		// Offset
-		unsigned int offset = 0;
-		while ('0'<=*prog && *prog<='9') {
-			offset = offset*10 + *prog++ - '0';
-		}
-
-		// Get field size and print field
-		switch (*prog++) {
-		case 'x':
-			for (int i=0; i<16; i+=2) SPRINTF("%04x ", *(unsigned short *)(pb+offset+i));
-			break;
-		case 'l':
-			SPRINTF("%04x%04x",
-				*(unsigned short *)(pb+offset), *(unsigned short *)(pb+offset+2));
-			break;
-		case 'w':
-			SPRINTF("%04x", *(unsigned short *)(pb+offset));
-			break;
-		case 'b':
-			SPRINTF("%02x", *(unsigned char *)(pb+offset));
-			break;
-		case 's':
-			{
-				unsigned char *pstring = *(unsigned char **)((char *)pb+offset);
-				SPRINTF("%08x", (uintptr_t)pstring);
-				if (pstring /*&& (uintptr_t)pstring<*(uintptr_t *)0x39c*/) // check MemTop!
-					SPRINTF(" \"%.*s\"", pstring[0], pstring+1);
+			// Offset
+			unsigned int offset = 0;
+			while ('0'<=*prog && *prog<='9') {
+				offset = offset*10 + *prog++ - '0';
 			}
-			break;
-		default:
-			SPRINTF("unimplemented field");
-			break;
-		}
-		NEWLINE();
 
-		while (*prog == ' ') prog++;
+			// Get field size and print field
+			switch (*prog++) {
+			case 'x':
+				for (int i=0; i<16; i+=2) SPRINTF("%04x ", *(unsigned short *)(pb+offset+i));
+				break;
+			case 'l':
+				SPRINTF("%04x%04x",
+					*(unsigned short *)(pb+offset), *(unsigned short *)(pb+offset+2));
+				break;
+			case 'w':
+				SPRINTF("%04x", *(unsigned short *)(pb+offset));
+				break;
+			case 'b':
+				SPRINTF("%02x", *(unsigned char *)(pb+offset));
+				break;
+			case 's':
+				{
+					unsigned char *pstring = *(unsigned char **)((char *)pb+offset);
+					SPRINTF("%08x", (uintptr_t)pstring);
+					if (pstring /*&& (uintptr_t)pstring<*(uintptr_t *)0x39c*/) // check MemTop!
+						SPRINTF(" \"%.*s\"", pstring[0], pstring+1);
+				}
+				break;
+			default:
+				SPRINTF("unimplemented field");
+				break;
+			}
+			NEWLINE();
+
+			while (*prog == ' ') prog++;
+		}
 	}
 
 	// Strip off all but the last newline
