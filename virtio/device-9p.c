@@ -11,6 +11,7 @@ Therefore we need this mapping:
 #include <FSM.h>
 #include <Gestalt.h>
 #include <DriverServices.h>
+#include <LowMem.h>
 #include <Memory.h>
 #include <MixedMode.h>
 
@@ -31,9 +32,13 @@ Therefore we need this mapping:
 #define p2cstr(c, p) {uint8_t l=p[0]; memcpy(c, p+1, l); c[l]=0;}
 #define pstrcpy(d, s) memcpy(d, s, 1+(unsigned char)s[0])
 
+#define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1));
+
 enum {
 	CREATOR = (0x0613<<16) | ('9'<<8) | 'p',
 	ROOTFID = 2,
+	WDLO = -32767,
+	WDHI = -4096,
 };
 
 // of a File Manager call
@@ -60,12 +65,14 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb);
 static OSErr MyGetVolParms(struct HIOParam *pb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
-static int32_t pbDirID(void *pb);
-static struct WDCBRec *wdcb(short refnum);
+static int32_t pbDirID(void *_pb);
+static struct WDCBRec wdcb(short refnum);
 static int walkToCNID(int32_t cnid, uint32_t fid);
 static int32_t makeCNID(int32_t parent, char *name);
 static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short drvNum);
+static char determineNumStr(void *_pb);
+static char determineNum(void *_pb);
 static struct handler handler(unsigned short selector);
 
 static short drvRefNum;
@@ -256,37 +263,61 @@ static OSErr MyMountVol(struct IOParam *pb) {
 	return noErr;
 }
 
+// TODO: search the FCB array for open files on this volume, set bit 6
+// TODO: when given a WD refnum, return directory valence as the file count
+// TODO: fake used/free alloc blocks (there are limits depending on H bit)
 static OSErr MyGetVolInfo(struct HVolumeParam *pb) {
-	if (pb->ioNamePtr!=NULL && pb->ioVolIndex==0) {
+	if (pb->ioVolIndex > 0) {
+		// Index into volume queue
+		struct VCB *v = (struct VCB *)GetVCBQHdr()->qHead;
+		for (int i=1; i<pb->ioVolIndex && v!=NULL; i++)
+			v = (struct VCB *)v->qLink;
+		if (v != &vcb)
+			return extFSErr;
+	} else if (pb->ioVolIndex == 0) {
+		// Simple volume/drive refnum
+		if (!determineNum(pb)) return extFSErr;
+	} else if (pb->ioVolIndex < 0) {
+		// "Standard way"
+		if (!determineNumStr(pb)) return extFSErr;
+	}
+
+	pb->ioVCrDate = vcb.vcbCrDate;
+	pb->ioVLsMod = vcb.vcbLsMod; // old field ioVLsBkUp is DIFFERENT
+	pb->ioVAtrb = vcb.vcbAtrb;
+	pb->ioVNmFls = vcb.vcbNmFls;
+	pb->ioVBitMap = vcb.vcbVBMSt; // old field ioVDirSt is DIFFERENT
+	pb->ioAllocPtr = vcb.vcbAllocPtr; // old field ioVBlLn is DIFFERENT
+	pb->ioVNmAlBlks = vcb.vcbNmAlBlks;
+	pb->ioVAlBlkSiz = vcb.vcbAlBlkSiz;
+	pb->ioVClpSiz = vcb.vcbClpSiz;
+	pb->ioAlBlSt = vcb.vcbAlBlSt;
+	pb->ioVNxtCNID = vcb.vcbNxtCNID; // old ioVNxtFNum field is equivalent
+	pb->ioVFrBlk = vcb.vcbFreeBks;
+
+	if ((char *)LMGetDefVCBPtr() == (char *)&vcb)
+		pb->ioVAtrb |= 1<<5;
+
+	if (pb->ioVRefNum == 0) {
+		pb->ioVRefNum = vcb.vcbVRefNum;
+	}
+
+	if (pb->ioNamePtr != NULL) {
 		pstrcpy(pb->ioNamePtr, vcb.vcbVN);
 	}
 
-	pb->ioVRefNum = -2;
-
-	pb->ioVCrDate = 0;
-	pb->ioVLsMod = 0;
-	pb->ioVAtrb = 0;
-	pb->ioVNmFls = 0;
-	pb->ioVBitMap = 0;
-	pb->ioAllocPtr = 0;
-	pb->ioVNmAlBlks = 31744;
-	pb->ioVAlBlkSiz = 512;
-	pb->ioVClpSiz = 512;
-	pb->ioAlBlSt = 0;
-	pb->ioVNxtCNID = 100;
-	pb->ioVFrBlk = 31744;
-
-	if (pb->ioTrap & 0x200) {
-		pb->ioVSigWord = 0x4244; // same as HFS
-		pb->ioVDrvInfo = drvNum;
-		pb->ioVDRefNum = drvRefNum;
-		pb->ioVFSID = CREATOR & 0xffff;
-		pb->ioVBkUp = 0;
-		pb->ioVSeqNum = 0;
-		pb->ioVWrCnt = 0;
-		pb->ioVFilCnt = 1;
-		pb->ioVDirCnt = 1;
-		memset(pb->ioVFndrInfo, 0, sizeof (pb->ioVFndrInfo));
+	if (pb->ioTrap & 0x200) { // ***H***GetVolInfo
+		pb->ioVRefNum = vcb.vcbVRefNum; // return irrespective of original val
+		pb->ioVSigWord = vcb.vcbSigWord;
+		pb->ioVDrvInfo = vcb.vcbDrvNum;
+		pb->ioVDRefNum = vcb.vcbDRefNum;
+		pb->ioVFSID = vcb.vcbFSID;
+		pb->ioVBkUp = vcb.vcbVolBkUp;
+		pb->ioVSeqNum = vcb.vcbVSeqNum;
+		pb->ioVWrCnt = vcb.vcbWrCnt;
+		pb->ioVFilCnt = vcb.vcbFilCnt;
+		pb->ioVDirCnt = vcb.vcbDirCnt;
+		memcpy(&pb->ioVFndrInfo, &vcb.vcbFndrInfo, 32);
 	}
 
 	return noErr;
@@ -301,6 +332,8 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb) {
 // <--    40    ioActCount    long    length of vol parms data
 
 static OSErr MyGetVolParms(struct HIOParam *pb) {
+	if (!determineNumStr(pb)) return extFSErr;
+
 	struct GetVolParmsInfoBuffer buf = {
 		.vMVersion = 1, // goes up to version 4
 		.vMAttrib = 0
@@ -360,6 +393,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 
 	if (idx > 0) {
 		lprintf("   GCI index mode\n");
+		if (!determineNum(pb)) return extFSErr;
 
 		if (walkToCNID(cnid, MYFID) < 0) return fnfErr;
 
@@ -382,10 +416,12 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 		Walk9(MYFID, MYFID, 1, (const char *[]){utf8}, NULL, NULL);
 	} else if (idx == 0) {
 		lprintf("   GCI name mode\n");
+		if (!determineNumStr(pb)) return extFSErr;
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
 		if (cnid < 0) return cnid;
 	} else {
 		lprintf("   GCI ID mode\n");
+		if (!determineNum(pb)) return extFSErr;
 		cnid = browse(MYFID, cnid, "\p");
 		if (cnid < 0) return cnid;
 	}
@@ -452,7 +488,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 	return noErr;
 }
 
-// As a utility routine, be careful to clean up our FIDs
+// Does not actually check for the right volume: determine*() first.
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	enum {LISTFID=5};
 
@@ -539,39 +575,45 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	return cnid;
 }
 
-// Handles one volume only: will need revision
-static int32_t pbDirID(void *pb) {
-	struct HFileParam *pbcast = pb;
+// Does not check whether our volume is the right one: use determineNumStr
+static int32_t pbDirID(void *_pb) {
+	struct HFileParam *pb = _pb;
 
 	// HFSDispatch or another hierarchical call: use dirID if nonzero
-	if ((pbcast->ioTrap & 0xff) == 0x60 || (pbcast->ioTrap & 0x200) != 0) {
-		if (pbcast->ioDirID != 0) {
-			return pbcast->ioDirID;
+	if ((pb->ioTrap & 0xff) == 0x60 || (pb->ioTrap & 0x200) != 0) {
+		if (pb->ioDirID != 0) {
+			return pb->ioDirID;
 		}
 	}
 
-	// Otherwise fall back on vRefNum
-	if (pbcast->ioVRefNum == -2) {
-		return 2; // root
-	} else if (pbcast->ioVRefNum == 0) {
-		return wdcb(-32765)->wdDirID; // default
-	} else {
-		return wdcb(pbcast->ioVRefNum)->wdDirID;
+	// Is it a WDCB?
+	if (pb->ioVRefNum <= WDHI || pb->ioVRefNum == 0) {
+		return wdcb(pb->ioVRefNum).wdDirID;
 	}
+
+	// It's just the root
+	return 2;
 }
 
-// Conservatively check for this WDCB
-static struct WDCBRec *wdcb(short refnum) {
-	char *table = *(char **)0x372; // unaligned access?
+// Validate WDCB refnum and return the structure.
+// The 4-byte fields of the WDCB array are *always* misaligned,
+// so it is better to return a structure copy than a pointer.
+static struct WDCBRec wdcb(short refnum) {
+	void *table = (void *)unaligned32(0x372);
+
 	int16_t tblSize = *(int16_t *)table;
-	int16_t offset = refnum + 0x7fff;
-	if (offset<2 || offset>tblSize || (offset%16)!=2) {
-		lprintf("bad wdcb refnum %d, will probably crash now\n", refnum);
-		return (void *)0x68f168f1;
+	int16_t offset = refnum ? refnum+WDLO : 2;
+
+	struct WDCBRec ret = {};
+
+	if (offset>=2 && offset<tblSize && (offset%16)==2) {
+		memcpy(&ret, table+offset, sizeof(struct WDCBRec));
 	}
-	return (struct WDCBRec *)(table + offset);
+
+	return ret;
 }
 
+// Does not actually check for the right volume: determine*() first.
 // If positive, return the "type" field from the qid
 // If negative, an error
 static int walkToCNID(int32_t cnid, uint32_t fid) {
@@ -643,6 +685,63 @@ static struct DrvQEl *findDrive(short drvNum) {
                 if (drv->dQDrive == drvNum) return drv;
         }
         return NULL;
+}
+
+// The "standard way":
+// 1. ioNamePtr: absolute path with correct volume name? Return 'p'.
+// 2. ioVRefNum: correct volume/drive/WD? See determineNum for return values.
+// 3. Else return 0.
+// Note that MPW does relative paths from CNID 1 but these have the right vRefNum
+static char determineNumStr(void *_pb) {
+	struct VolumeParam *pb = _pb;
+
+	// First element of absolute path
+	if (pb->ioNamePtr) {
+		char name[256];
+		p2cstr(name, pb->ioNamePtr);
+
+		// Is absolute path?
+		if (name[0]!=0 && name[0]!=':' && strstr(name, ":")!=NULL) {
+			strstr(name, ":")[0] = 0; // terminate at the colon
+			unsigned char pas[256];
+			c2pstr(pas, name);
+			if (RelString(pas, vcb.vcbVN, 0, 1) == 0) {
+				return 'p';
+			} else {
+				return 0;
+			}
+		}
+	}
+
+	return determineNum(pb);
+}
+
+// 0 for shrug, 'w' for wdcbRefNum, 'v' for vRefNum, 'd' for drvNum
+static char determineNum(void *_pb) {
+	struct VolumeParam *pb = _pb;
+
+	if (pb->ioVRefNum <= WDHI) {
+		// Working directory refnum
+		if (wdcb(pb->ioVRefNum).wdVCBPtr == &vcb) {
+			return 'w';
+		} else {
+			return 0;
+		}
+	} else if (pb->ioVRefNum < 0) {
+		// Volume refnum
+		if (pb->ioVRefNum == vcb.vcbVRefNum) {
+			return 'v';
+		} else {
+			return 0;
+		}
+	} else {
+		// Drive number
+		if (pb->ioVRefNum == dqe.dqe.dQDrive) {
+			return 'd';
+		} else {
+			return 0;
+		}
+	}
 }
 
 // This makes it easy to have a selector return noErr without a function
