@@ -65,6 +65,7 @@ static OSErr MyMountVol(struct IOParam *pb);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb);
 static OSErr MyGetVolParms(struct HIOParam *pb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb);
+static OSErr MyMakeFSSpec(struct HIOParam *pb);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec wdcb(short refnum);
@@ -498,18 +499,34 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 	return noErr;
 }
 
+// Problem: what if the leaf doesn't exist?
+static OSErr MyMakeFSSpec(struct HIOParam *pb) {
+	if (!determineNumStr(pb)) return extFSErr;
+
+	int32_t cnid = pbDirID(pb);
+	cnid = browse(10, cnid, pb->ioNamePtr);
+	if (cnid < 0) return cnid;
+	Clunk9(10);
+
+	struct record *rec = HTlookup(&cnid, sizeof(cnid));
+	if (!rec) return fnfErr;
+
+	struct FSSpec *spec = (struct FSSpec *)pb->ioMisc;
+
+	spec->vRefNum = vcb.vcbVRefNum;
+	spec->parID = rec->parent;
+	mr31name(spec->name, rec->name);
+
+	return noErr;
+}
+
 // Does not actually check for the right volume: determine*() first.
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	enum {LISTFID=5};
 
-	// Disallow nulls before we convert to C string
-	for (int i=0; i<paspath[0]; i++) {
-		if (paspath[i+1]==0) return bdNamErr;
-	}
-
 	// Null termination makes tokenisation easier (just convert : to null)
-	char cpath[256];
-	p2cstr(cpath, paspath);
+	char cpath[256] = "";
+	if (paspath != NULL) p2cstr(cpath, paspath);
 	int pathlen=strlen(cpath);
 
 	bool pathAbsolute = ((cpath[0] != ':') && (strstr(cpath, ":") != NULL))
@@ -822,7 +839,7 @@ static struct handler handler(unsigned short selector) {
 	case kFSMExchangeFiles: return (struct handler){NULL, extFSErr};
 	case kFSMCatSearch: return (struct handler){NULL, extFSErr};
 	case kFSMOpenDF: return (struct handler){NULL, extFSErr};
-	case kFSMMakeFSSpec: return (struct handler){NULL, extFSErr};
+	case kFSMMakeFSSpec: return (struct handler){MyMakeFSSpec};
 	case kFSMDTGetPath: return (struct handler){NULL, extFSErr};
 	case kFSMDTCloseDown: return (struct handler){NULL, extFSErr};
 	case kFSMDTAddIcon: return (struct handler){NULL, extFSErr};

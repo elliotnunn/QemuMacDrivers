@@ -61,7 +61,7 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 	case -0x001b: // MakeFSSpec
 		return "ioNamePtr18s ioVRefNum22w ioDirID48l";
 	case 0x001b:
-		return "ioMisc28l";
+		return "ioMisc28c";
 	case -0x0030: // GetVolParms
 		return "ioFileName18l ioVRefNum22w ioBuffer32l ioReqCount36l";
 	case 0x0030:
@@ -142,6 +142,16 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 					SPRINTF("%08x", (uintptr_t)pstring);
 					if (pstring /*&& (uintptr_t)pstring<*(uintptr_t *)0x39c*/) // check MemTop!
 						SPRINTF(" \"%.*s\"", pstring[0], pstring+1);
+				}
+				break;
+			case 'c': // FSSpec
+				{
+					char *spec = *(char **)(pb+offset);
+					SPRINTF("FSSpec(%04x, %08x, \"%.*s\")",
+						*(uint16_t *)spec,
+						*(uint32_t *)(spec + 2),
+						*(uint8_t *)(spec + 6),
+						spec + 7);
 				}
 				break;
 			default:
