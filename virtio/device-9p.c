@@ -773,8 +773,8 @@ static char determineNum(void *_pb) {
 
 static void autoVolName(unsigned char *pas) {
 	for (int i=1;; i++) {
-		strcpy((char *)pas+1, "Virtio HD");
-		if (i > 1) sprintf((char *)pas+10, " %d", i);
+		strcpy((char *)pas+1, "Shared Folder");
+		if (i > 1) sprintf((char *)pas+14, " %d", i);
 		pas[0] = strlen((char *)pas+1);
 
 		// Find a volume with a matching name
