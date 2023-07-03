@@ -90,6 +90,7 @@ static struct flagdqe dqe = {
 	.dqe = {.dQFSID = FSID},
 };
 static struct VCB vcb = {
+	.vcbAtrb = 0x8080, // hw and sw locked
 	.vcbSigWord = kHFSSigWord,
 	.vcbNmFls = 1234,
 	.vcbNmRtDirs = 6, // "number of directories in root" -- why?
