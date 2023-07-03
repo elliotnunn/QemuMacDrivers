@@ -76,6 +76,7 @@ static struct DrvQEl *findDrive(short drvNum);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
 static void autoVolName(unsigned char *pas);
+static bool visName(const char *name);
 static struct handler handler(unsigned short selector);
 
 static short drvRefNum;
@@ -417,8 +418,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 		int err;
 		int n=0;
 		while ((err=Readdir9(LISTFID, NULL, NULL, utf8)) == 0) {
-			if (!strcmp(utf8, ".") || !strcmp(utf8, ".."))
-				continue;
+			if (!visName(utf8)) continue;
 			if (pb->ioFDirIndex==++n) break;
 		}
 
@@ -463,9 +463,11 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 	pb->ioFRefNum = 0;
 
 	if (qid.type & 0x80) { // directory
-		int n=-2; // to get rid of . and ..
+		int n=0;
+		char childname[512];
 		Lopen9(MYFID, O_RDONLY, NULL, NULL); // iterate
-		while (Readdir9(MYFID, NULL, NULL, NULL) == 0) {
+		while (Readdir9(MYFID, NULL, NULL, childname) == 0) {
+			if (!visName(childname)) continue;
 			n++;
 		}
 
@@ -790,6 +792,15 @@ static void autoVolName(unsigned char *pas) {
 		// None? Good.
 		if (v == NULL) return;
 	}
+}
+
+static bool visName(const char *name) {
+	if (name[0] == '.') return false;
+
+	int len = strlen(name);
+	if (len >= 5 && !strcmp(name+len-5, ".rsrc")) return false;
+
+	return true;
 }
 
 // This makes it easy to have a selector return noErr without a function
