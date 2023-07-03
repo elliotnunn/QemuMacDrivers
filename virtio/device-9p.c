@@ -481,21 +481,34 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 			pb->ioFlXFndrInfo = (struct FXInfo){0}; // alias ioDrFndrInfo
 		}
 	} else { // file
+		uint64_t rsize = 0;
+		char rname[512];
+		sprintf(rname, "%s.rsrc", detail->name);
+		if (!Walk9(MYFID, MYFID, 2, (const char *[]){"..", rname}, NULL, NULL)) {
+			Getattr9(MYFID, NULL, &rsize, NULL);
+		}
+
 		pb->ioFlAttrib = 0;
 		pb->ioACUser = 0;
 		pb->ioFlFndrInfo = (struct FInfo){0};
 		pb->ioFlStBlk = 0;
-		pb->ioFlLgLen = 0;
-		pb->ioFlPyLen = 0;
+		pb->ioFlLgLen = size;
+		pb->ioFlPyLen = (size + 511) & -512;
 		pb->ioFlRStBlk = 0;
-		pb->ioFlRLgLen = 0;
-		pb->ioFlRPyLen = 0;
+		pb->ioFlRLgLen = rsize;
+		pb->ioFlRPyLen = (rsize + 511) & -512;
 		pb->ioFlCrDat = 0;
 		pb->ioFlMdDat = 0;
 		if (longform) {
 			pb->ioFlBkDat = 0;
 			pb->ioFlXFndrInfo = (struct FXInfo){0};
 			pb->ioFlClpSiz = 0;
+		}
+
+		if (!strcmp(detail->name, "System")) {
+			pb->ioFlFndrInfo = (struct FInfo){.fdType='ZSYS', .fdCreator='MACS'};
+		} else if (!strcmp(detail->name, "Finder")) {
+			pb->ioFlFndrInfo = (struct FInfo){.fdType='FNDR', .fdCreator='MACS'};
 		}
 	}
 
