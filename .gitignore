@@ -2,3 +2,4 @@
 *.so
 os9test
 fstest
+bootstrap

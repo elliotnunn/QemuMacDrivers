@@ -20,6 +20,8 @@ COMMON_PPC = \
 
 ../os9test/systemfolder/Extensions/9p.ndrv: device-9p.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
+	cp $@ ../bootstrap/systemfolder/tbxi.src/Parcels.src/9p.ndrv
+	cd ../bootstrap/systemfolder && tbxi build tbxi.src
 
 ../builds/qemu_vga.ndrv: device-gpu.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
