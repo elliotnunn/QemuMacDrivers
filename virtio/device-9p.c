@@ -22,6 +22,7 @@ Therefore we need this mapping:
 #include "rpc9p.h"
 #include "transport.h"
 #include "unicode.h"
+#include "universalfcb.h"
 #include "virtqueue.h"
 
 #include <stdbool.h> // leave till last, conflicts with Universal Interfaces
@@ -66,6 +67,9 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb);
 static OSErr MyGetVolParms(struct HIOParam *pb);
 static OSErr MyGetFileInfo(struct HFileInfo *pb);
 static OSErr MyMakeFSSpec(struct HIOParam *pb);
+static OSErr MyOpen(struct HFileParam *pb);
+static OSErr MyClose(struct IOParam *pb);
+static OSErr MyRead(struct IOParam *pb);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec wdcb(short refnum);
@@ -536,6 +540,142 @@ static OSErr MyMakeFSSpec(struct HIOParam *pb) {
 	return noErr;
 }
 
+static OSErr MyOpen(struct HFileParam *pb) {
+	pb->ioFRefNum = 0;
+
+	if (!determineNumStr(pb)) return extFSErr;
+
+	bool rfork = (pb->ioTrap & 0xff) == 0x0a;
+
+	short refn;
+	struct FCBRec *fcb;
+	if (UnivAllocateFCB(&refn, &fcb) != noErr) return tmfoErr;
+
+	lprintf("GOT REFNUM %d\n", refn);
+
+	uint32_t fid = 32 + refn;
+	Clunk9(fid); // preemptive
+
+	int32_t cnid = pbDirID(pb);
+	cnid = browse(fid, cnid, pb->ioNamePtr);
+	if (cnid < 0) return cnid;
+
+	struct record *rec = HTlookup(&cnid, sizeof(cnid));
+	if (!rec) return fnfErr;
+
+	if (rfork) {
+		char rname[512];
+		sprintf(rname, "%s.rsrc", rec->name);
+		if (Walk9(fid, fid, 2, (const char *[]){"..", rname}, NULL, NULL))
+			return fnfErr;
+	}
+
+	uint64_t size = 0;
+	if (Getattr9(fid, NULL, &size, NULL)) return permErr;
+	// TODO also check that it's not a directory
+
+	if (Lopen9(fid, O_RDONLY, NULL, NULL))
+		return permErr;
+
+	*fcb = (struct FCBRec){
+		.fcbFlNm = cnid,
+		.fcbFlags = (rfork ? 2 : 0) | 0x20, // locked ?resource
+		.fcbTypByt = 0, // MFS only
+		.fcbSBlk = 99, // free for our use
+		.fcbEOF = size,
+		.fcbPLen = (size + 511) & -512,
+		.fcbCrPs = 0,
+		.fcbVPtr = &vcb,
+		.fcbBfAdr = NULL, // reserved
+		.fcbFlPos = 0, // free for own use
+		.fcbClmpSize = 512,
+		.fcbBTCBPtr = NULL, // reserved
+		.fcbExtRec = {}, // own use
+		.fcbFType = 'APPL',
+		.fcbCatPos = 0, // own use
+		.fcbDirID = rec->parent,
+	};
+
+	lprintf("EOF is %#x\n", (long)size);
+
+	mr31name(fcb->fcbCName, rec->name);
+
+	pb->ioFRefNum = refn;
+
+	return noErr;
+}
+
+static OSErr MyClose(struct IOParam *pb) {
+	struct FCBRec *fcb;
+	if (UnivResolveFCB(pb->ioRefNum, &fcb))
+		return paramErr;
+
+	if (fcb->fcbFlNm == 0)
+		return fnOpnErr;
+
+	if (fcb->fcbVPtr != &vcb)
+		return extFSErr;
+
+	Clunk9(32 + pb->ioRefNum);
+	fcb->fcbFlNm = 0;
+
+	return noErr;
+}
+
+static OSErr MyRead(struct IOParam *pb) {
+	if (pb->ioReqCount < 0) return paramErr;
+
+	struct FCBRec *fcb;
+	if (UnivResolveFCB(pb->ioRefNum, &fcb))
+		return paramErr;
+
+	if (fcb->fcbFlNm == 0)
+		return fnOpnErr;
+
+	if (fcb->fcbVPtr != &vcb)
+		return extFSErr;
+
+	char seek = pb->ioPosMode & 3;
+
+	if (seek == fsAtMark) {
+		// leave fcb->fcbCrPs alone
+	} else if (seek == fsFromStart) {
+		fcb->fcbCrPs = pb->ioPosOffset;
+	} else if (seek == fsFromLEOF) {
+		fcb->fcbCrPs = fcb->fcbEOF + pb->ioPosOffset;
+	} else if (seek == fsFromMark) {
+		fcb->fcbCrPs = fcb->fcbCrPs + pb->ioPosOffset;
+	}
+
+	pb->ioActCount = 0;
+
+	if (fcb->fcbCrPs < 0) {
+		fcb->fcbCrPs = 0;
+		return posErr;
+	}
+
+	while (pb->ioActCount < pb->ioReqCount) {
+		uint32_t todo = pb->ioReqCount - pb->ioActCount;
+		if (todo > Max9) todo = Max9;
+
+		uint32_t act = 0;
+		Read9(32 + pb->ioRefNum, fcb->fcbCrPs, pb->ioReqCount, &act);
+
+		BlockMoveData(Buf9, pb->ioBuffer + pb->ioActCount, act);
+
+		pb->ioActCount += act;
+		fcb->fcbCrPs += act;
+		pb->ioPosOffset = fcb->fcbCrPs;
+
+		if (act != todo) break;
+	}
+
+// 	if (pb->ioActCount != pb->ioReqCount)
+// 		return eofErr;
+
+	return noErr;
+}
+
 // Does not actually check for the right volume: determine*() first.
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	enum {LISTFID=5};
@@ -819,14 +959,14 @@ static bool visName(const char *name) {
 // This makes it easy to have a selector return noErr without a function
 static struct handler handler(unsigned short selector) {
 	switch (selector & 0xf0ff) {
-	case kFSMOpen: return (struct handler){NULL, extFSErr};
-	case kFSMClose: return (struct handler){NULL, extFSErr};
-	case kFSMRead: return (struct handler){NULL, extFSErr};
+	case kFSMOpen: return (struct handler){MyOpen};
+	case kFSMClose: return (struct handler){MyClose};
+	case kFSMRead: return (struct handler){MyRead};
 	case kFSMWrite: return (struct handler){NULL, extFSErr};
 	case kFSMGetVolInfo: return (struct handler){MyGetVolInfo};
 	case kFSMCreate: return (struct handler){NULL, extFSErr};
 	case kFSMDelete: return (struct handler){NULL, extFSErr};
-	case kFSMOpenRF: return (struct handler){NULL, extFSErr};
+	case kFSMOpenRF: return (struct handler){MyOpen};
 	case kFSMRename: return (struct handler){NULL, extFSErr};
 	case kFSMGetFileInfo: return (struct handler){MyGetFileInfo};
 	case kFSMSetFileInfo: return (struct handler){NULL, extFSErr};
@@ -863,7 +1003,7 @@ static struct handler handler(unsigned short selector) {
 	case kFSMResolveFileIDRef: return (struct handler){NULL, extFSErr};
 	case kFSMExchangeFiles: return (struct handler){NULL, extFSErr};
 	case kFSMCatSearch: return (struct handler){NULL, extFSErr};
-	case kFSMOpenDF: return (struct handler){NULL, extFSErr};
+	case kFSMOpenDF: return (struct handler){MyOpen};
 	case kFSMMakeFSSpec: return (struct handler){MyMakeFSSpec};
 	case kFSMDTGetPath: return (struct handler){NULL, extFSErr};
 	case kFSMDTCloseDown: return (struct handler){NULL, extFSErr};

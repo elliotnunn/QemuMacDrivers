@@ -300,6 +300,8 @@ bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retioun
 
 	if (retqid != NULL) *retqid = qid;
 	if (retiounit != NULL) *retiounit = iounit;
+
+	return false;
 }
 
 // -1=err, 0=ok, 1=eof

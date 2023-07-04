@@ -18,7 +18,7 @@ static void *fcbBase(void) {
 
 OSErr UnivAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
 	if (fcbFormat9()) {
-		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xfe8,
+		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xfe8, 0,
 			fileRefNum, fileCtrlBlockPtr);
 	} else {
 		void *base = fcbBase;
@@ -31,5 +31,22 @@ OSErr UnivAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
 			}
 		}
 		return tmfoErr;
+	}
+}
+
+OSErr UnivResolveFCB(short fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
+	if (fcbFormat9()) {
+		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xee8, 5,
+			fileRefNum, fileCtrlBlockPtr);
+	} else {
+		void *base = fcbBase;
+		short len = *(short *)fcbBase;
+
+		if (fileRefNum < 2 || fileRefNum > len || fileRefNum % 94 != 2)
+			return paramErr;
+
+		*fileCtrlBlockPtr = base + fileRefNum;
+
+		return noErr;
 	}
 }

@@ -8,3 +8,4 @@
 #pragma once
 
 OSErr UnivAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr);
+OSErr UnivResolveFCB(short fileRefNum, FCBRecPtr *fileCtrlBlockPtr);

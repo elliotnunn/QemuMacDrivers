@@ -66,6 +66,14 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 		return "ioFileName18l ioVRefNum22w ioBuffer32l ioReqCount36l";
 	case 0x0030:
 		return "ioActCount40l";
+	case -0xa000: case -0xa00a: case -0x001a: // Open
+		return "ioNamePtr18s ioVRefNum22w ioPermssn27b ioDirID48l";
+	case 0xa000: case 0xa00a: case 0x001a:
+		return "ioRefNum24w";
+	case -0xa002: // Read
+		return "ioRefNum24w ioBuffer32l ioReqCount36l ioPosMode44w ioPosOffset46l";
+	case 0xa002:
+		return "ioActCount40l ioPosOffset46l";
 	}
 	return "";
 }
