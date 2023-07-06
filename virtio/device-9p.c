@@ -90,6 +90,7 @@ static int32_t cnidCtr = 100;
 static Handle finderwin;
 static short drvNum;
 static bool mounted;
+static char preferName[28];
 static struct flagdqe dqe = {
 	.flags = 0x00080000, // fixed disk
 	.dqe = {.dQFSID = FSID},
@@ -142,6 +143,10 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	case kOpenCommand:
 	case kCloseCommand:
 		err = noErr;
+		break;
+	case kReadCommand:
+		lprintf("Attempt to READ FROM THIS DISK!\n");
+		err = paramErr;
 		break;
 	default:
 		err = paramErr;
@@ -197,27 +202,22 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	lprintf("attached to root with path %08x%08x\n", (uint32_t)(root.path>>32), (uint32_t)root.path);
 
-	char diskname[27] = {};
-	RegPropertyValueSize size = sizeof(diskname);
-	RegistryPropertyGet(&info->deviceEntry, "mount", diskname, &size);
-	if (diskname[0] != 0) {
-		c2pstr(vcb.vcbVN, diskname);
-	} else {
-		autoVolName(vcb.vcbVN);
-	}
-
 	drvNum=4; // lower numbers reserved
 	while (findDrive(drvNum) != NULL) drvNum++;
 	AddDrive(drvRefNum, drvNum, &dqe.dqe);
+	lprintf("drefnum %d\n", drvRefNum);
 
-	// Hook ToExtFS
-	InstallExtFS();
+	RegPropertyValueSize size = sizeof(preferName);
+	RegistryPropertyGet(&info->deviceEntry, "mount", preferName, &size);
 
-	struct IOParam pb = {.ioVRefNum = drvNum};
-	PBMountVol((void *)&pb);
-
-	if (vcb.vcbVRefNum & 1)
-		strcpy(lprintf_prefix, "                              ");
+	// Is the File Manager actually up yet?
+	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
+		InstallExtFS();
+		struct IOParam pb = {.ioVRefNum = drvNum};
+		PBMountVol((void *)&pb);
+	} else {
+		lprintf(".virtio9p: this is very early boot, not mounting\n");
+	}
 
 	return noErr;
 }
@@ -262,6 +262,12 @@ static OSErr MyMountVol(struct IOParam *pb) {
 	if (pb->ioVRefNum != drvNum) return extFSErr;
 	if (mounted) return volOnLinErr;
 
+	if (preferName[0] != 0) {
+		c2pstr(vcb.vcbVN, preferName);
+	} else {
+		autoVolName(vcb.vcbVN);
+	}
+
 	int32_t rootcnid = 2;
 	static struct record rootrec = {.parent=1, .name={[28]=0}};
 	p2cstr(rootrec.name, vcb.vcbVN);
@@ -277,6 +283,8 @@ static OSErr MyMountVol(struct IOParam *pb) {
 	PostEvent(diskEvt, drvNum);
 
 	mounted = true;
+	if (vcb.vcbVRefNum & 1)
+		strcpy(lprintf_prefix, "                              ");
 	return noErr;
 }
 
