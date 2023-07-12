@@ -69,7 +69,7 @@ static uint32_t setVirtioScanout(int idx, short rowbytes, short w, short h, uint
 static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
 static void debugPoll(void);
-static void gestaltHook(unsigned short trap, unsigned long ostype);
+static void lateBootHook(void);
 static void updateScreen(short t, short l, short b, short r);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
 static void perfTest(void);
@@ -396,19 +396,21 @@ static OSStatus initialize(DriverInitInfo *info) {
 		NewRoutineDescriptor((ProcPtr)debugPoll, kCStackBased, GetCurrentISA())
 	);
 
-	// Wait for NewGestalt of the 'os  ' selector,
-	// which the Process Manager calls very late in the boot process.
+	// We can only patch drawing code *after* QuickDraw is fully installed,
+	// so wait for ProcessMgr to NewGestalt('os  ') right before the desktop.
 	gestaltPatch = Patch68k(
 		_Gestalt,
-		"48e7 e0e0"     // movem.l d0-d2/a0-a2,-(sp)
-		"4eb9 %l"       // jsr     gestaltHook
-		"4cdf 0707"     // movem.l (sp)+,d0-d2/a0-a2
-		"4ef9 %o",      // jmp     originalGestalt
-		NewRoutineDescriptor((ProcPtr)gestaltHook,
-			kRegisterBased
-				| REGISTER_ROUTINE_PARAMETER(1, kRegisterD1, kTwoByteCode)
-				| REGISTER_ROUTINE_PARAMETER(2, kRegisterD0, kFourByteCode),
-			GetCurrentISA())
+		"0c80 6f732020" //      cmp.l   #'os  ',d0
+		"661a"          //      bne.s   old
+		"0801 0009"     //      btst    #9,d1
+		"6714"          //      beq.s   old
+		"0801 000a"     //      btst    #10,d1
+		"660e"          //      bne.s   old
+		"48e7 e0e0"     //      movem.l d0-d2/a0-a2,-(sp)
+		"4eb9 %l"       //      jsr     lateBootHook
+		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
+		"4ef9 %o",      // old: jmp     originalGestalt
+		NewRoutineDescriptor((ProcPtr)lateBootHook, kCStackBased, GetCurrentISA())
 	);
 
 	if (virgl_enable) VirglTest();
@@ -764,13 +766,12 @@ static void debugPoll(void) {
 	updateScreen(0, 0, H, W);
 }
 
-static void gestaltHook(unsigned short trap, unsigned long ostype) {
-	if ((trap & 0x600) == 0x200 && ostype == 'os  ') {
-		InstallDirtyRectPatch();
-		updateScreen(0, 0, H, W);
-		DConfigChange();
-		Unpatch68k(gestaltPatch);
-	}
+static void lateBootHook(void) {
+	InstallDirtyRectPatch();
+	updateScreen(0, 0, H, W);
+	DConfigChange();
+	Unpatch68k(gestaltPatch); // do not call me again
+	lprintf("INSTALLED QUICKDRAW PATCHES");
 }
 
 void DirtyRectCallback(short top, short left, short bottom, short right) {
