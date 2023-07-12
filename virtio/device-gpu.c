@@ -393,7 +393,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		"4eb9 %l"       //      jsr     debugPoll
 		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
 		"4ef9 %o",      // old: jmp     originalDebugUtil
-		NewRoutineDescriptor((ProcPtr)debugPoll, kPascalStackBased, GetCurrentISA())
+		NewRoutineDescriptor((ProcPtr)debugPoll, kCStackBased, GetCurrentISA())
 	);
 
 	// Wait for NewGestalt of the 'os  ' selector,
