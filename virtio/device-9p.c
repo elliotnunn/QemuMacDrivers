@@ -257,7 +257,7 @@ static void secondaryInitialize(void) {
 		"201f"      // punt: move.l  (sp)+,d0          ; hook failure: restore d0 for next FS
 		"2e57"      //       move.l  (sp),sp           ; unswitch stack
 		"21df 0110" //       move.l  (sp)+,StkLowPt
-		"4ef9 %o",  //       jmp     originalExtFS     ; next FS
+		"4ef9 %o",  //       jmp     originalToExtFS
 
 		stack + STACKSIZE - 100,
 		stack + STACKSIZE - 100,
