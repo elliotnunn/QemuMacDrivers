@@ -7,13 +7,14 @@ Therefore we need this mapping:
 */
 
 #include <Disks.h>
+#include <DriverServices.h>
 #include <Files.h>
 #include <FSM.h>
 #include <Gestalt.h>
-#include <DriverServices.h>
 #include <LowMem.h>
 #include <Memory.h>
 #include <MixedMode.h>
+#include <Traps.h>
 
 #include "hashtab.h"
 #include "lprintf.h"
@@ -62,6 +63,7 @@ struct flagdqe {
 
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
+static long disposePtrShield(Ptr ptr, void *caller);
 static void secondaryInitialize(void);
 static long fileMgrHook(void *pb, long selector);
 static OSErr MyMountVol(struct IOParam *pb);
@@ -85,6 +87,7 @@ static void autoVolName(unsigned char *pas);
 static bool visName(const char *name);
 static struct handler handler(unsigned short selector);
 
+void *disposePtrPatch;
 static short drvRefNum;
 static unsigned long callcnt;
 static struct Qid9 root;
@@ -221,16 +224,53 @@ static OSStatus initialize(DriverInitInfo *info) {
 		secondaryInitialize();
 	} else {
 		lprintf(".virtio9p: this is very early boot, not mounting\n");
+
+		// This is very early boot, and my globals will be nuked by a ?ROM bug.
+		disposePtrPatch = Patch68k(
+			_DisposePtr,
+			"48e7 e0e0" //     movem.l d0-d2/a0-a2,-(sp)
+			"2f2f 0034" //     move.l  $34(sp),-(sp)
+			"2f08"      //     move.l  a0,-(sp)
+			"4eb9 %l"   //     jsr     disposePtrShield
+			"504f"      //     addq    #8,sp
+			"4a80"      //     tst.l   d0
+			"4cdf 0707" //     movem.l (sp)+,d0-d2/a0-a2
+			"6702"      //     beq.s   ok
+			"4e75"      //     rts
+			"4ef9 %o",  // ok: jmp     originalDisposePtr
+			NewRoutineDescriptor((ProcPtr)disposePtrShield,
+				kCStackBased
+					| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+					| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
+					| RESULT_SIZE(kFourByteCode),
+				GetCurrentISA())
+		);
 	}
 
 	return noErr;
 }
 
+// Prevent some errant ROM code from nuking my driver!
+static long disposePtrShield(Ptr ptr, void *caller) {
+	static char myglobals; // a memory address inside our global area
+
+	if (ptr <= &myglobals && &myglobals < ptr+GetPtrSize(ptr)) {
+		lprintf("Foiled the ROM's attempt to DisposePtr my globals! Caller was %p.\n", caller);
+		Unpatch68k(disposePtrPatch);
+		return 1; // do not call the real DisposePtr
+	} else {
+		return 0; // call the real DisposePtr
+	}
+}
+
 // Run this only when the File Manager is up
 static void secondaryInitialize(void) {
+	static bool alreadyUp;
+	if (alreadyUp) return;
+	alreadyUp = true;
+
 	// External filesystems need a big stack, and they can't
 	// share the FileMgr stack because of reentrancy problems
-
 	enum {STACKSIZE = 12 * 1024};
 	char *stack = NewPtrSys(STACKSIZE);
 	if (stack == NULL) stack = (char *)0x68f168f1;
