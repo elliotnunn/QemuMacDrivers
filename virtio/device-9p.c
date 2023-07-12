@@ -15,10 +15,10 @@ Therefore we need this mapping:
 #include <Memory.h>
 #include <MixedMode.h>
 
-#include "extfs.h"
 #include "hashtab.h"
 #include "lprintf.h"
 #include "paramblkprint.h"
+#include "patch68k.h"
 #include "rpc9p.h"
 #include "transport.h"
 #include "unicode.h"
@@ -60,8 +60,10 @@ struct flagdqe {
 	DrvQEl dqe; // AddDrive points here
 };
 
-static OSStatus initialize(DriverInitInfo *info);
 static OSStatus finalize(DriverFinalInfo *info);
+static OSStatus initialize(DriverInitInfo *info);
+static void secondaryInitialize(void);
+static long fileMgrHook(void *pb, long selector);
 static OSErr MyMountVol(struct IOParam *pb);
 static OSErr MyGetVolInfo(struct HVolumeParam *pb);
 static OSErr MyGetVolParms(struct HIOParam *pb);
@@ -161,6 +163,10 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	}
 }
 
+static OSStatus finalize(DriverFinalInfo *info) {
+	return noErr;
+}
+
 static OSStatus initialize(DriverInitInfo *info) {
 	lprintf_enable = true;
 
@@ -212,9 +218,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// Is the File Manager actually up yet?
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
-		InstallExtFS();
-		struct IOParam pb = {.ioVRefNum = drvNum};
-		PBMountVol((void *)&pb);
+		secondaryInitialize();
 	} else {
 		lprintf(".virtio9p: this is very early boot, not mounting\n");
 	}
@@ -222,11 +226,54 @@ static OSStatus initialize(DriverInitInfo *info) {
 	return noErr;
 }
 
-static OSStatus finalize(DriverFinalInfo *info) {
-	return noErr;
+// Run this only when the File Manager is up
+static void secondaryInitialize(void) {
+	// External filesystems need a big stack, and they can't
+	// share the FileMgr stack because of reentrancy problems
+
+	enum {STACKSIZE = 12 * 1024};
+	char *stack = NewPtrSys(STACKSIZE);
+	if (stack == NULL) stack = (char *)0x68f168f1;
+
+	Patch68k(
+		0x3f2,      // ExtFS:
+		"2f38 0110" //       move.l  StkLowPt,-(sp)
+		"42b8 0110" //       clr.l   StkLowPt
+		"23cf %l"   //       move.l  sp,stack-4
+		"2e7c %l"   //       move.l  #stack-4,sp
+		"2f00"      //       move.l  d0,-(sp)          ; restore d0 only if hook fails
+		"48e7 60e0" //       movem.l d1-d2/a0-a2,-(sp)
+		"2f00"      //       move.l  d0,-(sp)
+		"2f08"      //       move.l  a0,-(sp)
+		"4eb9 %l"   //       jsr     fileMgrHook
+		"504f"      //       addq    #8,sp
+		"4cdf 0706" //       movem.l (sp)+,d1-d2/a0-a2
+		"0c40 ffc6" //       cmp.w   #extFSErr,d0
+		"670a"      //       beq.s   punt
+		"584f"      //       addq    #4,sp             ; hook success: don't restore d0
+		"2e57"      //       move.l  (sp),sp           ; unswitch stack
+		"21df 0110" //       move.l  (sp)+,StkLowPt
+		"4e75"      //       rts
+		"201f"      // punt: move.l  (sp)+,d0          ; hook failure: restore d0 for next FS
+		"2e57"      //       move.l  (sp),sp           ; unswitch stack
+		"21df 0110" //       move.l  (sp)+,StkLowPt
+		"4ef9 %o",  //       jmp     originalExtFS     ; next FS
+
+		stack + STACKSIZE - 100,
+		stack + STACKSIZE - 100,
+		NewRoutineDescriptor((ProcPtr)fileMgrHook,
+			kCStackBased
+				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
+				| RESULT_SIZE(kFourByteCode),
+			GetCurrentISA())
+	);
+
+	struct IOParam pb = {.ioVRefNum = drvNum};
+	PBMountVol((void *)&pb);
 }
 
-long ExtFS(void *pb, long selector) {
+static long fileMgrHook(void *pb, long selector) {
 	unsigned short trap = ((struct IOParam *)pb)->ioTrap;
 
 	// Use the selector format of the File System Manager

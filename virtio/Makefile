@@ -34,7 +34,7 @@ COMMON_PPC = \
 device-gpu.so: device-gpu.o blit.o virgl.o dirtyrectpatch.o gammatables.o ${COMMON_PPC}
 	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
 
-device-9p.so: device-9p.o rpc9p.o hashtab.o paramblkprint.o unicode.o extfs.o universalfcb.o ${COMMON_PPC}
+device-9p.so: device-9p.o rpc9p.o hashtab.o paramblkprint.o unicode.o universalfcb.o ${COMMON_PPC}
 	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
 
 clean:
