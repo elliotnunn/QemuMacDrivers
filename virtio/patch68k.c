@@ -124,13 +124,15 @@ void Unpatch68k(void *patch) {
 
 	if (getvec(block->vector) == &block->code) {
 		// yay, we never got over-patched
+		lprintf("Unpatched %#x back to %p\n", block->vector, block->original);
+
 		setvec(block->vector, block->original);
 		DisposePtr((Ptr)block);
 	} else {
 		// someone over-patched us! yuck...
 		if ((long)block->original == 0 || (long)block->original == -1) {
 			// As always, never jump to a nonexistent address
-			block->code[0] = 0x4e;
+			block->code[0] = 0x4e; // RTS
 			block->code[1] = 0x75;
 		} else {
 			block->code[0] = 0x4e; // JMP
@@ -138,5 +140,11 @@ void Unpatch68k(void *patch) {
 			memcpy(block->code+2, &block->original, 4);
 		}
 		BlockMove(block, block, 14); // clear 68k emulator cache
+
+		lprintf("Unpatched %#x using a thunk:\n   ", block->vector);
+		for (char *i=block->code; i<block->code+6; i+=2) {
+			lprintf(" %02x%02x", i[0], i[1]);
+		}
+		lprintf("\n");
 	}
 }

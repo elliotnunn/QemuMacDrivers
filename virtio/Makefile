@@ -27,8 +27,7 @@ COMMON_PPC = \
 ../builds/qemu_vga.ndrv: device-gpu.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
 
-device-gpu.so: device-gpu.o blit.o virgl.o dirtyrectpatch.o \
-gammatables.o lateboothook.o ${COMMON_PPC}
+device-gpu.so: device-gpu.o blit.o virgl.o dirtyrectpatch.o gammatables.o ${COMMON_PPC}
 	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
 
 device-9p.so: device-9p.o rpc9p.o hashtab.o paramblkprint.o unicode.o extfs.o universalfcb.o ${COMMON_PPC}
