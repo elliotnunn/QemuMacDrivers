@@ -236,7 +236,7 @@ static void secondaryInitialize(void) {
 	if (stack == NULL) stack = (char *)0x68f168f1;
 
 	Patch68k(
-		0x3f2,      // ExtFS:
+		0x3f2,      // ToExtFS:
 		"2f38 0110" //       move.l  StkLowPt,-(sp)
 		"42b8 0110" //       clr.l   StkLowPt
 		"23cf %l"   //       move.l  sp,stack-4
