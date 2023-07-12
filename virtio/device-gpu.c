@@ -264,8 +264,6 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
-	lprintf_enable = 1;
-
 	switch (code) {
 	case kInitializeCommand:
 	case kReplaceCommand:
