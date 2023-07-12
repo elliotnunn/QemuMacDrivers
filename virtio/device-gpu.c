@@ -6,19 +6,21 @@
 #include <fp.h>
 #include <Gestalt.h>
 #include <LowMem.h>
+#include <MixedMode.h>
 #include <NameRegistry.h>
 #include <string.h>
+#include <Traps.h>
 #include <Video.h>
 #include <VideoServices.h>
 
 #include "allocator.h"
 #include "atomic.h"
 #include "blit.h"
-#include "debugpollpatch.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
 #include "lateboothook.h"
 #include "lprintf.h"
+#include "patch68k.h"
 #include "transport.h"
 #include "structs-gpu.h"
 #include "virgl.h"
@@ -67,6 +69,7 @@ static bool mode(int new_depth, uint32_t new_rez);
 static uint32_t setVirtioScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list);
 static void notificationProc(NMRecPtr nmReqPtr);
 static void notificationAtomic(void *nmReqPtr);
+static void debugPoll(void);
 static void updateScreen(short t, short l, short b, short r);
 static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
 static void perfTest(void);
@@ -259,6 +262,8 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
+	lprintf_enable = 1;
+
 	switch (code) {
 	case kInitializeCommand:
 	case kReplaceCommand:
@@ -378,8 +383,18 @@ static OSStatus initialize(DriverInitInfo *info) {
 	vbltime = AddDurationToAbsolute(FAST_REFRESH, UpTime());
 	SetInterruptTimer(&vbltime, VBL, NULL, &vbltimer);
 
-	// Catch MacsBug redraws (when interrupts are disabled)
-	InstallDebugPollPatch();
+	// MacsBug disables interrupts (including our frame timer)
+	// so catch when it polls the keyboard (continuously)
+	Patch68k(
+		_DebugUtil,
+		"0c80 00000003" //      cmp.l   #3,d0
+		"660e"          //      bne.s   old
+		"48e7 e0e0"     //      movem.l d0-d2/a0-a2,-(sp)
+		"4eb9 %l"       //      jsr     debugPoll
+		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
+		"4ef9 %o",      // old: jmp     originalDebugUtil
+		NewRoutineDescriptor((ProcPtr)debugPoll, kPascalStackBased, GetCurrentISA())
+	);
 
 	InstallLateBootHook();
 
@@ -728,7 +743,7 @@ void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 	}
 }
 
-void DebugPollCallback(void) {
+static void debugPoll(void) {
 	// If we enter the debugger with all descriptors in flight (rare),
 	// we will stall waiting for an interrupt to free up a descriptor.
 	while (freebufs == 0) QPoll(0);

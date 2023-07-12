@@ -16,6 +16,7 @@ COMMON_PPC = \
 	allocator-ppc.o \
 	atomic-ppc.o \
 	lprintf.o \
+	patch68k.o \
 	scc.o \
 
 .PHONY: ../bootstrap/systemfolder/tbxi.src/Parcels.src/9p.ndrv
@@ -26,7 +27,7 @@ COMMON_PPC = \
 ../builds/qemu_vga.ndrv: device-gpu.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
 
-device-gpu.so: device-gpu.o blit.o virgl.o debugpollpatch.o dirtyrectpatch.o \
+device-gpu.so: device-gpu.o blit.o virgl.o dirtyrectpatch.o \
 gammatables.o lateboothook.o ${COMMON_PPC}
 	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
 
