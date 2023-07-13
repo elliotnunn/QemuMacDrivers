@@ -337,7 +337,7 @@ static long fileMgrHook(void *pb, long selector) {
 	return result;
 }
 
-static OSErr MyMountVol(struct IOParam *pb) {
+static OSErr fileMgrMountVol(struct IOParam *pb) {
 	if (pb->ioVRefNum != drvNum) return extFSErr;
 	if (mounted) return volOnLinErr;
 
@@ -370,7 +370,7 @@ static OSErr MyMountVol(struct IOParam *pb) {
 // TODO: search the FCB array for open files on this volume, set bit 6
 // TODO: when given a WD refnum, return directory valence as the file count
 // TODO: fake used/free alloc blocks (there are limits depending on H bit)
-static OSErr MyGetVolInfo(struct HVolumeParam *pb) {
+static OSErr fileMgrGetVolInfo(struct HVolumeParam *pb) {
 	if (pb->ioVolIndex > 0) {
 		// Index into volume queue
 		struct VCB *v = (struct VCB *)GetVCBQHdr()->qHead;
@@ -435,7 +435,7 @@ static OSErr MyGetVolInfo(struct HVolumeParam *pb) {
 // -->    36    ioReqCount    long    size of buffer area
 // <--    40    ioActCount    long    length of vol parms data
 
-static OSErr MyGetVolParms(struct HIOParam *pb) {
+static OSErr fileMgrGetVolParms(struct HIOParam *pb) {
 	if (!determineNumStr(pb)) return extFSErr;
 
 	struct GetVolParmsInfoBuffer buf = {
@@ -484,7 +484,7 @@ static OSErr MyGetVolParms(struct HIOParam *pb) {
 // <--    100   ioFlParID      long word    <--    100    ioDrParID   long word
 // <--    104   ioFlClpSiz     long word
 
-static OSErr MyGetFileInfo(struct HFileInfo *pb) {
+static OSErr fileMgrGetFileInfo(struct HFileInfo *pb) {
 	enum {MYFID=3, LISTFID=4};
 
 	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
@@ -607,7 +607,7 @@ static OSErr MyGetFileInfo(struct HFileInfo *pb) {
 }
 
 // Problem: what if the leaf doesn't exist?
-static OSErr MyMakeFSSpec(struct HIOParam *pb) {
+static OSErr fileMgrMakeFSSpec(struct HIOParam *pb) {
 	if (!determineNumStr(pb)) return extFSErr;
 
 	int32_t cnid = pbDirID(pb);
@@ -627,7 +627,7 @@ static OSErr MyMakeFSSpec(struct HIOParam *pb) {
 	return noErr;
 }
 
-static OSErr MyOpen(struct HFileParam *pb) {
+static OSErr fileMgrOpen(struct HFileParam *pb) {
 	pb->ioFRefNum = 0;
 
 	if (!determineNumStr(pb)) return extFSErr;
@@ -692,7 +692,7 @@ static OSErr MyOpen(struct HFileParam *pb) {
 	return noErr;
 }
 
-static OSErr MyClose(struct IOParam *pb) {
+static OSErr fileMgrClose(struct IOParam *pb) {
 	struct FCBRec *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
@@ -709,7 +709,7 @@ static OSErr MyClose(struct IOParam *pb) {
 	return noErr;
 }
 
-static OSErr MyRead(struct IOParam *pb) {
+static OSErr fileMgrRead(struct IOParam *pb) {
 	if (pb->ioReqCount < 0) return paramErr;
 
 	struct FCBRec *fcb;
@@ -1046,19 +1046,19 @@ static bool visName(const char *name) {
 // This makes it easy to have a selector return noErr without a function
 static struct handler handler(unsigned short selector) {
 	switch (selector & 0xf0ff) {
-	case kFSMOpen: return (struct handler){MyOpen};
-	case kFSMClose: return (struct handler){MyClose};
-	case kFSMRead: return (struct handler){MyRead};
+	case kFSMOpen: return (struct handler){fileMgrOpen};
+	case kFSMClose: return (struct handler){fileMgrClose};
+	case kFSMRead: return (struct handler){fileMgrRead};
 	case kFSMWrite: return (struct handler){NULL, extFSErr};
-	case kFSMGetVolInfo: return (struct handler){MyGetVolInfo};
+	case kFSMGetVolInfo: return (struct handler){fileMgrGetVolInfo};
 	case kFSMCreate: return (struct handler){NULL, extFSErr};
 	case kFSMDelete: return (struct handler){NULL, extFSErr};
-	case kFSMOpenRF: return (struct handler){MyOpen};
+	case kFSMOpenRF: return (struct handler){fileMgrOpen};
 	case kFSMRename: return (struct handler){NULL, extFSErr};
-	case kFSMGetFileInfo: return (struct handler){MyGetFileInfo};
+	case kFSMGetFileInfo: return (struct handler){fileMgrGetFileInfo};
 	case kFSMSetFileInfo: return (struct handler){NULL, extFSErr};
 	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
-	case kFSMMountVol: return (struct handler){MyMountVol};
+	case kFSMMountVol: return (struct handler){fileMgrMountVol};
 	case kFSMAllocate: return (struct handler){NULL, extFSErr};
 	case kFSMGetEOF: return (struct handler){NULL, extFSErr};
 	case kFSMSetEOF: return (struct handler){NULL, extFSErr};
@@ -1079,7 +1079,7 @@ static struct handler handler(unsigned short selector) {
 	case kFSMDirCreate: return (struct handler){NULL, extFSErr};
 	case kFSMGetWDInfo: return (struct handler){NULL, extFSErr};
 	case kFSMGetFCBInfo: return (struct handler){NULL, extFSErr};
-	case kFSMGetCatInfo: return (struct handler){MyGetFileInfo};
+	case kFSMGetCatInfo: return (struct handler){fileMgrGetFileInfo};
 	case kFSMSetCatInfo: return (struct handler){NULL, extFSErr};
 	case kFSMSetVolInfo: return (struct handler){NULL, extFSErr};
 	case kFSMLockRng: return (struct handler){NULL, extFSErr};
@@ -1090,8 +1090,8 @@ static struct handler handler(unsigned short selector) {
 	case kFSMResolveFileIDRef: return (struct handler){NULL, extFSErr};
 	case kFSMExchangeFiles: return (struct handler){NULL, extFSErr};
 	case kFSMCatSearch: return (struct handler){NULL, extFSErr};
-	case kFSMOpenDF: return (struct handler){MyOpen};
-	case kFSMMakeFSSpec: return (struct handler){MyMakeFSSpec};
+	case kFSMOpenDF: return (struct handler){fileMgrOpen};
+	case kFSMMakeFSSpec: return (struct handler){fileMgrMakeFSSpec};
 	case kFSMDTGetPath: return (struct handler){NULL, extFSErr};
 	case kFSMDTCloseDown: return (struct handler){NULL, extFSErr};
 	case kFSMDTAddIcon: return (struct handler){NULL, extFSErr};
@@ -1108,7 +1108,7 @@ static struct handler handler(unsigned short selector) {
 	case kFSMDTGetInfo: return (struct handler){NULL, extFSErr};
 	case kFSMDTOpenInform: return (struct handler){NULL, extFSErr};
 	case kFSMDTDelete: return (struct handler){NULL, extFSErr};
-	case kFSMGetVolParms: return (struct handler){MyGetVolParms};
+	case kFSMGetVolParms: return (struct handler){fileMgrGetVolParms};
 	case kFSMGetLogInInfo: return (struct handler){NULL, extFSErr};
 	case kFSMGetDirAccess: return (struct handler){NULL, extFSErr};
 	case kFSMSetDirAccess: return (struct handler){NULL, extFSErr};
