@@ -514,7 +514,7 @@ static const char *drvrgestaltname(long code) {
 		case 'diad': return "kdcAddDriveWithInfo";
 		case 'dev1': return "kdgATADev1";
 		case 'dvrf': return "kdgDeviceReference";
-		case 'nmrg': return "kdrvrgestaltnameRegistryEntry";
+		case 'nmrg': return "kdgNameRegistryEntry";
 		case 'info': return "kdgDeviceModelInfo";
 		case 'mdty': return "kdgSupportedMediaTypes";
 		case 'ofpt': return "kdgOpenFirmwareBootSupport";
