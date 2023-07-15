@@ -8,10 +8,34 @@
 static const char *minilang(const char *pb, unsigned short selector, int pre);
 static const char *callname(unsigned short selector);
 static const char *errname(short err);
+static const char *controlname(short code);
+static const char *statusname(short code);
+static const char *drvrgestaltname(long code);
+static const char *drvrconfname(long code);
 
 // No need to worry about the "usual" fields like ioTrap
 static const char *minilang(const char *pb, unsigned short selector, int pre) {
 	switch (((long)selector & 0xf0ff) * (pre ? -1 : 1)) {
+	case -0xa004: // Control
+		if (*(short *)(pb+26) == 43) {
+			return "ioVRefNum22w ioRefNum24w csCode26g dcSelector28t dcParameter32l";
+		} else {
+			return "ioVRefNum22w ioRefNum24w csCode26g csParam28l";
+		}
+	case 0xa004:
+		return "";
+	case -0xa005: // Status
+		if (*(short *)(pb+26) == 43) {
+			return "ioVRefNum22w ioRefNum24w csCode26G dgSelector28T";
+		} else {
+			return "ioVRefNum22w ioRefNum24w csCode26G csParam28l";
+		}
+	case 0xa005:
+		if (*(short *)(pb+26) == 43) {
+			return "ioVRefNum22w ioRefNum24w csCode26g dgResponse32l dgResponse36l dgResponse40l dgResponse44l";
+		} else {
+			return "csParam28l";
+		}
 	case -0xa007: // GetVolInfo
 		return "ioNamePtr18s ioVRefNum22w ioVolIndex28w";
 	case 0xa007:
@@ -91,9 +115,7 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 		strcpy(name, callname(selector));
 		if ((selector&0x200) == 0 && name[0] == 'H')
 			memmove(name, name+1, 127); // cut off the H
-		for (int i=0; i<sizeof(name); i++)
-			name[i] = toupper(name[i]);
-		SPRINTF("%s: %p", name, pb);
+		SPRINTF("%s(%p)", name, pb);
 	}
 	NEWLINE();
 
@@ -144,6 +166,18 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 			case 'b':
 				SPRINTF("%02x", *(unsigned char *)(pb+offset));
 				break;
+			case 't':
+				SPRINTF("'%.4s' %s", pb+offset, drvrconfname(*(long *)(pb+offset)));
+				break;
+			case 'T':
+				SPRINTF("'%.4s' %s", pb+offset, drvrgestaltname(*(long *)(pb+offset)));
+				break;
+			case 'g':
+				SPRINTF("%d %s", *(unsigned short *)(pb+offset), controlname(*(unsigned short *)(pb+offset)));
+				break;
+			case 'G':
+				SPRINTF("%d %s", *(unsigned short *)(pb+offset), statusname(*(unsigned short *)(pb+offset)));
+				break;
 			case 's':
 				{
 					unsigned char *pstring = *(unsigned char **)((char *)pb+offset);
@@ -190,6 +224,8 @@ static const char *callname(unsigned short selector) {
 		case 0xa001: return "Close";
 		case 0xa002: return "Read";
 		case 0xa003: return "Write";
+		case 0xa004: return "Control";
+		case 0xa005: return "Status";
 		case 0xa007: return "HGetVolInfo";
 		case 0xa008: return "HCreate";
 		case 0xa009: return "HDelete";
@@ -400,6 +436,97 @@ static const char *errname(short err) {
 		case -124: return "volGoneErr";
 		case -125: return "updPixMemErr";
 		case -128: return "userCanceledErr";
+		default: return "(unknown)";
+	}
+}
+
+static const char *controlname(short code) {
+	switch (code) {
+		case 5: return "kVerify";
+		case 6: return "kFormat";
+		case 7: return "kEject";
+		case 8: return "kSetTagBuffer";
+		case 9: return "kTrackCache";
+		case 21: return "kDriveIcon";
+		case 22: return "kMediaIcon";
+		case 23: return "kDriveInfo";
+		case 43: return "kDriverConfigureCode";
+		case 44: return "kSetStartupPartition";
+		case 45: return "kSetStartupMount";
+		case 46: return "kLockPartition";
+		case 48: return "kClearPartitionMount";
+		case 49: return "kUnlockPartition";
+		case 50: return "kRegisterPartition";
+		case 51: return "kGetADrive";
+		case 52: return "kProhibitMounting";
+		case 60: return "kMountVolume";
+		case 70: return "kdgLowPowerMode";
+		default: return "(unknown)";
+	}
+}
+
+static const char *statusname(short code) {
+	switch (code) {
+		case 6: return "kReturnFormatList";
+		case 8: return "kDriveStatus";
+		case 10: return "kMFMStatus";
+		case 43: return "kDriverGestaltCode";
+		case 44: return "kGetStartupStatus";
+		case 45: return "kGetMountStatus";
+		case 46: return "kGetLockStatus";
+		case 50: return "kGetPartitionStatus";
+		case 51: return "kGetPartInfo";
+		case 70: return "kdgLowPowerMode";
+		case 120: return "kdgReturnDeviceID";
+		case 121: return "kdgGetCDDeviceInfo";
+		case 123: return "kGetErrorInfo";
+		case 124: return "kGetDriveInfo";
+		case 125: return "kGetDriveCapacity";
+		default: return "(unknown)";
+	}
+}
+
+static const char *drvrgestaltname(long code) {
+	switch (code) {
+		case 'vers': return "kdgVersion";
+		case 'devt': return "kdgDeviceType";
+		case 'intf': return "kdgInterface";
+		case 'sync': return "kdgSync";
+		case 'boot': return "kdgBoot";
+		case 'wide': return "kdgWide";
+		case 'purg': return "kdgPurge";
+		case 'lpwr': return "kdgSupportsSwitching";
+		case 'pmn3': return "kdgMin3VPower";
+		case 'pmn5': return "kdgMin5VPower";
+		case 'pmx3': return "kdgMax3VPower";
+		case 'pmx5': return "kdgMax5VPower";
+		case 'psta': return "kdgInHighPower";
+		case 'psup': return "kdgSupportsPowerCtl";
+		case 'dAPI': return "kdgAPI";
+		case 'ejec': return "kdgEject";
+		case 'flus': return "kdgFlush";
+		case 'vmop': return "kdgVMOptions";
+		case 'minf': return "kdgMediaInfo";
+		case 'dics': return "kdgPhysDriveIconSuite";
+		case 'mics': return "kdgMediaIconSuite";
+		case 'mnam': return "kdgMediaName";
+		case 'digt': return "kdgGetDriveAddInfo";
+		case 'diad': return "kdcAddDriveWithInfo";
+		case 'dev1': return "kdgATADev1";
+		case 'dvrf': return "kdgDeviceReference";
+		case 'nmrg': return "kdrvrgestaltnameRegistryEntry";
+		case 'info': return "kdgDeviceModelInfo";
+		case 'mdty': return "kdgSupportedMediaTypes";
+		case 'ofpt': return "kdgOpenFirmwareBootSupport";
+		case 'ofbt': return "kdgOpenFirmwareBootingSupport";
+		default: return "(unknown)";
+	}
+}
+
+static const char *drvrconfname(long code) {
+	switch (code) {
+		case 'flus': return "kdcFlush";
+		case 'vmop': return "kdcVMOptions";
 		default: return "(unknown)";
 	}
 }

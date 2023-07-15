@@ -7,6 +7,7 @@ Therefore we need this mapping:
 */
 
 #include <Disks.h>
+#include <DriverGestalt.h>
 #include <DriverServices.h>
 #include <Files.h>
 #include <FSM.h>
@@ -65,7 +66,6 @@ static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static long disposePtrShield(Ptr ptr, void *caller);
 static void secondaryInitialize(void);
-static long fileMgrHook(void *pb, long selector);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec wdcb(short refnum);
@@ -77,7 +77,10 @@ static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
 static void autoVolName(unsigned char *pas);
 static bool visName(const char *name);
-static struct handler handler(unsigned short selector);
+static long fsCall(void *pb, long selector);
+static struct handler fsHandler(unsigned short selector);
+static OSErr controlStatusCall(struct CntrlParam *pb);
+static struct handler controlStatusHandler(long selector);
 
 void *disposePtrPatch;
 static short drvRefNum;
@@ -132,10 +135,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = finalize(pb.finalInfo);
 		break;
 	case kControlCommand:
-		err = controlErr;
-		break;
 	case kStatusCommand:
-		err = statusErr;
+		err = controlStatusCall(&(*pb.pb).cntrlParam);
 		break;
 	case kOpenCommand:
 	case kCloseCommand:
@@ -277,7 +278,7 @@ static void secondaryInitialize(void) {
 		"48e7 60e0" //       movem.l d1-d2/a0-a2,-(sp)
 		"2f00"      //       move.l  d0,-(sp)
 		"2f08"      //       move.l  a0,-(sp)
-		"4eb9 %l"   //       jsr     fileMgrHook
+		"4eb9 %l"   //       jsr     fsCall
 		"504f"      //       addq    #8,sp
 		"4cdf 0706" //       movem.l (sp)+,d1-d2/a0-a2
 		"0c40 ffc6" //       cmp.w   #extFSErr,d0
@@ -293,7 +294,7 @@ static void secondaryInitialize(void) {
 
 		stack + STACKSIZE - 100,
 		stack + STACKSIZE - 100,
-		NewRoutineDescriptor((ProcPtr)fileMgrHook,
+		NewRoutineDescriptor((ProcPtr)fsCall,
 			kCStackBased
 				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
 				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
@@ -305,39 +306,7 @@ static void secondaryInitialize(void) {
 	PBMountVol((void *)&pb);
 }
 
-static long fileMgrHook(void *pb, long selector) {
-	unsigned short trap = ((struct IOParam *)pb)->ioTrap;
-
-	// Use the selector format of the File System Manager
-	if ((trap & 0xff) == 0x60) { // HFSDispatch
-		selector = (selector & 0xff) | (trap & 0xf00);
-	} else {
-		selector = trap;
-	}
-
-	lprintf("%s", PBPrint(pb, selector, 1));
-	strcat(lprintf_prefix, "     ");
-
-	callcnt++;
-
-	OSErr result;
-	struct handler h = handler(selector);
-
-	if (h.func == NULL) {
-		result = h.err;
-	} else {
-		// Unsafe calling convention magic
-		typedef OSErr (*handlerFunc)(void *pb);
-		result = ((handlerFunc)h.func)(pb);
-	}
-
-	lprintf_prefix[strlen(lprintf_prefix) - 5] = 0;
-	lprintf("%s", PBPrint(pb, selector, result));
-
-	return result;
-}
-
-static OSErr fileMgrMountVol(struct IOParam *pb) {
+static OSErr fsMountVol(struct IOParam *pb) {
 	if (pb->ioVRefNum != drvNum) return extFSErr;
 	if (mounted) return volOnLinErr;
 
@@ -370,7 +339,7 @@ static OSErr fileMgrMountVol(struct IOParam *pb) {
 // TODO: search the FCB array for open files on this volume, set bit 6
 // TODO: when given a WD refnum, return directory valence as the file count
 // TODO: fake used/free alloc blocks (there are limits depending on H bit)
-static OSErr fileMgrGetVolInfo(struct HVolumeParam *pb) {
+static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
 	if (pb->ioVolIndex > 0) {
 		// Index into volume queue
 		struct VCB *v = (struct VCB *)GetVCBQHdr()->qHead;
@@ -435,7 +404,7 @@ static OSErr fileMgrGetVolInfo(struct HVolumeParam *pb) {
 // -->    36    ioReqCount    long    size of buffer area
 // <--    40    ioActCount    long    length of vol parms data
 
-static OSErr fileMgrGetVolParms(struct HIOParam *pb) {
+static OSErr fsGetVolParms(struct HIOParam *pb) {
 	if (!determineNumStr(pb)) return extFSErr;
 
 	struct GetVolParmsInfoBuffer buf = {
@@ -484,7 +453,7 @@ static OSErr fileMgrGetVolParms(struct HIOParam *pb) {
 // <--    100   ioFlParID      long word    <--    100    ioDrParID   long word
 // <--    104   ioFlClpSiz     long word
 
-static OSErr fileMgrGetFileInfo(struct HFileInfo *pb) {
+static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	enum {MYFID=3, LISTFID=4};
 
 	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
@@ -607,7 +576,7 @@ static OSErr fileMgrGetFileInfo(struct HFileInfo *pb) {
 }
 
 // Problem: what if the leaf doesn't exist?
-static OSErr fileMgrMakeFSSpec(struct HIOParam *pb) {
+static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	if (!determineNumStr(pb)) return extFSErr;
 
 	int32_t cnid = pbDirID(pb);
@@ -627,7 +596,7 @@ static OSErr fileMgrMakeFSSpec(struct HIOParam *pb) {
 	return noErr;
 }
 
-static OSErr fileMgrOpen(struct HFileParam *pb) {
+static OSErr fsOpen(struct HFileParam *pb) {
 	pb->ioFRefNum = 0;
 
 	if (!determineNumStr(pb)) return extFSErr;
@@ -692,7 +661,7 @@ static OSErr fileMgrOpen(struct HFileParam *pb) {
 	return noErr;
 }
 
-static OSErr fileMgrClose(struct IOParam *pb) {
+static OSErr fsClose(struct IOParam *pb) {
 	struct FCBRec *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
@@ -709,7 +678,7 @@ static OSErr fileMgrClose(struct IOParam *pb) {
 	return noErr;
 }
 
-static OSErr fileMgrRead(struct IOParam *pb) {
+static OSErr fsRead(struct IOParam *pb) {
 	if (pb->ioReqCount < 0) return paramErr;
 
 	struct FCBRec *fcb;
@@ -1043,22 +1012,54 @@ static bool visName(const char *name) {
 	return true;
 }
 
+static long fsCall(void *pb, long selector) {
+	unsigned short trap = ((struct IOParam *)pb)->ioTrap;
+
+	// Use the selector format of the File System Manager
+	if ((trap & 0xff) == 0x60) { // HFSDispatch
+		selector = (selector & 0xff) | (trap & 0xf00);
+	} else {
+		selector = trap;
+	}
+
+	lprintf("FS_%s", PBPrint(pb, selector, 1));
+	strcat(lprintf_prefix, "     ");
+
+	callcnt++;
+
+	OSErr result;
+	struct handler h = fsHandler(selector);
+
+	if (h.func == NULL) {
+		result = h.err;
+	} else {
+		// Unsafe calling convention magic
+		typedef OSErr (*handlerFunc)(void *pb);
+		result = ((handlerFunc)h.func)(pb);
+	}
+
+	lprintf_prefix[strlen(lprintf_prefix) - 5] = 0;
+	lprintf("%s", PBPrint(pb, selector, result));
+
+	return result;
+}
+
 // This makes it easy to have a selector return noErr without a function
-static struct handler handler(unsigned short selector) {
+static struct handler fsHandler(unsigned short selector) {
 	switch (selector & 0xf0ff) {
-	case kFSMOpen: return (struct handler){fileMgrOpen};
-	case kFSMClose: return (struct handler){fileMgrClose};
-	case kFSMRead: return (struct handler){fileMgrRead};
+	case kFSMOpen: return (struct handler){fsOpen};
+	case kFSMClose: return (struct handler){fsClose};
+	case kFSMRead: return (struct handler){fsRead};
 	case kFSMWrite: return (struct handler){NULL, extFSErr};
-	case kFSMGetVolInfo: return (struct handler){fileMgrGetVolInfo};
+	case kFSMGetVolInfo: return (struct handler){fsGetVolInfo};
 	case kFSMCreate: return (struct handler){NULL, extFSErr};
 	case kFSMDelete: return (struct handler){NULL, extFSErr};
-	case kFSMOpenRF: return (struct handler){fileMgrOpen};
+	case kFSMOpenRF: return (struct handler){fsOpen};
 	case kFSMRename: return (struct handler){NULL, extFSErr};
-	case kFSMGetFileInfo: return (struct handler){fileMgrGetFileInfo};
+	case kFSMGetFileInfo: return (struct handler){fsGetFileInfo};
 	case kFSMSetFileInfo: return (struct handler){NULL, extFSErr};
 	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
-	case kFSMMountVol: return (struct handler){fileMgrMountVol};
+	case kFSMMountVol: return (struct handler){fsMountVol};
 	case kFSMAllocate: return (struct handler){NULL, extFSErr};
 	case kFSMGetEOF: return (struct handler){NULL, extFSErr};
 	case kFSMSetEOF: return (struct handler){NULL, extFSErr};
@@ -1079,7 +1080,7 @@ static struct handler handler(unsigned short selector) {
 	case kFSMDirCreate: return (struct handler){NULL, extFSErr};
 	case kFSMGetWDInfo: return (struct handler){NULL, extFSErr};
 	case kFSMGetFCBInfo: return (struct handler){NULL, extFSErr};
-	case kFSMGetCatInfo: return (struct handler){fileMgrGetFileInfo};
+	case kFSMGetCatInfo: return (struct handler){fsGetFileInfo};
 	case kFSMSetCatInfo: return (struct handler){NULL, extFSErr};
 	case kFSMSetVolInfo: return (struct handler){NULL, extFSErr};
 	case kFSMLockRng: return (struct handler){NULL, extFSErr};
@@ -1090,8 +1091,8 @@ static struct handler handler(unsigned short selector) {
 	case kFSMResolveFileIDRef: return (struct handler){NULL, extFSErr};
 	case kFSMExchangeFiles: return (struct handler){NULL, extFSErr};
 	case kFSMCatSearch: return (struct handler){NULL, extFSErr};
-	case kFSMOpenDF: return (struct handler){fileMgrOpen};
-	case kFSMMakeFSSpec: return (struct handler){fileMgrMakeFSSpec};
+	case kFSMOpenDF: return (struct handler){fsOpen};
+	case kFSMMakeFSSpec: return (struct handler){fsMakeFSSpec};
 	case kFSMDTGetPath: return (struct handler){NULL, extFSErr};
 	case kFSMDTCloseDown: return (struct handler){NULL, extFSErr};
 	case kFSMDTAddIcon: return (struct handler){NULL, extFSErr};
@@ -1108,7 +1109,7 @@ static struct handler handler(unsigned short selector) {
 	case kFSMDTGetInfo: return (struct handler){NULL, extFSErr};
 	case kFSMDTOpenInform: return (struct handler){NULL, extFSErr};
 	case kFSMDTDelete: return (struct handler){NULL, extFSErr};
-	case kFSMGetVolParms: return (struct handler){fileMgrGetVolParms};
+	case kFSMGetVolParms: return (struct handler){fsGetVolParms};
 	case kFSMGetLogInInfo: return (struct handler){NULL, extFSErr};
 	case kFSMGetDirAccess: return (struct handler){NULL, extFSErr};
 	case kFSMSetDirAccess: return (struct handler){NULL, extFSErr};
@@ -1159,5 +1160,51 @@ static struct handler handler(unsigned short selector) {
 	case kFSMDeleteFork: return (struct handler){NULL, extFSErr};
 	case kFSMIterateForks: return (struct handler){NULL, extFSErr};
 	default: return (struct handler){NULL, extFSErr};
+	}
+}
+
+static OSErr controlStatusCall(struct CntrlParam *pb) {
+	OSErr err = 100;
+
+	lprintf("Drvr_%s", PBPrint(pb, pb->ioTrap | 0xa000, 1));
+
+	// Coerce csCode or driverGestaltSelector into one long
+	// Negative is Status/DriverGestalt, positive is Control/DriverConfigure
+	long selector = pb->csCode;
+
+	if (selector == kDriverGestaltCode)
+		selector = ((struct DriverGestaltParam *)pb)->driverGestaltSelector;
+
+	if (selector > 0) {
+		if ((pb->ioTrap & 0xa8ff) == _Status)
+			selector = -selector;
+
+		struct handler h = controlStatusHandler(selector);
+
+		if (h.func == NULL) {
+			err = h.err;
+		} else {
+			// Unsafe calling convention magic
+			typedef OSErr (*handlerFunc)(void *pb);
+			err = ((handlerFunc)h.func)(pb);
+		}
+	}
+
+	if (err == 100) {
+		if ((pb->ioTrap & 0xa8ff) == _Status)
+			err = statusErr;
+		else
+			err = controlErr;
+	}
+
+	lprintf("%s", PBPrint(pb, pb->ioTrap | 0xa000, err));
+
+	return err;
+}
+
+static struct handler controlStatusHandler(long selector) {
+	switch (selector & 0xf0ff) {
+// 	case 'boot': return (struct handler){MyDCBoot};
+	default: return (struct handler){NULL, selector>0 ? statusErr : controlErr};
 	}
 }
