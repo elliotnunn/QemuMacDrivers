@@ -120,7 +120,7 @@ char *PBPrint(void *pb, unsigned short selector, short errcode) {
 	NEWLINE();
 
 	if (errcode<=0) {
-		SPRINTF("OSErr       %d %s", errcode, errname(errcode));
+		SPRINTF("result      %d %s", errcode, errname(errcode));
 		NEWLINE();
 	}
 
