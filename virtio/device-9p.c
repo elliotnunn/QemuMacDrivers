@@ -15,6 +15,7 @@ Therefore we need this mapping:
 #include <LowMem.h>
 #include <Memory.h>
 #include <MixedMode.h>
+#include <Start.h>
 #include <Traps.h>
 
 #include "hashtab.h"
@@ -69,10 +70,12 @@ static void secondaryInitialize(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec wdcb(short refnum);
+static void wdcbSet(short refnum, struct WDCBRec val);
 static int walkToCNID(int32_t cnid, uint32_t fid);
 static int32_t makeCNID(int32_t parent, char *name);
 static void cnidPrint(int32_t cnid);
-static struct DrvQEl *findDrive(short drvNum);
+static struct DrvQEl *findDrive(short num);
+static struct VCB *findVol(short num);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
 static void autoVolName(unsigned char *pas);
@@ -83,12 +86,11 @@ static OSErr controlStatusCall(struct CntrlParam *pb);
 static struct handler controlStatusHandler(long selector);
 
 void *disposePtrPatch;
-static short drvRefNum;
+static short drvrRefNum;
 static unsigned long callcnt;
 static struct Qid9 root;
 static int32_t cnidCtr = 100;
 static Handle finderwin;
-static short drvNum;
 static bool mounted;
 static char preferName[28];
 static struct flagdqe dqe = {
@@ -108,6 +110,33 @@ static struct VCB vcb = {
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
+};
+static const short bootBlocks[] = {
+	0x4c4b, 0x6000, 0x0086, 0x4418, 0x0000, 0x0653, 0x7973, 0x7465, // LK`...D....Syste
+	0x6d00, 0x0000, 0x0000, 0x0000, 0x0000, 0x0646, 0x696e, 0x6465, // m..........Finde
+	0x7200, 0x0000, 0x0000, 0x0000, 0x0000, 0x074d, 0x6163, 0x7342, // r..........MacsB
+	0x7567, 0x0000, 0x0000, 0x0000, 0x0000, 0x0c44, 0x6973, 0x6173, // ug.........Disas
+	0x7365, 0x6d62, 0x6c65, 0x7200, 0x0000, 0x0d53, 0x7461, 0x7274, // sembler....Start
+	0x5570, 0x5363, 0x7265, 0x656e, 0x0000, 0x0646, 0x696e, 0x6465, // UpScreen...Finde
+	0x7200, 0x0000, 0x0000, 0x0000, 0x0000, 0x0943, 0x6c69, 0x7062, // r..........Clipb
+	0x6f61, 0x7264, 0x0000, 0x0000, 0x0000, 0x000a, 0x0014, 0x0000, // oard............
+	0x4300, 0x0000, 0x8000, 0x0002, 0x0000, 0x4a78, 0x028e, 0x6b46, // C.........Jx..kF
+	0x2078, 0x02ae, 0x3228, 0x0008, 0x7cfe, 0x5446, 0x303b, 0x603c, //  x..2(..|.TF0;`<
+	0x6758, 0xb240, 0x66f4, 0x0c01, 0x0076, 0x6210, 0x2078, 0x02a6, // gX.@f....vb. x..
+	0xd1fa, 0xffd4, 0xa057, 0x21f8, 0x02a6, 0x0118, 0x584f, 0x2e0f, // .....W!.....XO..
+	0x6138, 0x323b, 0x6022, 0x4a40, 0x6704, 0x323b, 0x6024, 0x2078, // a82;`"J@g.2;`$ x
+	0x02ae, 0x4ef0, 0x1000, 0x7062, 0xa9c9, 0x0075, 0x0276, 0x0178, // ..N...pb...u.v.x
+	0x037a, 0x067c, 0x0000, 0x0a44, 0x090e, 0x0f1c, 0x30e6, 0x1d96, // .z.|...D....0...
+	0x0b82, 0x0a52, 0x11ae, 0x336e, 0x203e, 0x41fa, 0xff0e, 0x43f8, // ...R..3n >A...C.
+	0x0ad8, 0x7010, 0xa02e, 0x41fa, 0xff12, 0x43f8, 0x02e0, 0x7010, // ..p...A...C...p.
+	0xa02e, 0x41fa, 0xff56, 0x43f8, 0x0970, 0x21c9, 0x096c, 0x7010, // ..A..VC..p!..lp.
+	0xa02e, 0x303a, 0xff58, 0xa06d, 0x303a, 0xff50, 0xa06c, 0x2047, // ..0:.X.m0:.P.l G
+	0x3178, 0x0210, 0x0016, 0xa00f, 0x6654, 0x42a8, 0x0012, 0x4268, // 1x......fTB...Bh
+	0x001c, 0xa207, 0x6640, 0x2868, 0x005e, 0x2168, 0x005a, 0x0030, // ....f@(h.^!h.Z.0
+	0x6710, 0x217c, 0x4552, 0x494b, 0x001c, 0x7001, 0xa260, 0x6626, // g.!|ERIK..p..`f&
+	0xa015, 0x554f, 0xa995, 0x4a5f, 0x6b1a, 0x594f, 0x2f3c, 0x626f, // ..UO..J_k.YO/<bo
+	0x6f74, 0x3f3c, 0x0002, 0xa9a0, 0x201f, 0x6712, 0x584f, 0x2640, // ot?<.... .g.XO&@
+	0x2053, 0x4ed0, 0x702b, 0x3f00, 0x2047, 0xa00e, 0x301f, 0x4e75, //  SN.p+?. G..0.Nu
 };
 
 DriverDescription TheDriverDescription = {
@@ -142,10 +171,19 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	case kCloseCommand:
 		err = noErr;
 		break;
-	case kReadCommand:
-		lprintf("Attempt to READ FROM THIS DISK!\n");
-		err = paramErr;
+	case kReadCommand: {
+		struct IOParam *param = &pb.pb->ioParam;
+		param->ioActCount = param->ioReqCount;
+		for (long i=0; i<param->ioReqCount; i++) {
+			if (param->ioPosOffset+i < sizeof(bootBlocks)) {
+				param->ioBuffer[i] = ((char *)&bootBlocks)[param->ioPosOffset+i];
+			} else {
+				param->ioBuffer[i] = 0;
+			}
+		}
+		err = noErr;
 		break;
+		}
 	default:
 		err = paramErr;
 		break;
@@ -166,7 +204,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static OSStatus initialize(DriverInitInfo *info) {
 	lprintf_enable = true;
 
-	drvRefNum = info->refNum;
+	drvrRefNum = info->refNum;
 
 	OSStatus err;
 
@@ -204,10 +242,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	lprintf("attached to root with path %08x%08x\n", (uint32_t)(root.path>>32), (uint32_t)root.path);
 
-	drvNum=4; // lower numbers reserved
-	while (findDrive(drvNum) != NULL) drvNum++;
-	AddDrive(drvRefNum, drvNum, &dqe.dqe);
-	lprintf("drefnum %d\n", drvRefNum);
+	dqe.dqe.dQDrive=4; // lower numbers reserved
+	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
+	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
 
 	RegPropertyValueSize size = sizeof(preferName);
 	RegistryPropertyGet(&info->deviceEntry, "mount", preferName, &size);
@@ -215,6 +252,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Is the File Manager actually up yet?
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
 		secondaryInitialize();
+
+		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
+		PBMountVol((void *)&pb);
 	} else {
 		lprintf(".virtio9p: this is very early boot, not mounting\n");
 
@@ -238,6 +278,20 @@ static OSStatus initialize(DriverInitInfo *info) {
 					| RESULT_SIZE(kFourByteCode),
 				GetCurrentISA())
 		);
+
+		Patch68k(
+			_InitFS,
+			"48e7 e0e0" //     movem.l d0-d2/a0-a2,-(sp)
+			"4eb9 %o"   //     jsr     originalInitFS
+			"4eb9 %l"   //     jsr     secondaryInitialize
+			"4cdf 0707" //     movem.l (sp)+,d0-d2/a0-a2
+			"4e75",     //     rts
+			NewRoutineDescriptor((ProcPtr)secondaryInitialize,
+				kCStackBased,
+				GetCurrentISA())
+		);
+
+		SetTimeout(1); // give up on the default disk quickly
 	}
 
 	return noErr;
@@ -261,6 +315,8 @@ static void secondaryInitialize(void) {
 	static bool alreadyUp;
 	if (alreadyUp) return;
 	alreadyUp = true;
+
+	lprintf("Secondary init VCBQHdr=%x\n", (long)GetVCBQHdr()->qHead);
 
 	// External filesystems need a big stack, and they can't
 	// share the FileMgr stack because of reentrancy problems
@@ -301,13 +357,10 @@ static void secondaryInitialize(void) {
 				| RESULT_SIZE(kFourByteCode),
 			GetCurrentISA())
 	);
-
-	struct IOParam pb = {.ioVRefNum = drvNum};
-	PBMountVol((void *)&pb);
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
-	if (pb->ioVRefNum != drvNum) return extFSErr;
+	if (pb->ioVRefNum != dqe.dqe.dQDrive) return extFSErr;
 	if (mounted) return volOnLinErr;
 
 	if (preferName[0] != 0) {
@@ -323,16 +376,32 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	finderwin = NewHandleSysClear(2);
 
-	OSErr err;
+	vcb.vcbDrvNum = dqe.dqe.dQDrive;
+	vcb.vcbDRefNum = drvrRefNum;
+	vcb.vcbVRefNum = -1;
 
-	err = UTAddNewVCB(drvNum, &pb->ioVRefNum, &vcb);
-	if (err) return err;
+	while (findVol(vcb.vcbVRefNum) != NULL) vcb.vcbVRefNum--;
 
-	PostEvent(diskEvt, drvNum);
+	lprintf("RefNum roundup: driver=%d drive=%d volume=%d\n",
+		drvrRefNum, dqe.dqe.dQDrive, vcb.vcbVRefNum);
+
+	if (GetVCBQHdr()->qHead == NULL) {
+		LMSetDefVCBPtr((Ptr)&vcb);
+		*(short *)0x384 = vcb.vcbVRefNum; // DefVRefNum
+
+		wdcbSet(0, (struct WDCBRec){
+			.wdVCBPtr = &vcb,
+			.wdDirID = 2,
+		});
+	}
+
+	Enqueue((QElemPtr)&vcb, GetVCBQHdr());
+
+	PostEvent(diskEvt, dqe.dqe.dQDrive);
 
 	mounted = true;
-	if (vcb.vcbVRefNum & 1)
-		strcpy(lprintf_prefix, "                              ");
+// 	if (vcb.vcbVRefNum & 1)
+// 		strcpy(lprintf_prefix, "                              ");
 	return noErr;
 }
 
@@ -597,6 +666,8 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 }
 
 static OSErr fsOpen(struct HFileParam *pb) {
+	lprintf("Attempting open..\n");
+
 	pb->ioFRefNum = 0;
 
 	if (!determineNumStr(pb)) return extFSErr;
@@ -624,6 +695,7 @@ static OSErr fsOpen(struct HFileParam *pb) {
 		sprintf(rname, "%s.rsrc", rec->name);
 		if (Walk9(fid, fid, 2, (const char *[]){"..", rname}, NULL, NULL))
 			return fnfErr;
+		// TODO this actually doesn't check the error correctly
 	}
 
 	uint64_t size = 0;
@@ -657,6 +729,22 @@ static OSErr fsOpen(struct HFileParam *pb) {
 	mr31name(fcb->fcbCName, rec->name);
 
 	pb->ioFRefNum = refn;
+
+	return noErr;
+}
+
+static OSErr fsGetEOF(struct IOParam *pb) {
+	struct FCBRec *fcb;
+	if (UnivResolveFCB(pb->ioRefNum, &fcb))
+		return paramErr;
+
+	if (fcb->fcbFlNm == 0)
+		return fnOpnErr;
+
+	if (fcb->fcbVPtr != &vcb)
+		return extFSErr;
+
+	pb->ioMisc = (Ptr)fcb->fcbEOF;
 
 	return noErr;
 }
@@ -725,6 +813,11 @@ static OSErr fsRead(struct IOParam *pb) {
 
 		if (act != todo) break;
 	}
+
+	for (int i=0; i<pb->ioActCount; i++) {
+		lprintf("%02x", (unsigned char)pb->ioBuffer[i]);
+	}
+	lprintf("\n");
 
 // 	if (pb->ioActCount != pb->ioReqCount)
 // 		return eofErr;
@@ -852,6 +945,19 @@ static struct WDCBRec wdcb(short refnum) {
 	return ret;
 }
 
+static void wdcbSet(short refnum, struct WDCBRec val) {
+	void *table = (void *)unaligned32(0x372);
+
+	int16_t tblSize = *(int16_t *)table;
+	int16_t offset = refnum ? refnum+WDLO : 2;
+
+	struct WDCBRec ret = {};
+
+	if (offset>=2 && offset<tblSize && (offset%16)==2) {
+		memcpy(table+offset, &val, sizeof(struct WDCBRec));
+	}
+}
+
 // Does not actually check for the right volume: determine*() first.
 // If positive, return the "type" field from the qid
 // If negative, an error
@@ -918,12 +1024,24 @@ static void cnidPrint(int32_t cnid) {
 	lprintf("(root)");
 }
 
-static struct DrvQEl *findDrive(short drvNum) {
-        struct DrvQEl *drv;
-        for (drv=(void *)GetDrvQHdr()->qHead; drv!=NULL; drv=(void *)drv->qLink) {
-                if (drv->dQDrive == drvNum) return drv;
-        }
-        return NULL;
+static struct DrvQEl *findDrive(short num) {
+	for (struct DrvQEl *i=(struct DrvQEl *)GetDrvQHdr()->qHead;
+		i!=NULL;
+		i=(struct DrvQEl *)i->qLink
+	) {
+		if (i->dQDrive == num) return i;
+	}
+	return NULL;
+}
+
+static struct VCB *findVol(short num) {
+	for (struct VCB *i=(struct VCB *)GetVCBQHdr()->qHead;
+		i!=NULL;
+		i=(struct VCB *)i->qLink
+	) {
+		if (i->vcbVRefNum == num) return i;
+	}
+	return NULL;
 }
 
 // The "standard way":
@@ -1068,7 +1186,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
 	case kFSMMountVol: return (struct handler){fsMountVol};
 	case kFSMAllocate: return (struct handler){NULL, extFSErr};
-	case kFSMGetEOF: return (struct handler){NULL, extFSErr};
+	case kFSMGetEOF: return (struct handler){fsGetEOF};
 	case kFSMSetEOF: return (struct handler){NULL, extFSErr};
 	case kFSMFlushVol: return (struct handler){NULL, noErr};
 	case kFSMGetVol: return (struct handler){NULL, extFSErr};
