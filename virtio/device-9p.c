@@ -973,6 +973,13 @@ static char determineNum(void *_pb) {
 		} else {
 			return 0;
 		}
+	} else if (pb->ioVRefNum == 0) {
+		// Default volume (arguably also a WD)
+		if ((struct VCB *)LMGetDefVCBPtr() == &vcb) {
+			return 'v';
+		} else {
+			return 0;
+		}
 	} else {
 		// Drive number
 		if (pb->ioVRefNum == dqe.dqe.dQDrive) {
