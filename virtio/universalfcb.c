@@ -21,8 +21,8 @@ OSErr UnivAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
 		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xfe8, 0,
 			fileRefNum, fileCtrlBlockPtr);
 	} else {
-		void *base = fcbBase;
-		short len = *(short *)fcbBase;
+		void *base = fcbBase();
+		short len = *(short *)base;
 		for (short refnum=2; refnum<len; refnum+=94) {
 			if (*(long *)(base + refnum) == 0) {
 				*fileRefNum = refnum;
@@ -39,8 +39,8 @@ OSErr UnivResolveFCB(short fileRefNum, FCBRecPtr *fileCtrlBlockPtr) {
 		return CallUniversalProc(*(UniversalProcPtr *)0xe90, 0xee8, 5,
 			fileRefNum, fileCtrlBlockPtr);
 	} else {
-		void *base = fcbBase;
-		short len = *(short *)fcbBase;
+		void *base = fcbBase();
+		short len = *(short *)base;
 
 		if (fileRefNum < 2 || fileRefNum > len || fileRefNum % 94 != 2)
 			return paramErr;
