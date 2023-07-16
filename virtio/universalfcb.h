@@ -9,3 +9,4 @@
 
 OSErr UnivAllocateFCB(short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr);
 OSErr UnivResolveFCB(short fileRefNum, FCBRecPtr *fileCtrlBlockPtr);
+OSErr UnivIndexFCB(VCBPtr volCtrlBlockPtr, short *fileRefNum, FCBRecPtr *fileCtrlBlockPtr);

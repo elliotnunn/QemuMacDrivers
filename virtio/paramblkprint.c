@@ -69,6 +69,10 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 		return "ioVRefNum22w ioWDIndex26w ioWDProcID28l";
 	case 0x0007:
 		return "ioNamePtr18s ioVRefNum22w ioWDProcID28l ioWDVRefNum32w";
+	case -0x0008: // GetFCBInfo
+		return "ioVRefNum22w ioRefNum24w ioFCBIndx28l";
+	case 0x0008:
+		return "ioNamePtr18s ioRefNum24w ioFCBFlNm32l ioFCBFlags36w ioFCBStBlk38w ioFCBEOF40l ioFCBPLen44l ioFCBCrPs48l ioFCBVRefNum52w ioFCBClpSiz54l ioFCBParID58l";
 	case -0x0009: // GetCatInfo
 		if (*(short *)(pb+28) == 0) {
 			return "ioNamePtr18s ioVRefNum22w ioFDirIndex28w ioDirID48l";

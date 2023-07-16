@@ -747,6 +747,51 @@ static OSErr fsGetEOF(struct IOParam *pb) {
 	return noErr;
 }
 
+static OSErr fsGetFCBInfo(struct FCBPBRec *pb) {
+	short ref;
+	struct FCBRec *fcb;
+
+	if (pb->ioFCBIndx == 0) {
+		// File refNum provided
+		ref = pb->ioRefNum;
+		OSErr err = UnivResolveFCB(ref, &fcb);
+		if (err) return err;
+	} else if (pb->ioFCBIndx > 0) {
+		// Index provided, possibly with a "filter" vRefNum
+		struct VCB *volfilter;
+		if (pb->ioVRefNum == 0) {
+			volfilter = NULL;
+		} else {
+			if (!determineNum(pb)) return extFSErr;
+			volfilter = &vcb;
+		}
+
+		ref = 0;
+		for (int i=0; i<0; i++)	{
+			OSErr err = UnivIndexFCB(volfilter, &ref, &fcb);
+			if (err) return err;
+		}
+	} else if (pb->ioFCBIndx < 0) {
+		return paramErr;
+	}
+
+	if (fcb->fcbVPtr != &vcb)
+		return extFSErr;
+
+	if (pb->ioNamePtr != NULL) pstrcpy(pb->ioNamePtr, fcb->fcbCName);
+	pb->ioFCBFlNm = fcb->fcbFlNm;
+	pb->ioFCBFlags = fcb->fcbFlags;
+	pb->ioFCBStBlk = fcb->fcbSBlk;
+	pb->ioFCBEOF = fcb->fcbEOF;
+	pb->ioFCBPLen = fcb->fcbPLen;
+	pb->ioFCBCrPs = fcb->fcbCrPs;
+	pb->ioFCBVRefNum = vcb.vcbVRefNum;
+	pb->ioFCBClpSiz = fcb->fcbClmpSize;
+	pb->ioFCBParID = fcb->fcbDirID;
+
+	return noErr;
+}
+
 static OSErr fsClose(struct IOParam *pb) {
 	struct FCBRec *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
@@ -1197,7 +1242,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMCatMove: return (struct handler){NULL, extFSErr};
 	case kFSMDirCreate: return (struct handler){NULL, extFSErr};
 	case kFSMGetWDInfo: return (struct handler){NULL, extFSErr};
-	case kFSMGetFCBInfo: return (struct handler){NULL, extFSErr};
+	case kFSMGetFCBInfo: return (struct handler){fsGetFCBInfo};
 	case kFSMGetCatInfo: return (struct handler){fsGetFileInfo};
 	case kFSMSetCatInfo: return (struct handler){NULL, extFSErr};
 	case kFSMSetVolInfo: return (struct handler){NULL, extFSErr};
