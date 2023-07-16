@@ -208,7 +208,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	OSStatus err;
 
-	lprintf(".virtio9p: starting\n");
+	lprintf(".virtio9p: primary init\n");
 
 	// No need to signal FAILED if cannot communicate with device
 	if (!VInit(&info->deviceEntry)) {
@@ -240,8 +240,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	}
 
-	lprintf("attached to root with path %08x%08x\n", (uint32_t)(root.path>>32), (uint32_t)root.path);
-
 	dqe.dqe.dQDrive=4; // lower numbers reserved
 	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
 	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
@@ -256,7 +254,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
 		PBMountVol((void *)&pb);
 	} else {
-		lprintf(".virtio9p: this is very early boot, not mounting\n");
+		lprintf(".virtio9p: early boot -- attempting boot device hacks\n");
 
 		// This is very early boot, and my globals will be nuked by a ?ROM bug.
 		disposePtrPatch = Patch68k(
@@ -316,7 +314,7 @@ static void secondaryInitialize(void) {
 	if (alreadyUp) return;
 	alreadyUp = true;
 
-	lprintf("Secondary init VCBQHdr=%x\n", (long)GetVCBQHdr()->qHead);
+	lprintf(".virtio9p: secondary init\n");
 
 	// External filesystems need a big stack, and they can't
 	// share the FileMgr stack because of reentrancy problems
@@ -382,7 +380,7 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	while (findVol(vcb.vcbVRefNum) != NULL) vcb.vcbVRefNum--;
 
-	lprintf("RefNum roundup: driver=%d drive=%d volume=%d\n",
+	lprintf(".virtio9p: refnums are driver=%d drive=%d volume=%d\n",
 		drvrRefNum, dqe.dqe.dQDrive, vcb.vcbVRefNum);
 
 	if (GetVCBQHdr()->qHead == NULL) {
@@ -666,8 +664,6 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 }
 
 static OSErr fsOpen(struct HFileParam *pb) {
-	lprintf("Attempting open..\n");
-
 	pb->ioFRefNum = 0;
 
 	if (!determineNumStr(pb)) return extFSErr;
@@ -677,8 +673,6 @@ static OSErr fsOpen(struct HFileParam *pb) {
 	short refn;
 	struct FCBRec *fcb;
 	if (UnivAllocateFCB(&refn, &fcb) != noErr) return tmfoErr;
-
-	lprintf("GOT REFNUM %d\n", refn);
 
 	uint32_t fid = 32 + refn;
 	Clunk9(fid); // preemptive
@@ -723,8 +717,6 @@ static OSErr fsOpen(struct HFileParam *pb) {
 		.fcbCatPos = 0, // own use
 		.fcbDirID = rec->parent,
 	};
-
-	lprintf("EOF is %#x\n", (long)size);
 
 	mr31name(fcb->fcbCName, rec->name);
 
@@ -813,11 +805,6 @@ static OSErr fsRead(struct IOParam *pb) {
 
 		if (act != todo) break;
 	}
-
-	for (int i=0; i<pb->ioActCount; i++) {
-		lprintf("%02x", (unsigned char)pb->ioBuffer[i]);
-	}
-	lprintf("\n");
 
 // 	if (pb->ioActCount != pb->ioReqCount)
 // 		return eofErr;
