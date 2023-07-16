@@ -154,6 +154,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
+	if (code <= 6)
+		lprintf("Drvr_%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, 1));
+
 	switch (code) {
 	case kInitializeCommand:
 	case kReplaceCommand:
@@ -188,6 +191,9 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = paramErr;
 		break;
 	}
+
+	if (code <= 6)
+		lprintf("%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, err));
 
 	// Return directly from every call
 	if (kind & kImmediateIOCommandKind) {
@@ -1278,8 +1284,6 @@ static struct handler fsHandler(unsigned short selector) {
 static OSErr controlStatusCall(struct CntrlParam *pb) {
 	OSErr err = 100;
 
-	lprintf("Drvr_%s", PBPrint(pb, pb->ioTrap | 0xa000, 1));
-
 	// Coerce csCode or driverGestaltSelector into one long
 	// Negative is Status/DriverGestalt, positive is Control/DriverConfigure
 	long selector = pb->csCode;
@@ -1308,8 +1312,6 @@ static OSErr controlStatusCall(struct CntrlParam *pb) {
 		else
 			err = controlErr;
 	}
-
-	lprintf("%s", PBPrint(pb, pb->ioTrap | 0xa000, err));
 
 	return err;
 }
