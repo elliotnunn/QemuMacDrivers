@@ -61,6 +61,10 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 		}
 	case -0xa013: // FlushVol
 		return "ioNamePtr18s ioVRefNum22w";
+	case -0x0001: // OpenWD
+		return "ioNamePtr18s ioVRefNum22w ioWDProcID28l ioWDDirID48l";
+	case 0x0001:
+		return "ioVRefNum22w";
 	case -0x0006: // DirCreate
 		return "ioNamePtr18s ioVRefNum22w ioDirID48l";
 	case 0x0006:
