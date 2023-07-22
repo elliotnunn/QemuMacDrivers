@@ -810,6 +810,9 @@ static OSErr fsClose(struct IOParam *pb) {
 }
 
 static OSErr fsRead(struct IOParam *pb) {
+	if ((pb->ioTrap & 0xa8ff) == (_SetFPos & 0xa8ff))
+		pb->ioReqCount = 0;
+
 	if (pb->ioReqCount < 0) return paramErr;
 
 	struct FCBRec *fcb;
@@ -1235,9 +1238,9 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMSetFilLock: return (struct handler){NULL, extFSErr};
 	case kFSMRstFilLock: return (struct handler){NULL, extFSErr};
 	case kFSMSetFilType: return (struct handler){NULL, extFSErr};
-	case kFSMSetFPos: return (struct handler){NULL, extFSErr};
 	case kFSMFlushFile: return (struct handler){NULL, extFSErr};
 	case kFSMOpenWD: return (struct handler){NULL, extFSErr};
+	case kFSMSetFPos: return (struct handler){fsRead};
 	case kFSMCloseWD: return (struct handler){NULL, extFSErr};
 	case kFSMCatMove: return (struct handler){NULL, extFSErr};
 	case kFSMDirCreate: return (struct handler){NULL, extFSErr};
