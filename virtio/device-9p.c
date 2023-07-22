@@ -641,6 +641,10 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 			pb->ioFlFndrInfo = (struct FInfo){.fdType='ZSYS', .fdCreator='MACS'};
 		} else if (!strcmp(detail->name, "Finder")) {
 			pb->ioFlFndrInfo = (struct FInfo){.fdType='FNDR', .fdCreator='MACS'};
+		} else if (!strcmp(detail->name, "Desktop DB")) {
+			pb->ioFlFndrInfo = (struct FInfo){.fdType='BTFL', .fdCreator='DMGR'};
+		} else if (!strcmp(detail->name, "Desktop DF")) {
+			pb->ioFlFndrInfo = (struct FInfo){.fdType='DTFL', .fdCreator='DMGR'};
 		}
 	}
 
