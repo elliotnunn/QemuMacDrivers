@@ -948,6 +948,14 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 	return tmwdoErr;
 }
 
+// The File Manager has very kindly populated this call for us,
+// and only asks that we return noErr (after checking we're the right fs!).
+// FM does pass the WDCB address in d1, but we don't need it.
+static OSErr fsGetWDInfo(struct WDParam *pb) {
+	if (pb->ioWDVRefNum != vcb.vcbVRefNum) return extFSErr;
+	return noErr;
+}
+
 // Does not actually check for the right volume: determine*() first.
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	enum {LISTFID=5};
@@ -1313,7 +1321,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMCloseWD: return (struct handler){NULL, extFSErr};
 	case kFSMCatMove: return (struct handler){NULL, wPrErr};
 	case kFSMDirCreate: return (struct handler){NULL, wPrErr};
-	case kFSMGetWDInfo: return (struct handler){NULL, extFSErr};
+	case kFSMGetWDInfo: return (struct handler){fsGetWDInfo};
 	case kFSMGetFCBInfo: return (struct handler){fsGetFCBInfo};
 	case kFSMGetCatInfo: return (struct handler){fsGetFileInfo};
 	case kFSMSetCatInfo: return (struct handler){NULL, wPrErr};
