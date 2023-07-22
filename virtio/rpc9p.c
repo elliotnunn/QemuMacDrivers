@@ -456,9 +456,12 @@ bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count
 	WRITE64LE(smlBuf+4+1+2+4, offset);
 	WRITE32LE(smlBuf+4+1+2+4+8, count);
 
+	lprintf("Tread(fid=%lu ofs=%lu cnt=%lu)", fid, (uint32_t)offset, count);
+
 	putSmlGetBig();
 
 	if (checkErr(bigBuf)) {
+		lprintf(" -> (fail)\n");
 		return true;
 	}
 
@@ -467,6 +470,8 @@ bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count
 	if (actual_count != NULL) {
 		*actual_count = got;
 	}
+
+	lprintf(" -> (ok)\n");
 
 	return false;
 }
