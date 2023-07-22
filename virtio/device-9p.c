@@ -69,8 +69,7 @@ static long disposePtrShield(Ptr ptr, void *caller);
 static void secondaryInitialize(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *_pb);
-static struct WDCBRec wdcb(short refnum);
-static void wdcbSet(short refnum, struct WDCBRec val);
+static struct WDCBRec *findWD(short refnum);
 static int walkToCNID(int32_t cnid, uint32_t fid);
 static int32_t makeCNID(int32_t parent, char *name);
 static void cnidPrint(int32_t cnid);
@@ -393,10 +392,9 @@ static OSErr fsMountVol(struct IOParam *pb) {
 		LMSetDefVCBPtr((Ptr)&vcb);
 		*(short *)0x384 = vcb.vcbVRefNum; // DefVRefNum
 
-		wdcbSet(0, (struct WDCBRec){
-			.wdVCBPtr = &vcb,
-			.wdDirID = 2,
-		});
+		memcpy(findWD(0),
+			&(struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID = 2},
+			16);
 	}
 
 	Enqueue((QElemPtr)&vcb, GetVCBQHdr());
@@ -900,6 +898,55 @@ static OSErr fsRead(struct IOParam *pb) {
 	return noErr;
 }
 
+// "Working directories" are a compatibility shim for apps expecting flat disks:
+// a table of fake volume reference numbers that actually refer to directories.
+static OSErr fsOpenWD(struct WDParam *pb) {
+	if (!determineNumStr(pb)) return extFSErr;
+
+	int32_t cnid = pbDirID(pb);
+	cnid = browse(12, cnid, pb->ioNamePtr);
+	if (cnid < 0) return cnid;
+
+	// The root: no need to create a WD, just return the volume's refnum
+	if (cnid == 2) {
+		pb->ioVRefNum = vcb.vcbVRefNum;
+		return noErr;
+	}
+
+	// Ensure it's actually a directory
+	struct Qid9 qid;
+	if (Getattr9(12, &qid, NULL, NULL)) return permErr;
+	if ((qid.type & 0x80) == 0) return dirNFErr;
+
+	// A copy of the desired WDCB (a straight comparison is okay)
+	struct WDCBRec wdcb = {
+		.wdVCBPtr = &vcb,
+		.wdDirID = cnid,
+		.wdProcID = pb->ioWDProcID,
+	};
+
+	short tablesize = *(short *)unaligned32(0x372); // int at start of table
+
+	// Search for already-open WDCB
+	for (short ref=WDLO+18; ref<WDLO+tablesize; ref+=16) {
+		if (!memcmp(findWD(ref), &wdcb, sizeof wdcb)) {
+			pb->ioVRefNum = ref;
+			return noErr;
+		}
+	}
+
+	// Search for free WDCB
+	for (short ref=WDLO+18; ref<WDLO+tablesize; ref+=16) {
+		if (findWD(ref)->wdVCBPtr == NULL) {
+			memcpy(findWD(ref), &wdcb, sizeof wdcb);
+			pb->ioVRefNum = ref;
+			return noErr;
+		}
+	}
+
+	return tmwdoErr;
+}
+
 // Does not actually check for the right volume: determine*() first.
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	enum {LISTFID=5};
@@ -995,7 +1042,8 @@ static int32_t pbDirID(void *_pb) {
 
 	// Is it a WDCB?
 	if (pb->ioVRefNum <= WDHI || pb->ioVRefNum == 0) {
-		return wdcb(pb->ioVRefNum).wdDirID;
+		struct WDCBRec *wdcb = findWD(pb->ioVRefNum);
+		if (wdcb) return wdcb->wdDirID;
 	}
 
 	// It's just the root
@@ -1003,33 +1051,18 @@ static int32_t pbDirID(void *_pb) {
 }
 
 // Validate WDCB refnum and return the structure.
-// The 4-byte fields of the WDCB array are *always* misaligned,
-// so it is better to return a structure copy than a pointer.
-static struct WDCBRec wdcb(short refnum) {
+// A refnum of zero refers to the "current directory" WDCB
+// Sadly the blocks are *always* non-4-byte-aligned
+static struct WDCBRec *findWD(short refnum) {
 	void *table = (void *)unaligned32(0x372);
 
 	int16_t tblSize = *(int16_t *)table;
 	int16_t offset = refnum ? refnum+WDLO : 2;
 
-	struct WDCBRec ret = {};
-
 	if (offset>=2 && offset<tblSize && (offset%16)==2) {
-		memcpy(&ret, table+offset, sizeof(struct WDCBRec));
-	}
-
-	return ret;
-}
-
-static void wdcbSet(short refnum, struct WDCBRec val) {
-	void *table = (void *)unaligned32(0x372);
-
-	int16_t tblSize = *(int16_t *)table;
-	int16_t offset = refnum ? refnum+WDLO : 2;
-
-	struct WDCBRec ret = {};
-
-	if (offset>=2 && offset<tblSize && (offset%16)==2) {
-		memcpy(table+offset, &val, sizeof(struct WDCBRec));
+		return table+offset;
+	} else {
+		return NULL;
 	}
 }
 
@@ -1154,7 +1187,8 @@ static char determineNum(void *_pb) {
 
 	if (pb->ioVRefNum <= WDHI) {
 		// Working directory refnum
-		if (wdcb(pb->ioVRefNum).wdVCBPtr == &vcb) {
+		struct WDCBRec *wdcb = findWD(pb->ioVRefNum);
+		if (wdcb && wdcb->wdVCBPtr == &vcb) {
 			return 'w';
 		} else {
 			return 0;
@@ -1272,9 +1306,9 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMSetFilLock: return (struct handler){NULL, extFSErr};
 	case kFSMRstFilLock: return (struct handler){NULL, extFSErr};
 	case kFSMSetFilType: return (struct handler){NULL, extFSErr};
-	case kFSMOpenWD: return (struct handler){NULL, extFSErr};
 	case kFSMSetFPos: return (struct handler){fsRead};
 	case kFSMFlushFile: return (struct handler){NULL, wPrErr};
+	case kFSMOpenWD: return (struct handler){fsOpenWD};
 	case kFSMCloseWD: return (struct handler){NULL, extFSErr};
 	case kFSMCatMove: return (struct handler){NULL, wPrErr};
 	case kFSMDirCreate: return (struct handler){NULL, wPrErr};
