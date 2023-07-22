@@ -471,7 +471,7 @@ bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count
 		*actual_count = got;
 	}
 
-	lprintf(" -> (ok)\n");
+	lprintf(" -> (cnt=%lu)\n", got);
 
 	return false;
 }
