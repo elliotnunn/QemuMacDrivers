@@ -648,25 +648,59 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	return noErr;
 }
 
-// Problem: what if the leaf doesn't exist?
 static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	if (!determineNumStr(pb)) return extFSErr;
 
-	int32_t cnid = pbDirID(pb);
-	cnid = browse(10, cnid, pb->ioNamePtr);
-	if (cnid < 0) return cnid;
-	Clunk9(10);
-
-	struct record *rec = HTlookup(&cnid, sizeof(cnid));
-	if (!rec) return fnfErr;
-
 	struct FSSpec *spec = (struct FSSpec *)pb->ioMisc;
 
-	spec->vRefNum = vcb.vcbVRefNum;
-	spec->parID = rec->parent;
-	mr31name(spec->name, rec->name);
+	int32_t cnid = pbDirID(pb);
+	cnid = browse(10, cnid, pb->ioNamePtr);
+	if (cnid > 0) {
+		// The target exists
+		struct record *rec = HTlookup(&cnid, sizeof(cnid));
 
-	return noErr;
+		if (cnid == 2) {
+			spec->vRefNum = vcb.vcbVRefNum;
+			spec->parID = 2;
+			spec->name[0] = 0;
+		} else {
+			spec->vRefNum = vcb.vcbVRefNum;
+			spec->parID = rec->parent;
+			mr31name(spec->name, rec->name);
+		}
+
+		return noErr;
+	}
+
+	if (!pb->ioNamePtr) return dirNFErr;
+
+	// The target doesn't (yet) exist
+	// TODO this is messy
+	int leafstart = pb->ioNamePtr[0];
+	int leaflen = 0;
+	if (leafstart && pb->ioNamePtr[leafstart] == ':') leafstart--;
+	while (leafstart && pb->ioNamePtr[leafstart] != ':') {
+		leafstart--;
+		leaflen++;
+	}
+
+	if (leaflen == 0) return dirNFErr;
+
+	unsigned char path[256], leaf[256];
+	path[0] = leafstart;
+	memcpy(path+1, pb->ioNamePtr+1, leafstart);
+	leaf[0] = leaflen;
+	memcpy(leaf+1, pb->ioNamePtr+1+leafstart, leaflen);
+
+	cnid = pbDirID(pb);
+	cnid = browse(10, cnid, path);
+	if (cnid < 0) return dirNFErr; // return cnid;
+
+	spec->vRefNum = vcb.vcbVRefNum;
+	spec->parID = cnid;
+	pstrcpy(spec->name, leaf);
+
+	return fnfErr;
 }
 
 static OSErr fsOpen(struct HFileParam *pb) {
