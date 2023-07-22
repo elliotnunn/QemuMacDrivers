@@ -109,6 +109,7 @@ static struct VCB vcb = {
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
+	.vcbFndrInfo = {2}, // TODO set a better blessed folder than root
 };
 static const short bootBlocks[] = {
 	0x4c4b, 0x6000, 0x0086, 0x4418, 0x0000, 0x0653, 0x7973, 0x7465, // LK`...D....Syste
