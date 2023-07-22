@@ -106,6 +106,10 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 		return "ioRefNum24w";
 	case 0xa011:
 		return "ioMisc28l";
+	case -0xa044: // SetFPos
+		return "ioRefNum24w ioReqCount36l ioPosMode44w ioPosOffset46l";
+	case 0xa044:
+		return "ioPosOffset46l";
 	}
 	return "";
 }
