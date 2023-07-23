@@ -19,14 +19,13 @@ COMMON_PPC = \
 	patch68k.o \
 	scc.o \
 
-# force a rebuild so that our tbxi gets rebuild
-.PHONY: ../builds/9p.ndrv
+all: ../builds/qemu_vga.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
+
+../builds/bootstrap.img: ../builds/9p.ndrv
+	../mk-9p-bootstrapper.py ~/Documents/mac/MacROMan/TestImages/New\ World\ ROM/2003-04-03\ -\ Mac\ OS\ ROM\ 10.2.1.rom $^ $@
 
 ../builds/9p.ndrv: device-9p.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
-	cp $@ ${HOME}/Documents/mac/9boot/System\ Folder/Extensions/
-	cp $@ ../bootstrap/systemfolder/tbxi.src/Parcels.src/
-	cd ../bootstrap/systemfolder && tbxi build tbxi.src
 
 ../builds/qemu_vga.ndrv: device-gpu.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
