@@ -19,10 +19,10 @@ struct entry {
 };
 
 struct entry *table[1<<12];
-char blob[1<<15];
-char *bump = blob;
+char *blob, *bump, *limit;
 
 static unsigned long hash(void *key, short klen);
+static void alloc(long bytes);
 
 void HTinstall(void *key, short klen, void *val, short vlen) {
 // 	if (klen == 4)
@@ -51,17 +51,22 @@ void HTinstall(void *key, short klen, void *val, short vlen) {
 	}
 
 	// Key can be unaligned
+	alloc(klen);
 	memcpy(bump, key, klen);
 	key = bump;
 	bump += klen;
 
 	// Value must be aligned
-	while ((uintptr_t)bump % 8) bump++;
+	while ((uintptr_t)bump % 8) {
+		alloc(1);
+		bump++;
+	}
 	memcpy(bump, val, vlen);
 	val = bump;
 	bump += vlen;
 
 	// Struct quite strict with alignment
+	alloc(sizeof(struct entry) + alignof(struct entry));
 	while ((uintptr_t)bump % alignof(struct entry)) bump++;
 	struct entry *e = (struct entry *)bump;
 	*e = (struct entry){*root, key, val, klen, vlen};
@@ -98,6 +103,26 @@ static unsigned long hash(void *key, short klen) {
 		hashval = hashval * 31 + ((unsigned char *)key)[i];
 	}
 	return hashval;
+}
+
+// Ensure at least this many bytes at bump
+static void alloc(long bytes) {
+	if (bump + bytes <= limit) return;
+
+	long size = 64*1024;
+
+	for (;;) {
+		blob = NewPtrSys(64*1024);
+		if (blob) break;
+		size >>= 1;
+		if (size < 2048) {
+			blob = (char *)0xdeadbeef;
+			break;
+		}
+	}
+
+	bump = blob;
+	limit = blob + size;
 }
 
 #include <stdio.h>
