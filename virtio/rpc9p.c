@@ -233,8 +233,10 @@ bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, ui
 	WRITE16LE(bigBuf+4+1+2+4+4, nwname);
 
 	uint32_t size = 4+1+2+4+4+2;
+	const char *prefix = "";
 	for (uint16_t i=0; i<nwname; i++) {
-		lprintf("/%s", *name);
+		lprintf("%s%s", prefix, *name);
+		prefix = "/";
 		uint16_t len = strlen(*name);
 		WRITE16LE(bigBuf+size, len);
 		size += 2;
