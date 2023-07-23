@@ -53,7 +53,7 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 			return "ioVRefNum22w ioFDirIndex28w";
 		}
 	case 0xa00c:
-#		define FINFOCOMMON "ioFRefNum24s ioFlAttrib30b ioFlFndrInfo32x ioFlNum48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l";
+#		define FINFOCOMMON "ioFRefNum24w ioFlAttrib30b ioFlFndrInfo32x ioFlNum48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l";
 		if (*(short *)(pb+28) <= 0) {
 			return FINFOCOMMON;
 		} else {
