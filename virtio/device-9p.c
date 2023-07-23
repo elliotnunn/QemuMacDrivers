@@ -619,8 +619,11 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		uint64_t rsize = 0;
 		char rname[512];
 		sprintf(rname, "%s.rsrc", detail->name);
-		if (!Walk9(MYFID, MYFID, 2, (const char *[]){"..", rname}, NULL, NULL)) {
-			Getattr9(MYFID, NULL, &rsize, NULL);
+		uint16_t oksteps = 0;
+
+		Walk9(MYFID, 19, 2, (const char *[]){"..", rname}, &oksteps, NULL);
+		if (oksteps == 2) {
+			Getattr9(19, NULL, &rsize, NULL);
 		}
 
 		pb->ioFlAttrib = 0;
@@ -640,14 +643,19 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 			pb->ioFlClpSiz = 0;
 		}
 
-		if (!strcmp(detail->name, "System")) {
-			pb->ioFlFndrInfo = (struct FInfo){.fdType='ZSYS', .fdCreator='MACS'};
-		} else if (!strcmp(detail->name, "Finder")) {
-			pb->ioFlFndrInfo = (struct FInfo){.fdType='FNDR', .fdCreator='MACS'};
-		} else if (!strcmp(detail->name, "Desktop DB")) {
-			pb->ioFlFndrInfo = (struct FInfo){.fdType='BTFL', .fdCreator='DMGR'};
-		} else if (!strcmp(detail->name, "Desktop DF")) {
-			pb->ioFlFndrInfo = (struct FInfo){.fdType='DTFL', .fdCreator='DMGR'};
+		char iname[512];
+		sprintf(iname, "%s.idump", detail->name);
+		oksteps = 0;
+
+		Walk9(MYFID, 19, 2, (const char *[]){"..", iname}, &oksteps, NULL);
+		if (oksteps == 2) {
+			if (!Lopen9(19, O_RDONLY, NULL, NULL)) {
+				uint32_t act = 0;
+				Read9(19, 0, 8, &act);
+				if (act == 8) {
+					memcpy(&pb->ioFlFndrInfo, Buf9, 8);
+				}
+			}
 		}
 	}
 
@@ -1220,6 +1228,8 @@ static bool visName(const char *name) {
 
 	int len = strlen(name);
 	if (len >= 5 && !strcmp(name+len-5, ".rsrc")) return false;
+	if (len >= 6 && !strcmp(name+len-6, ".rdump")) return false;
+	if (len >= 6 && !strcmp(name+len-6, ".idump")) return false;
 
 	return true;
 }
