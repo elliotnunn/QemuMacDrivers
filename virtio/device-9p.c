@@ -109,7 +109,6 @@ static struct VCB vcb = {
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
-	.vcbFndrInfo = {2}, // TODO set a better blessed folder than root
 };
 static const short bootBlocks[] = {
 	0x4c4b, 0x6000, 0x0086, 0x4418, 0x0000, 0x0653, 0x7973, 0x7465, // LK`...D....Syste
@@ -252,6 +251,10 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	RegPropertyValueSize size = sizeof(preferName);
 	RegistryPropertyGet(&info->deviceEntry, "mount", preferName, &size);
+
+	// Find the system folder
+	vcb.vcbFndrInfo[0] = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
+	lprintf("System folder CNID %d\n", vcb.vcbFndrInfo[0]);
 
 	// Is the File Manager actually up yet?
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
@@ -931,9 +934,10 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 	};
 
 	short tablesize = *(short *)unaligned32(0x372); // int at start of table
+	enum {SKIPWD = 2 + 2 * sizeof (struct WDCBRec)}; // never use 1st/2nd WDCB
 
 	// Search for already-open WDCB
-	for (short ref=WDLO+18; ref<WDLO+tablesize; ref+=16) {
+	for (short ref=WDLO+SKIPWD; ref<WDLO+tablesize; ref+=16) {
 		if (!memcmp(findWD(ref), &wdcb, sizeof wdcb)) {
 			pb->ioVRefNum = ref;
 			return noErr;
@@ -941,7 +945,7 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 	}
 
 	// Search for free WDCB
-	for (short ref=WDLO+18; ref<WDLO+tablesize; ref+=16) {
+	for (short ref=WDLO+SKIPWD; ref<WDLO+tablesize; ref+=16) {
 		if (findWD(ref)->wdVCBPtr == NULL) {
 			memcpy(findWD(ref), &wdcb, sizeof wdcb);
 			pb->ioVRefNum = ref;
@@ -1070,7 +1074,7 @@ static struct WDCBRec *findWD(short refnum) {
 	void *table = (void *)unaligned32(0x372);
 
 	int16_t tblSize = *(int16_t *)table;
-	int16_t offset = refnum ? refnum+WDLO : 2;
+	int16_t offset = refnum ? refnum-WDLO : 2;
 
 	if (offset>=2 && offset<tblSize && (offset%16)==2) {
 		return table+offset;
