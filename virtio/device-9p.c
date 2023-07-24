@@ -155,7 +155,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
-	if (code <= 6)
+	if (code <= 6 && lprintf_enable)
 		lprintf("Drvr_%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, 1));
 
 	switch (code) {
@@ -193,7 +193,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		break;
 	}
 
-	if (code <= 6)
+	if (code <= 6 && lprintf_enable)
 		lprintf("%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, err));
 
 	// Return directly from every call
@@ -209,7 +209,9 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-	lprintf_enable = true;
+	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
+		lprintf_enable = 1;
+	}
 
 	drvrRefNum = info->refNum;
 
@@ -1245,8 +1247,10 @@ static long fsCall(void *pb, long selector) {
 		selector = trap;
 	}
 
-	lprintf("FS_%s", PBPrint(pb, selector, 1));
-	strcat(lprintf_prefix, "     ");
+	if (lprintf_enable) {
+		lprintf("FS_%s", PBPrint(pb, selector, 1));
+		strcat(lprintf_prefix, "     ");
+	}
 
 	callcnt++;
 
@@ -1261,8 +1265,10 @@ static long fsCall(void *pb, long selector) {
 		result = ((handlerFunc)h.func)(pb);
 	}
 
-	lprintf_prefix[strlen(lprintf_prefix) - 5] = 0;
-	lprintf("%s", PBPrint(pb, selector, result));
+	if (lprintf_enable) {
+		lprintf_prefix[strlen(lprintf_prefix) - 5] = 0;
+		lprintf("%s", PBPrint(pb, selector, result));
+	}
 
 	return result;
 }
