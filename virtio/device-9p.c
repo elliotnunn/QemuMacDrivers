@@ -555,7 +555,10 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		char utf8[512];
 		int err;
 		int n=0;
-		while ((err=Readdir9(LISTFID, NULL, NULL, utf8)) == 0) {
+		struct Qid9 qid;
+		while ((err=Readdir9(LISTFID, &qid, NULL, utf8)) == 0) {
+			// GetFileInfo skips folders, GetCatInfo doesn't
+			if (!longform && !(qid.type & 0x80)) continue;
 			if (!visName(utf8)) continue;
 			if (pb->ioFDirIndex==++n) break;
 		}
