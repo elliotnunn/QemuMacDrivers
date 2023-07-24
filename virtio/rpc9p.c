@@ -495,14 +495,14 @@ static void putSmlGetBig(void) {
 	flag = false;
 	QSend(0, 1, bigCnt, smlBigAddrs, smlBigSizes, NULL);
 	QNotify(0);
-	while (!flag) {} // Change to WaitForInterrupt
+	while (!flag) QPoll(0) // Change to WaitForInterrupt
 }
 
 static void putBigGetSml(void) {
 	flag = false;
 	QSend(0, bigCnt, 1, bigSmlAddrs, bigSmlSizes, NULL);
 	QNotify(0);
-	while (!flag) {} // Change to WaitForInterrupt
+	while (!flag) QPoll(0) // Change to WaitForInterrupt
 }
 
 // Set these globals or return false: msize [tr]buf [trbufcnt] physbufs bufsizes
