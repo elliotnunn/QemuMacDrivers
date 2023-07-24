@@ -44,6 +44,7 @@ enum {
 	ROOTFID = 2,
 	WDLO = -32767,
 	WDHI = -4096,
+	STACKSIZE = 12 * 1024,
 };
 
 // of a File Manager call
@@ -85,6 +86,7 @@ static OSErr controlStatusCall(struct CntrlParam *pb);
 static struct handler controlStatusHandler(long selector);
 
 void *disposePtrPatch;
+static char *stack;
 static short drvrRefNum;
 static unsigned long callcnt;
 static struct Qid9 root;
@@ -327,8 +329,7 @@ static void secondaryInitialize(void) {
 
 	// External filesystems need a big stack, and they can't
 	// share the FileMgr stack because of reentrancy problems
-	enum {STACKSIZE = 12 * 1024};
-	char *stack = NewPtrSys(STACKSIZE);
+	stack = NewPtrSys(STACKSIZE);
 	if (stack == NULL) stack = (char *)0x68f168f1;
 
 	Patch68k(
