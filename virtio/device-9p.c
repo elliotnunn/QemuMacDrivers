@@ -768,6 +768,8 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 }
 
 static OSErr fsOpen(struct HFileParam *pb) {
+// 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
+
 	pb->ioFRefNum = 0;
 
 	if (!determineNumStr(pb)) return extFSErr;
