@@ -668,6 +668,47 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	return noErr;
 }
 
+static OSErr fsSetVol(struct HFileParam *pb) {
+	struct VCB *setDefVCBPtr;
+	short setDefVRefNum;
+	struct WDCBRec setDefWDCB;
+
+	if (pb->ioTrap & 0x200) {
+		if (!determineNumStr(pb)) return extFSErr;
+
+		// Check that it exists and is a directory
+		int32_t cnid = browse(11, pbDirID(pb), pb->ioNamePtr);
+		if (cnid < 0) return cnid;
+		struct Qid9 qid;
+		if (Getattr9(11, &qid, NULL, NULL)) return permErr;
+		if ((qid.type & 0x80) == 0) return dirNFErr;
+		Clunk9(11);
+
+		setDefVCBPtr = &vcb;
+		setDefVRefNum = vcb.vcbVRefNum;
+		setDefWDCB = (struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID=cnid};
+	} else {
+		char how = determineNumStr(pb);
+		if (!how) {
+			return extFSErr;
+		} else if (how == 'w') { // working directory (not the root)
+			setDefVCBPtr = &vcb;
+			setDefVRefNum = pb->ioVRefNum;
+			setDefWDCB = (struct WDCBRec){.wdVCBPtr=&vcb,
+				.wdDirID=findWD(pb->ioVRefNum)->wdDirID};
+		} else { // path, volume number or drive number (the root)
+			setDefVCBPtr = &vcb;
+			setDefVRefNum = vcb.vcbVRefNum;
+			setDefWDCB = (struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID=2};
+		}
+	}
+
+	LMSetDefVCBPtr((Ptr)setDefVCBPtr);
+	*(short *)0x384 = setDefVRefNum;
+	memcpy(findWD(0), &setDefWDCB, sizeof setDefWDCB);
+	return noErr;
+}
+
 static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	if (!determineNumStr(pb)) return extFSErr;
 
@@ -1297,7 +1338,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMSetEOF: return (struct handler){NULL, wPrErr};
 	case kFSMFlushVol: return (struct handler){NULL, noErr};
 	case kFSMGetVol: return (struct handler){NULL, extFSErr};
-	case kFSMSetVol: return (struct handler){NULL, extFSErr};
+	case kFSMSetVol: return (struct handler){fsSetVol};
 	case kFSMEject: return (struct handler){NULL, extFSErr};
 	case kFSMGetFPos: return (struct handler){NULL, extFSErr};
 	case kFSMOffline: return (struct handler){NULL, extFSErr};
