@@ -94,6 +94,9 @@ static int32_t cnidCtr = 100;
 static Handle finderwin;
 static bool mounted;
 static char preferName[28];
+static long cacheCNID;
+static long cacheOffset, cacheLen;
+static char cache[512];
 static struct flagdqe dqe = {
 	.flags = 0x00080000, // fixed disk
 	.dqe = {.dQFSID = FSID},
@@ -900,24 +903,51 @@ static OSErr fsRead(struct IOParam *pb) {
 		return posErr;
 	}
 
-	while (pb->ioActCount < pb->ioReqCount) {
-		uint32_t todo = pb->ioReqCount - pb->ioActCount;
-		if (todo > Max9) todo = Max9;
-
-		uint32_t act = 0;
-		Read9(32 + pb->ioRefNum, fcb->fcbCrPs, pb->ioReqCount, &act);
-
-		BlockMoveData(Buf9, pb->ioBuffer + pb->ioActCount, act);
-
-		pb->ioActCount += act;
-		fcb->fcbCrPs += act;
+	// This cache code could use a cleanup (couldn't all cache code?)
+	if (fcb->fcbFlNm == cacheCNID &&
+		fcb->fcbCrPs >= cacheOffset &&
+		fcb->fcbCrPs + pb->ioReqCount <= cacheOffset + cacheLen
+	) {
+		// Satisfy the request from the cache
+		BlockMoveData(cache + fcb->fcbCrPs - cacheOffset, pb->ioBuffer, pb->ioReqCount);
+		pb->ioActCount = pb->ioReqCount;
+		fcb->fcbCrPs += pb->ioActCount;
 		pb->ioPosOffset = fcb->fcbCrPs;
+	} else {
+		// Request the host
+		while (pb->ioActCount < pb->ioReqCount) {
+			uint32_t forcaller = pb->ioReqCount - pb->ioActCount;
+			if (forcaller > Max9) forcaller = Max9;
 
-		if (act != todo) break;
+			uint32_t forcache = forcaller;
+			if (forcache < sizeof cache) forcache = sizeof cache;
+
+			uint32_t got = 0;
+			Read9(32 + pb->ioRefNum, fcb->fcbCrPs, forcache, &got);
+
+			bool eof = false;
+
+			if (got < forcaller) {
+				forcaller = got;
+				eof = true;
+			}
+
+			if (got < forcache) forcache = got;
+			if (sizeof cache < forcache) forcache = sizeof cache;
+
+			BlockMoveData(Buf9, pb->ioBuffer + pb->ioActCount, forcaller);
+			BlockMoveData(Buf9 + got - forcache, cache, forcache);
+			cacheCNID = fcb->fcbFlNm;
+			cacheOffset = fcb->fcbCrPs;
+			cacheLen = forcache;
+
+			pb->ioActCount += forcaller;
+			fcb->fcbCrPs += forcaller;
+			pb->ioPosOffset = fcb->fcbCrPs;
+
+			if (eof) break;
+		}
 	}
-
-// 	if (pb->ioActCount != pb->ioReqCount)
-// 		return eofErr;
 
 	return noErr;
 }
