@@ -535,7 +535,7 @@ static OSErr fsGetVolParms(struct HIOParam *pb) {
 // <--    104   ioFlClpSiz     long word
 
 static OSErr fsGetFileInfo(struct HFileInfo *pb) {
-	enum {MYFID=3, LISTFID=4};
+	enum {MYFID=3};
 
 	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
 	bool longform = (pb->ioTrap&0x00ff) == 0x0060; // GetCatInfo
@@ -549,29 +549,49 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		if (!determineNum(pb)) return extFSErr;
 		lprintf("GCI index mode\n");
 
-		if (walkToCNID(cnid, MYFID) < 0) return fnfErr;
+		// Software commonly calls with index 1, 2, 3 etc
+		// Cache Readdir9 to avoid quadratically relisting the directory per-call
+		// An improvement might be to have multiple caches
+		static char scratch[2048];
+		static long lastCNID;
+		static int lastIdx;
+		enum {LISTFID=22};
 
-		// Read the directory
-		Walk9(MYFID, LISTFID, 0, NULL, NULL, NULL); // duplicate
-		Lopen9(LISTFID, O_RDONLY, NULL, NULL); // iterate
-
-		char utf8[512];
-		int err;
-		int n=0;
-		struct Qid9 qid;
-		char scratch[2048];
-		Clrdirbuf9(scratch, sizeof scratch);
-		while ((err=Readdir9(LISTFID, scratch, sizeof scratch, &qid, NULL, utf8)) == 0) {
-			// GetFileInfo skips folders, GetCatInfo doesn't
-			if (!longform && !(qid.type & 0x80)) continue;
-			if (!visName(utf8)) continue;
-			if (pb->ioFDirIndex==++n) break;
+		// Invalidate the cache (by setting lastCNID to 0)
+		if (cnid != lastCNID || idx <= lastIdx) {
+			lastCNID = 0;
+			lastIdx = 0;
+			Clrdirbuf9(scratch, sizeof scratch);
+			if (walkToCNID(cnid, LISTFID) < 0) return fnfErr;
+			if (Lopen9(LISTFID, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
+			lastCNID = cnid;
 		}
 
-		if (err!=0) return fnfErr;
+		char name[512];
 
-		cnid = makeCNID(cnid, utf8);
-		Walk9(MYFID, MYFID, 1, (const char *[]){utf8}, NULL, NULL);
+		// Fast-forward
+		while (lastIdx < idx) {
+			char type;
+			int err = Readdir9(LISTFID, scratch, sizeof scratch, NULL, &type, name);
+
+			if (err) {
+				lastCNID = 0;
+				Clunk9(LISTFID);
+				return fnfErr;
+			}
+
+			// GetFileInfo/HGetFileInfo ignores child directories
+			// Note that Rreaddir does return a qid, but the type field of that
+			// qid is unpopulated. So we use the Linux-style type byte instead.
+			if ((!longform && type == 4) || !visName(name)) {
+				continue;
+			}
+
+			lastIdx++;
+		}
+
+		cnid = makeCNID(cnid, name);
+		walkToCNID(cnid, MYFID);
 	} else if (idx == 0) {
 		if (!determineNumStr(pb)) return extFSErr;
 		lprintf("GCI name mode\n");
