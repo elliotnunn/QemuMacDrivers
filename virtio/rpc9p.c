@@ -51,6 +51,7 @@ Tstat = 124
 Twstat = 126
 */
 
+#include <stdalign.h>
 #include <string.h>
 
 #include "allocator.h"
@@ -65,32 +66,32 @@ enum {
 	ONLYTAG = 1,
 };
 
-#define READ16LE(S) ((255 & (S)[1]) << 8 | (255 & (S)[0]))
+#define READ16LE(S) ((255 & ((char *)S)[1]) << 8 | (255 & ((char *)S)[0]))
 #define READ32LE(S) \
-  ((uint32_t)(255 & (S)[3]) << 24 | (uint32_t)(255 & (S)[2]) << 16 | \
-   (uint32_t)(255 & (S)[1]) << 8 | (uint32_t)(255 & (S)[0]))
+  ((uint32_t)(255 & ((char *)S)[3]) << 24 | (uint32_t)(255 & ((char *)S)[2]) << 16 | \
+   (uint32_t)(255 & ((char *)S)[1]) << 8 | (uint32_t)(255 & ((char *)S)[0]))
 #define READ64LE(S)                                                    \
-  ((uint64_t)(255 & (S)[7]) << 070 | (uint64_t)(255 & (S)[6]) << 060 | \
-   (uint64_t)(255 & (S)[5]) << 050 | (uint64_t)(255 & (S)[4]) << 040 | \
-   (uint64_t)(255 & (S)[3]) << 030 | (uint64_t)(255 & (S)[2]) << 020 | \
-   (uint64_t)(255 & (S)[1]) << 010 | (uint64_t)(255 & (S)[0]) << 000)
+  ((uint64_t)(255 & ((char *)S)[7]) << 070 | (uint64_t)(255 & ((char *)S)[6]) << 060 | \
+   (uint64_t)(255 & ((char *)S)[5]) << 050 | (uint64_t)(255 & ((char *)S)[4]) << 040 | \
+   (uint64_t)(255 & ((char *)S)[3]) << 030 | (uint64_t)(255 & ((char *)S)[2]) << 020 | \
+   (uint64_t)(255 & ((char *)S)[1]) << 010 | (uint64_t)(255 & ((char *)S)[0]) << 000)
 #define WRITE16LE(P, V)                        \
-  ((P)[0] = (0x000000FF & (V)), \
-   (P)[1] = (0x0000FF00 & (V)) >> 8, (P) + 2)
+  (((char *)P)[0] = (0x000000FF & (V)), \
+   ((char *)P)[1] = (0x0000FF00 & (V)) >> 8, ((char *)P) + 2)
 #define WRITE32LE(P, V)                        \
-  ((P)[0] = (0x000000FF & (V)), \
-   (P)[1] = (0x0000FF00 & (V)) >> 8, \
-   (P)[2] = (0x00FF0000 & (V)) >> 16, \
-   (P)[3] = (0xFF000000 & (V)) >> 24, (P) + 4)
+  (((char *)P)[0] = (0x000000FF & (V)), \
+   ((char *)P)[1] = (0x0000FF00 & (V)) >> 8, \
+   ((char *)P)[2] = (0x00FF0000 & (V)) >> 16, \
+   ((char *)P)[3] = (0xFF000000 & (V)) >> 24, ((char *)P) + 4)
 #define WRITE64LE(P, V)                        \
-  ((P)[0] = (0x00000000000000FF & (V)) >> 000, \
-   (P)[1] = (0x000000000000FF00 & (V)) >> 010, \
-   (P)[2] = (0x0000000000FF0000 & (V)) >> 020, \
-   (P)[3] = (0x00000000FF000000 & (V)) >> 030, \
-   (P)[4] = (0x000000FF00000000 & (V)) >> 040, \
-   (P)[5] = (0x0000FF0000000000 & (V)) >> 050, \
-   (P)[6] = (0x00FF000000000000 & (V)) >> 060, \
-   (P)[7] = (0xFF00000000000000 & (V)) >> 070, (P) + 8)
+  (((char *)P)[0] = (0x00000000000000FF & (V)) >> 000, \
+   ((char *)P)[1] = (0x000000000000FF00 & (V)) >> 010, \
+   ((char *)P)[2] = (0x0000000000FF0000 & (V)) >> 020, \
+   ((char *)P)[3] = (0x00000000FF000000 & (V)) >> 030, \
+   ((char *)P)[4] = (0x000000FF00000000 & (V)) >> 040, \
+   ((char *)P)[5] = (0x0000FF0000000000 & (V)) >> 050, \
+   ((char *)P)[6] = (0x00FF000000000000 & (V)) >> 060, \
+   ((char *)P)[7] = (0xFF00000000000000 & (V)) >> 070, ((char *)P) + 8)
 
 char *Buf9;
 uint32_t Max9;
@@ -103,9 +104,6 @@ uint16_t bigCnt;
 static uint32_t openfids;
 
 volatile bool flag;
-
-static uint32_t curreadfid = (uint32_t)NOFID;
-#define INVAL_READDIR() {curreadfid = (uint32_t)NOFID;}
 
 #define QIDF "0x%02x.%x.%x"
 #define QIDA(qid) qid.type, qid.version, (uint32_t)qid.path
@@ -183,8 +181,6 @@ bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 
 	enum {Tattach = 104}; // size[4] Tattach tag[2] fid[4] afid[4] uname[s] aname[s] !UNIX n_uname[4]
 	enum {Rattach = 105}; // size[4] Rattach tag[2] qid[13]
 
-	INVAL_READDIR();
-
 	size_t ulen = strlen(uname), alen = strlen(aname);
 	uint32_t size = 4+1+2+4+4+2+ulen+2+alen+4;
 
@@ -219,8 +215,6 @@ bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 
 bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, uint16_t *retnwqid, struct Qid9 *retqid) {
 	enum {Twalk = 110}; // size[4] Twalk tag[2] fid[4] newfid[4] nwname[2] nwname*(wname[s])
 	enum {Rwalk = 111}; // size[4] Rwalk tag[2] nwqid[2] nwqid*(wqid[13])
-
-	INVAL_READDIR();
 
 	if (newfid < 32 && fid != newfid && (openfids & (1<<newfid))) Clunk9(newfid);
 
@@ -277,8 +271,6 @@ bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retioun
 	enum {Tlopen = 12}; // size[4] Tlopen tag[2] fid[4] flags[4]
 	enum {Rlopen = 13}; // size[4] Rlopen tag[2] qid[13] iounit[4]
 
-	INVAL_READDIR();
-
 	uint32_t size = 4+1+2+4+4;
 
 	WRITE32LE(smlBuf, size);
@@ -306,31 +298,41 @@ bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retioun
 	return false;
 }
 
+void Clrdirbuf9(void *buf, size_t bufsize) {
+	size_t clear = bufsize;
+	if (clear > 32) clear = 32;
+	memset(buf+bufsize-clear, 0, clear);
+}
+
 // -1=err, 0=ok, 1=eof
-// global storage invalidated by INVAL_READDIR()
-char Readdir9(uint32_t fid, struct Qid9 *retqid, char *rettype, char retname[512]) {
+// It is safe to use Buf9 and Max9 to take advantage of the large buffer
+// (but subsequent calls will wipe your data)
+char Readdir9(uint32_t fid, void *buf, size_t bufsize, struct Qid9 *retqid, char *rettype, char retname[512]) {
 	enum {Treaddir = 40}; // size[4] Treaddir tag[2] fid[4] offset[8] count[4]
 	enum {Rreaddir = 41}; // size[4] Rreaddir tag[2] count[4] data[count]
 	// data consists of: qid[13] offset[8] type[1] name[s]
 
-	static uint64_t requestoffset;
-	static uint32_t cursor, count;
+	struct header {
+		uint64_t offsetForNextRequest;
+		void *limit;
+		void *next;
+	};
 
-	if (fid != curreadfid) {
-		curreadfid = fid;
-		requestoffset = 0;
-		count = 0;
-	}
+	struct header *header = (struct header *)
+		(((uintptr_t)buf + bufsize - sizeof (struct header)) & -alignof header);
 
-	if (cursor>=count) {
+	bufsize = (void *)header - buf;
+	if (bufsize > Max9) bufsize = Max9;
+
+	if (header->next >= header->limit) {
 		uint32_t size = 4+1+2+4+8+4;
 
 		WRITE32LE(smlBuf, size);
 		*(smlBuf+4) = Treaddir;
 		WRITE16LE(smlBuf+4+1, ONLYTAG);
-		WRITE32LE(smlBuf+4+1+2, curreadfid);
-		WRITE64LE(smlBuf+4+1+2+4, requestoffset);
-		WRITE32LE(smlBuf+4+1+2+4+8, Max9);
+		WRITE32LE(smlBuf+4+1+2, fid);
+		WRITE64LE(smlBuf+4+1+2+4, header->offsetForNextRequest);
+		WRITE32LE(smlBuf+4+1+2+4+8, bufsize);
 
 		lprintf("Treaddir(fid=%lu)", fid);
 
@@ -340,33 +342,34 @@ char Readdir9(uint32_t fid, struct Qid9 *retqid, char *rettype, char retname[512
 			return -1;
 		}
 
-		cursor = 0;
-		count = READ32LE(bigBuf+7);
+		size = READ32LE(bigBuf+7);
 
-		lprintf(" -> (count=%lu)\n", count);
+		lprintf(" -> (count=%lu)\n", size);
 
-		if (count==0) {
+		if (buf != bigBuf+11)
+			memcpy(buf, bigBuf+11, size);
+
+		header->next = buf;
+		header->limit = buf + size;
+
+		if (size == 0) {
 			return 1; // eof
 		}
 	}
 
-	char *entry = bigBuf+11+cursor;
+	if (retqid) *retqid = READQID(header->next);
+	header->offsetForNextRequest = READ64LE(header->next+13);
+	if (rettype) *rettype = *((char *)header->next+13+8);
+	uint16_t nlen = READ16LE(header->next+13+8+1);
 
-	struct Qid9 qid = READQID(entry);
-	requestoffset = READ64LE(entry+13);
-	unsigned char type = *(entry+13+8);
-	uint16_t nlen = READ16LE(entry+13+8+1);
-
-	cursor += 13+8+1+2+nlen;
-
-	if (retqid != NULL) *retqid = qid;
-	if (rettype != NULL) *rettype = type;
-
-	if (retname != NULL) {
-		if (nlen > 511) nlen = 511;
-		memcpy(retname, entry+13+8+1+2, nlen);
-		retname[nlen] = 0;
+	if (retname) {
+		uint16_t copylen = nlen;
+		if (copylen > 511) copylen = 511;
+		memcpy(retname, header->next+13+8+1+2, copylen);
+		retname[copylen] = 0;
 	}
+
+	header->next += 13+8+1+2+nlen;
 
 	return 0;
 }
@@ -380,8 +383,6 @@ bool Getattr9(uint32_t fid, struct Qid9 *retqid, uint64_t *retsize, uint64_t *re
 	                      // atime_nsec[8] mtime_sec[8] mtime_nsec[8]
 	                      // ctime_sec[8] ctime_nsec[8] btime_sec[8]
 	                      // btime_nsec[8] gen[8] data_version[8]
-
-	INVAL_READDIR();
 
 	uint32_t size = 4+1+2+4+8;
 
@@ -418,8 +419,6 @@ bool Clunk9(uint32_t fid) {
 	enum {Tclunk = 120}; // size[4] Tclunk tag[2] fid[4]
 	enum {Rclunk = 121}; // size[4] Rclunk tag[2]
 
-	INVAL_READDIR();
-
 	if (fid < 32) openfids &= ~(1<<fid);
 
 	uint32_t size = 4+1+2+4;
@@ -442,8 +441,6 @@ bool Clunk9(uint32_t fid) {
 bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count) {
 	enum {Tread = 116}; // size[4] Tread tag[2] fid[4] offset[8] count[4]
 	enum {Rread = 117}; // size[4] Rread tag[2] count[4] data[count]
-
-	INVAL_READDIR();
 
 	if (actual_count != NULL) {
 		*actual_count = 0;

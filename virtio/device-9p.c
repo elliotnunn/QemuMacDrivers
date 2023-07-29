@@ -559,7 +559,9 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		int err;
 		int n=0;
 		struct Qid9 qid;
-		while ((err=Readdir9(LISTFID, &qid, NULL, utf8)) == 0) {
+		char scratch[2048];
+		Clrdirbuf9(scratch, sizeof scratch);
+		while ((err=Readdir9(LISTFID, scratch, sizeof scratch, &qid, NULL, utf8)) == 0) {
 			// GetFileInfo skips folders, GetCatInfo doesn't
 			if (!longform && !(qid.type & 0x80)) continue;
 			if (!visName(utf8)) continue;
@@ -610,7 +612,9 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		int n=0;
 		char childname[512];
 		Lopen9(MYFID, O_RDONLY, NULL, NULL); // iterate
-		while (Readdir9(MYFID, NULL, NULL, childname) == 0) {
+		char scratch[2048];
+		Clrdirbuf9(Buf9, Max9);
+		while (Readdir9(MYFID, Buf9, Max9, NULL, NULL, childname) == 0) {
 			if (!visName(childname)) continue;
 			n++;
 		}
@@ -1076,8 +1080,10 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 
 			// Need to list the directory and see what matches!
 			// (A shortcut might be to query the CNID table)
+			char scratch[2048];
+			Clrdirbuf9(scratch, sizeof scratch);
 			int err;
-			while ((err=Readdir9(LISTFID, NULL, NULL, gotutf8)) == 0) {
+			while ((err=Readdir9(LISTFID, scratch, sizeof scratch, NULL, NULL, gotutf8)) == 0) {
 				mr31name(got, gotutf8);
 				if (RelString(want, got, 0, 1) == 0) break;
 			}
