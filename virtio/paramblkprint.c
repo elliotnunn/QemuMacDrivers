@@ -84,7 +84,7 @@ static const char *minilang(const char *pb, unsigned short selector, int pre) {
 			return "ioVRefNum22w ioFDirIndex28w ioDirID48l";
 		}
 	case 0x0009:
-#		define CATINFOCOMMON "ioFRefNum24w ioFlAttrib30b ioFlFndrInfo32x ioDirID48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l ioFlBkDat80l ioFlXFndrInfo84x ioFlParID100l ioFlClpSiz100l";
+#		define CATINFOCOMMON "ioFRefNum24w ioFlAttrib30b ioFlFndrInfo32x ioDirID48l ioFlStBlk52w ioFlLgLen54l ioFlPyLen58l ioFlRStBlk62w ioFlRLgLen64l ioFlRPyLen68l ioFlCrDat72l ioFlMdDat72l ioFlBkDat80l ioFlXFndrInfo84x ioFlParID100l ioFlClpSiz104l";
 		if (*(short *)(pb+28) == 0) {
 			return CATINFOCOMMON;
 		} else {
