@@ -625,8 +625,12 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	if (Getattr9(MYFID, &qid, &size, &time)) return permErr;
 
 	pb->ioDirID = cnid; // alias ioDrDirID
-	pb->ioFlParID = detail->parent; // alias ioDrDirID
 	pb->ioFRefNum = 0;
+
+	// This is outside the GetFileInfo block: anticipate catastrophe
+	if (longform) {
+		pb->ioFlParID = detail->parent; // alias ioDrDirID
+	}
 
 	if (qid.type & 0x80) { // directory
 		int n=0;
