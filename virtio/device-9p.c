@@ -821,14 +821,16 @@ static OSErr fsOpen(struct HFileParam *pb) {
 	if (rfork) {
 		char rname[512];
 		sprintf(rname, "%s.rsrc", rec->name);
-		if (Walk9(fid, fid, 2, (const char *[]){"..", rname}, NULL, NULL))
-			return fnfErr;
-		// TODO this actually doesn't check the error correctly
+
+		uint16_t oksteps = 0;
+		Walk9(fid, fid, 2, (const char *[]){"..", rname}, &oksteps, NULL);
+		if (oksteps != 2) return fnfErr;
 	}
 
 	uint64_t size = 0;
-	if (Getattr9(fid, NULL, &size, NULL)) return permErr;
-	// TODO also check that it's not a directory
+	struct Qid9 qid;
+	if (Getattr9(fid, &qid, &size, NULL)) return permErr;
+	if (qid.type & 0x80) return fnfErr; // better not be a folder!
 
 	if (Lopen9(fid, O_RDONLY, NULL, NULL))
 		return permErr;
