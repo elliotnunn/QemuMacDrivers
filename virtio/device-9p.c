@@ -274,15 +274,15 @@ static OSStatus initialize(DriverInitInfo *info) {
 		// This is very early boot, and my globals will be nuked by a ?ROM bug.
 		Patch68k(
 			_DisposePtr,
-			"48e7 e0e0" //     movem.l d0-d2/a0-a2,-(sp)
-			"2f2f 0034" //     move.l  $34(sp),-(sp)
-			"2f08"      //     move.l  a0,-(sp)
-			"4eb9 %l"   //     jsr     disposePtrShield
-			"504f"      //     addq    #8,sp
-			"4a80"      //     tst.l   d0
-			"4cdf 0707" //     movem.l (sp)+,d0-d2/a0-a2
-			"6606"      //     bne.s   uninstall
-			"4ef9 %o",  //     jmp     originalDisposePtr
+			"48e7 e0e0" // movem.l d0-d2/a0-a2,-(sp)
+			"2f2f 0034" // move.l  $34(sp),-(sp)
+			"2f08"      // move.l  a0,-(sp)
+			"4eb9 %l"   // jsr     disposePtrShield
+			"504f"      // addq    #8,sp
+			"4a80"      // tst.l   d0
+			"4cdf 0707" // movem.l (sp)+,d0-d2/a0-a2
+			"6606"      // bne.s   uninstall
+			"4ef9 %o",  // jmp     originalDisposePtr
 			            // uninstall:
 			NewRoutineDescriptor((ProcPtr)disposePtrShield,
 				kCStackBased
@@ -294,11 +294,12 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 		Patch68k(
 			_InitFS,
-			"48e7 e0e0" //     movem.l d0-d2/a0-a2,-(sp)
-			"4eb9 %o"   //     jsr     originalInitFS
-			"4eb9 %l"   //     jsr     secondaryInitialize
-			"4cdf 0707" //     movem.l (sp)+,d0-d2/a0-a2
-			"4e75",     //     rts
+			"48e7 60e0"  // movem.l d1-d2/a0-a2,-(sp)
+			"4eb9 %o"    // jsr     originalInitFS
+			"2f00"       // move.l  d0,-(sp)
+			"4eb9 %l"    // jsr     secondaryInitialize
+			"4cdf 0707", // movem.l (sp)+,d0-d2/a0-a2
+			             // fallthru to uninstall code
 			NewRoutineDescriptor((ProcPtr)secondaryInitialize,
 				kCStackBased,
 				GetCurrentISA())
