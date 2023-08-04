@@ -85,7 +85,6 @@ static struct handler fsHandler(unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static struct handler controlStatusHandler(long selector);
 
-void *disposePtrPatch;
 static char *stack;
 static short drvrRefNum;
 static unsigned long callcnt;
@@ -273,7 +272,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		lprintf(".virtio9p: early boot -- attempting boot device hacks\n");
 
 		// This is very early boot, and my globals will be nuked by a ?ROM bug.
-		disposePtrPatch = Patch68k(
+		Patch68k(
 			_DisposePtr,
 			"48e7 e0e0" //     movem.l d0-d2/a0-a2,-(sp)
 			"2f2f 0034" //     move.l  $34(sp),-(sp)
@@ -282,9 +281,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 			"504f"      //     addq    #8,sp
 			"4a80"      //     tst.l   d0
 			"4cdf 0707" //     movem.l (sp)+,d0-d2/a0-a2
-			"6702"      //     beq.s   ok
-			"4e75"      //     rts
-			"4ef9 %o",  // ok: jmp     originalDisposePtr
+			"6606"      //     bne.s   uninstall
+			"4ef9 %o",  //     jmp     originalDisposePtr
+			            // uninstall:
 			NewRoutineDescriptor((ProcPtr)disposePtrShield,
 				kCStackBased
 					| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
@@ -317,7 +316,6 @@ static long disposePtrShield(Ptr ptr, void *caller) {
 
 	if (ptr <= &myglobals && &myglobals < ptr+GetPtrSize(ptr)) {
 		lprintf("Foiled the ROM's attempt to DisposePtr my globals! Caller was %p.\n", caller);
-		Unpatch68k(disposePtrPatch);
 		return 1; // do not call the real DisposePtr
 	} else {
 		return 0; // call the real DisposePtr

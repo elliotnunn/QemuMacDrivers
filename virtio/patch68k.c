@@ -16,6 +16,10 @@ struct block {
 	char code[128];
 };
 
+static struct RoutineDescriptor unpatcher = BUILD_ROUTINE_DESCRIPTOR(
+	kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
+	Unpatch68k);
+
 static int hex(char c) {
 	if ('0'<=c && c<='9') return c - '0';
 	if ('a'<=c && c<='f') return c - 'a' + 10;
@@ -102,6 +106,33 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	}
 
 	va_end(argp);
+
+	// Fallthrough code to remove the patch
+	*code++ = 0x48; // MOVEM.L d0-d2/a0-a2,-(sp)
+	*code++ = 0xe7;
+	*code++ = 0xe0;
+	*code++ = 0xe0;
+
+	*code++ = 0x48; // PEA code
+	*code++ = 0x7a;
+	short delta = block->code - code;
+	*code++ = delta >> 8;
+	*code++ = delta;
+
+	*code++ = 0x4e; // JSR unpatcher
+	*code++ = 0xb9;
+	*code++ = (unsigned long)&unpatcher >> 24;
+	*code++ = (unsigned long)&unpatcher >> 16;
+	*code++ = (unsigned long)&unpatcher >> 8;
+	*code++ = (unsigned long)&unpatcher;
+
+	*code++ = 0x4c; // MOVEM.L (sp)+,d0-d2/a0-a2
+	*code++ = 0xdf;
+	*code++ = 0x07;
+	*code++ = 0x07;
+
+	*code++ = 0x4e; // RTS
+	*code++ = 0x75;
 
 	BlockMove(block, block, sizeof *block); // clear 68k emulator cache
 	SetPtrSize((Ptr)block, (char *)code - (char *)block); // shrink

@@ -165,8 +165,6 @@ static bool change_in_progress; // SetMode/SwitchMode lock out frame interrupts
 
 static bool virgl_enable; // 3D mode
 
-static void *gestaltPatch;
-
 // Cursor that the driver composites (like a hardware cursor)
 static bool curs_set;
 static bool curs_visible;
@@ -398,18 +396,20 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// We can only patch drawing code *after* QuickDraw is fully installed,
 	// so wait for ProcessMgr to NewGestalt('os  ') right before the desktop.
-	gestaltPatch = Patch68k(
+	Patch68k(
 		_Gestalt,
 		"0c80 6f732020" //      cmp.l   #'os  ',d0
 		"661a"          //      bne.s   old
 		"0801 0009"     //      btst    #9,d1
 		"6714"          //      beq.s   old
 		"0801 000a"     //      btst    #10,d1
-		"660e"          //      bne.s   old
+		"6610"          //      bne.s   old
 		"48e7 e0e0"     //      movem.l d0-d2/a0-a2,-(sp)
 		"4eb9 %l"       //      jsr     lateBootHook
 		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
+		"6106"          //      bsr.s   uninstall
 		"4ef9 %o",      // old: jmp     originalGestalt
+		                // uninstall: (fallthrough code)
 		NewRoutineDescriptor((ProcPtr)lateBootHook, kCStackBased, GetCurrentISA())
 	);
 
@@ -770,7 +770,6 @@ static void lateBootHook(void) {
 	InstallDirtyRectPatch();
 	updateScreen(0, 0, H, W);
 	DConfigChange();
-	Unpatch68k(gestaltPatch); // do not call me again
 	lprintf("INSTALLED QUICKDRAW PATCHES");
 }
 

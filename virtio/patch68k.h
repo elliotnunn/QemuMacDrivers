@@ -6,5 +6,8 @@
 #define LONGCODE68K "%l" // 1 argument: 32-bit literal
 // ... and everything else in the format string is hex or whitespace
 
+// If the code "falls through" the end, it will run an uninstaller routine,
+// then return.
+
 void *Patch68k(unsigned long vector, const char *fmt, ...);
 void Unpatch68k(void *patch);
