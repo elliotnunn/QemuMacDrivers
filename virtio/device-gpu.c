@@ -399,9 +399,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	Patch68k(
 		_Gestalt,
 		"0c80 6f732020" //      cmp.l   #'os  ',d0
-		"661a"          //      bne.s   old
+		"661c"          //      bne.s   old
 		"0801 0009"     //      btst    #9,d1
-		"6714"          //      beq.s   old
+		"6716"          //      beq.s   old
 		"0801 000a"     //      btst    #10,d1
 		"6610"          //      bne.s   old
 		"48e7 e0e0"     //      movem.l d0-d2/a0-a2,-(sp)
