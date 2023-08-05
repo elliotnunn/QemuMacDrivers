@@ -66,8 +66,10 @@ struct flagdqe {
 
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
+static void installToExtFS(void);
+static OSErr boot(void);
+static void workAroundROMBug(void);
 static long disposePtrShield(Ptr ptr, void *caller);
-static void secondaryInitialize(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
@@ -114,32 +116,11 @@ static struct VCB vcb = {
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
 };
-static const short bootBlocks[] = {
-	0x4c4b, 0x6000, 0x0086, 0x4418, 0x0000, 0x0653, 0x7973, 0x7465, // LK`...D....Syste
-	0x6d00, 0x0000, 0x0000, 0x0000, 0x0000, 0x0646, 0x696e, 0x6465, // m..........Finde
-	0x7200, 0x0000, 0x0000, 0x0000, 0x0000, 0x074d, 0x6163, 0x7342, // r..........MacsB
-	0x7567, 0x0000, 0x0000, 0x0000, 0x0000, 0x0c44, 0x6973, 0x6173, // ug.........Disas
-	0x7365, 0x6d62, 0x6c65, 0x7200, 0x0000, 0x0d53, 0x7461, 0x7274, // sembler....Start
-	0x5570, 0x5363, 0x7265, 0x656e, 0x0000, 0x0646, 0x696e, 0x6465, // UpScreen...Finde
-	0x7200, 0x0000, 0x0000, 0x0000, 0x0000, 0x0943, 0x6c69, 0x7062, // r..........Clipb
-	0x6f61, 0x7264, 0x0000, 0x0000, 0x0000, 0x000a, 0x0014, 0x0000, // oard............
-	0x4300, 0x0000, 0x8000, 0x0002, 0x0000, 0x4a78, 0x028e, 0x6b46, // C.........Jx..kF
-	0x2078, 0x02ae, 0x3228, 0x0008, 0x7cfe, 0x5446, 0x303b, 0x603c, //  x..2(..|.TF0;`<
-	0x6758, 0xb240, 0x66f4, 0x0c01, 0x0076, 0x6210, 0x2078, 0x02a6, // gX.@f....vb. x..
-	0xd1fa, 0xffd4, 0xa057, 0x21f8, 0x02a6, 0x0118, 0x584f, 0x2e0f, // .....W!.....XO..
-	0x6138, 0x323b, 0x6022, 0x4a40, 0x6704, 0x323b, 0x6024, 0x2078, // a82;`"J@g.2;`$ x
-	0x02ae, 0x4ef0, 0x1000, 0x7062, 0xa9c9, 0x0075, 0x0276, 0x0178, // ..N...pb...u.v.x
-	0x037a, 0x067c, 0x0000, 0x0a44, 0x090e, 0x0f1c, 0x30e6, 0x1d96, // .z.|...D....0...
-	0x0b82, 0x0a52, 0x11ae, 0x336e, 0x203e, 0x41fa, 0xff0e, 0x43f8, // ...R..3n >A...C.
-	0x0ad8, 0x7010, 0xa02e, 0x41fa, 0xff12, 0x43f8, 0x02e0, 0x7010, // ..p...A...C...p.
-	0xa02e, 0x41fa, 0xff56, 0x43f8, 0x0970, 0x21c9, 0x096c, 0x7010, // ..A..VC..p!..lp.
-	0xa02e, 0x303a, 0xff58, 0xa06d, 0x303a, 0xff50, 0xa06c, 0x2047, // ..0:.X.m0:.P.l G
-	0x3178, 0x0210, 0x0016, 0xa00f, 0x6654, 0x42a8, 0x0012, 0x4268, // 1x......fTB...Bh
-	0x001c, 0xa207, 0x6640, 0x2868, 0x005e, 0x2168, 0x005a, 0x0030, // ....f@(h.^!h.Z.0
-	0x6710, 0x217c, 0x4552, 0x494b, 0x001c, 0x7001, 0xa260, 0x6626, // g.!|ERIK..p..`f&
-	0xa015, 0x554f, 0xa995, 0x4a5f, 0x6b1a, 0x594f, 0x2f3c, 0x626f, // ..UO..J_k.YO/<bo
-	0x6f74, 0x3f3c, 0x0002, 0xa9a0, 0x201f, 0x6712, 0x584f, 0x2640, // ot?<.... .g.XO&@
-	0x2053, 0x4ed0, 0x702b, 0x3f00, 0x2047, 0xa00e, 0x301f, 0x4e75, //  SN.p+?. G..0.Nu
+static short bootBlocks[(8 + sizeof(RoutineDescriptor))/2] = {
+	0x4c4b, // Larry Kenyon's magic number
+	0x6000, 0x0004, // BRA to routine descriptor
+	0x4418, // executable flavour (not declarative)
+	// routine descriptor goes here
 };
 
 DriverDescription TheDriverDescription = {
@@ -258,73 +239,35 @@ static OSStatus initialize(DriverInitInfo *info) {
 	RegPropertyValueSize size = sizeof(preferName);
 	RegistryPropertyGet(&info->deviceEntry, "mount", preferName, &size);
 
-	// Find the system folder
-	vcb.vcbFndrInfo[0] = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
-	lprintf("System folder CNID %d\n", vcb.vcbFndrInfo[0]);
-
 	// Is the File Manager actually up yet?
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
-		secondaryInitialize();
+		installToExtFS();
 
 		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
 		PBMountVol((void *)&pb);
 	} else {
-		lprintf(".virtio9p: early boot -- attempting boot device hacks\n");
+		workAroundROMBug();
 
-		// This is very early boot, and my globals will be nuked by a ?ROM bug.
-		Patch68k(
-			_DisposePtr,
-			"48e7 e0e0" // movem.l d0-d2/a0-a2,-(sp)
-			"2f2f 0034" // move.l  $34(sp),-(sp)
-			"2f08"      // move.l  a0,-(sp)
-			"4eb9 %l"   // jsr     disposePtrShield
-			"504f"      // addq    #8,sp
-			"4a80"      // tst.l   d0
-			"4cdf 0707" // movem.l (sp)+,d0-d2/a0-a2
-			"6606"      // bne.s   uninstall
-			"4ef9 %o",  // jmp     originalDisposePtr
-			            // uninstall:
-			NewRoutineDescriptor((ProcPtr)disposePtrShield,
-				kCStackBased
-					| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-					| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-					| RESULT_SIZE(kFourByteCode),
-				GetCurrentISA())
-		);
+		// Bootable filesystem?
+		// TODO: this needs to check for a ZSYS and FNDR file
+		int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
+		if (systemFolder > 0) {
+			lprintf("Has a System Folder: making bootable\n");
+			vcb.vcbFndrInfo[0] = systemFolder;
+			SetTimeout(1); // give up on the default disk quickly
 
-		Patch68k(
-			_InitFS,
-			"48e7 60e0"  // movem.l d1-d2/a0-a2,-(sp)
-			"4eb9 %o"    // jsr     originalInitFS
-			"2f00"       // move.l  d0,-(sp)
-			"4eb9 %l"    // jsr     secondaryInitialize
-			"4cdf 0707", // movem.l (sp)+,d0-d2/a0-a2
-			             // fallthru to uninstall code
-			NewRoutineDescriptor((ProcPtr)secondaryInitialize,
-				kCStackBased,
-				GetCurrentISA())
-		);
-
-		SetTimeout(1); // give up on the default disk quickly
+			RoutineDescriptor boot68 = BUILD_ROUTINE_DESCRIPTOR(
+				kCStackBased | RESULT_SIZE(kFourByteCode), boot);
+			memcpy(bootBlocks + 8/sizeof *bootBlocks, &boot68, sizeof boot68);
+			BlockMove(bootBlocks, bootBlocks, sizeof bootBlocks); // don't really need this early
+		}
 	}
 
 	return noErr;
 }
 
-// Prevent some errant ROM code from nuking my driver!
-static long disposePtrShield(Ptr ptr, void *caller) {
-	static char myglobals; // a memory address inside our global area
-
-	if (ptr <= &myglobals && &myglobals < ptr+GetPtrSize(ptr)) {
-		lprintf("Foiled the ROM's attempt to DisposePtr my globals! Caller was %p.\n", caller);
-		return 1; // do not call the real DisposePtr
-	} else {
-		return 0; // call the real DisposePtr
-	}
-}
-
 // Run this only when the File Manager is up
-static void secondaryInitialize(void) {
+static void installToExtFS(void) {
 	static bool alreadyUp;
 	if (alreadyUp) return;
 	alreadyUp = true;
@@ -369,6 +312,80 @@ static void secondaryInitialize(void) {
 				| RESULT_SIZE(kFourByteCode),
 			GetCurrentISA())
 	);
+}
+
+// Load and run a 'boot' 2 resource as if we were a real System
+static OSErr boot(void) {
+	SysError(dsBadPatch);
+
+	pstrcpy((unsigned char *)0xad8, "\pSystem");
+	pstrcpy((unsigned char *)0x2e0, "\pFinder");
+	pstrcpy((unsigned char *)0x970, "\pClipboard");
+	*(unsigned char **)0x96c = (unsigned char *)0x970;
+
+	CallOSTrapUniversalProc(GetOSTrapAddress(_InitEvents), 0x33802, _InitEvents, 20);
+
+	CallOSTrapUniversalProc(GetOSTrapAddress(_InitFS), 0x33802, _InitFS, 10);
+
+	installToExtFS();
+
+	struct IOParam mntPB = {.ioVRefNum=dqe.dqe.dQDrive};
+	PBMountVol((void *)&mntPB);
+
+	struct WDPBRec wdPB = {.ioVRefNum=vcb.vcbVRefNum, .ioWDDirID=vcb.vcbFndrInfo[0], .ioWDProcID='ERIK'};
+	PBOpenWDSync((void *)&wdPB);
+	PBSetVolSync((void *)&wdPB);
+
+	InitResources();
+
+	Handle boot2hdl = GetResource('boot', 2);
+
+	// movem.l (sp),a0/a3/a4; move.l (a3),-(sp); rts
+	static short thunk[6] = {0x4CD7, 0x1900, 0x2F13, 0x4E75};
+	BlockMove(thunk, thunk, sizeof thunk);
+
+	CallUniversalProc(
+		(void *)thunk,
+		kCStackBased
+			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+			| STACK_ROUTINE_PARAMETER(2, kFourByteCode),
+		boot2hdl,
+		vcb.vcbFndrInfo[0] // a4 has in the past been the startup app dirID??
+	);
+}
+
+// Stop an early-boot ROM ?bug from nuking my data segment
+static void workAroundROMBug(void) {
+	Patch68k(
+		_DisposePtr,
+		"48e7 e0e0" // movem.l d0-d2/a0-a2,-(sp)
+		"2f2f 0034" // move.l  $34(sp),-(sp)
+		"2f08"      // move.l  a0,-(sp)
+		"4eb9 %l"   // jsr     disposePtrShield
+		"504f"      // addq    #8,sp
+		"4a80"      // tst.l   d0
+		"4cdf 0707" // movem.l (sp)+,d0-d2/a0-a2
+		"6606"      // bne.s   uninstall
+		"4ef9 %o",  // jmp     originalDisposePtr
+					// uninstall:
+		NewRoutineDescriptor((ProcPtr)disposePtrShield,
+			kCStackBased
+				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
+				| RESULT_SIZE(kFourByteCode),
+			GetCurrentISA())
+	);
+}
+
+static long disposePtrShield(Ptr ptr, void *caller) {
+	static char myglobals; // a memory address inside our global area
+
+	if (ptr <= &myglobals && &myglobals < ptr+GetPtrSize(ptr)) {
+		lprintf("Foiled the ROM's attempt to DisposePtr my globals! Caller was %p.\n", caller);
+		return 1; // do not call the real DisposePtr
+	} else {
+		return 0; // call the real DisposePtr
+	}
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
