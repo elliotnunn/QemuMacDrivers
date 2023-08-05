@@ -196,7 +196,11 @@ static InterruptMemberNumber interruptTopHalf(InterruptSetMember ist, void *refC
 		QueueSecondaryInterruptHandler(configIntBottomHalf, NULL, NULL, NULL);
 	}
 
-	return noErr;
+	if (flags & 3) {
+		return kIsrIsComplete;
+	} else {
+		return kIsrIsNotComplete;
+	}
 }
 
 static OSStatus queueIntBottomHalf(void *arg1, void *arg2) {
