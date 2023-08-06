@@ -64,9 +64,20 @@ struct flagdqe {
 	DrvQEl dqe; // AddDrive points here
 };
 
+struct bbnames {
+	unsigned char sys[16]; // "System"
+	unsigned char fnd[16]; // "Finder"
+	unsigned char dbg[16]; // "MacsBug"
+	unsigned char dis[16]; // "Disassembler"
+	unsigned char scr[16]; // "StartUpScreen"
+	unsigned char app[16]; // "Finder"
+	unsigned char clp[16]; // "Clipboard"
+};
+
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void installToExtFS(void);
+static char *mkbb(OSErr (*booter)(void), struct bbnames names);
 static OSErr boot(void);
 static void workAroundROMBug(void);
 static long disposePtrShield(Ptr ptr, void *caller);
@@ -98,6 +109,7 @@ static char preferName[28];
 static long cacheCNID;
 static long cacheOffset, cacheLen;
 static char cache[512];
+static char *bootBlock;
 static struct flagdqe dqe = {
 	.flags = 0x00080000, // fixed disk
 	.dqe = {.dQFSID = FSID},
@@ -115,12 +127,6 @@ static struct VCB vcb = {
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
-};
-static short bootBlocks[(8 + sizeof(RoutineDescriptor))/2] = {
-	0x4c4b, // Larry Kenyon's magic number
-	0x6000, 0x0004, // BRA to routine descriptor
-	0x4418, // executable flavour (not declarative)
-	// routine descriptor goes here
 };
 
 DriverDescription TheDriverDescription = {
@@ -162,8 +168,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		struct IOParam *param = &pb.pb->ioParam;
 		param->ioActCount = param->ioReqCount;
 		for (long i=0; i<param->ioReqCount; i++) {
-			if (param->ioPosOffset+i < sizeof(bootBlocks)) {
-				param->ioBuffer[i] = ((char *)&bootBlocks)[param->ioPosOffset+i];
+			if (param->ioPosOffset+i < 512 && bootBlock != NULL) {
+				param->ioBuffer[i] = bootBlock[i];
 			} else {
 				param->ioBuffer[i] = 0;
 			}
@@ -241,6 +247,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// Is the File Manager actually up yet?
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
+		lprintf("File Manager ready: mounting now\n");
 		installToExtFS();
 
 		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
@@ -252,14 +259,21 @@ static OSStatus initialize(DriverInitInfo *info) {
 		// TODO: this needs to check for a ZSYS and FNDR file
 		int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
 		if (systemFolder > 0) {
-			lprintf("Has a System Folder: making bootable\n");
+			lprintf("File Manager not ready, I am bootable: attempting to boot\n");
 			vcb.vcbFndrInfo[0] = systemFolder;
-			SetTimeout(1); // give up on the default disk quickly
 
-			RoutineDescriptor boot68 = BUILD_ROUTINE_DESCRIPTOR(
-				kCStackBased | RESULT_SIZE(kFourByteCode), boot);
-			memcpy(bootBlocks + 8/sizeof *bootBlocks, &boot68, sizeof boot68);
-			BlockMove(bootBlocks, bootBlocks, sizeof bootBlocks); // don't really need this early
+			struct bbnames bbn = {};
+			memcpy(bbn.sys, "\pSystem", 7);
+			memcpy(bbn.fnd, "\pFinder", 7);
+			memcpy(bbn.dbg, "\pMacsBug", 8);
+			memcpy(bbn.dis, "\pDisassembler", 13);
+			memcpy(bbn.clp, "\pClipboard", 10);
+
+			bootBlock = mkbb(boot, bbn);
+
+			SetTimeout(1); // give up on the default disk quickly
+		} else {
+			lprintf("File Manager not ready, I am not bootable: giving up\n");
 		}
 	}
 
@@ -272,7 +286,7 @@ static void installToExtFS(void) {
 	if (alreadyUp) return;
 	alreadyUp = true;
 
-	lprintf(".virtio9p: secondary init\n");
+	lprintf("Hooking ToExtFS\n");
 
 	// External filesystems need a big stack, and they can't
 	// share the FileMgr stack because of reentrancy problems
@@ -314,14 +328,39 @@ static void installToExtFS(void) {
 	);
 }
 
-// Load and run a 'boot' 2 resource as if we were a real System
-static OSErr boot(void) {
-	SysError(dsBadPatch);
+// Make (in the heap) a single 512-byte block that the ROM will boot from
+static char *mkbb(OSErr (*booter)(void), struct bbnames names) {
+	char *bb = NewPtrSysClear(512);
+	if (!bb) return NULL;
 
-	pstrcpy((unsigned char *)0xad8, "\pSystem");
-	pstrcpy((unsigned char *)0x2e0, "\pFinder");
-	pstrcpy((unsigned char *)0x970, "\pClipboard");
-	*(unsigned char **)0x96c = (unsigned char *)0x970;
+	// Larry Kenyon's magic number, BRA routine descriptor, executable flavour
+	memcpy(bb, (const short []){0x4c4b, 0x6000, 0x0086, 0x4418}, 8);
+
+	// List of 16-byte names: "System", "Finder" etc
+	memcpy(bb + 0x0a, &names, sizeof names);
+
+	RoutineDescriptor booter68 = BUILD_ROUTINE_DESCRIPTOR(
+		kCStackBased
+			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+			| RESULT_SIZE(kTwoByteCode),
+		booter);
+	memcpy(bb + 0x8a, &booter68, sizeof booter68);
+
+	return bb;
+}
+
+// Emulate a System 7-style boot block ('boot' 1 resource):
+// Load and run a 'boot' 2 resource in the System file
+// Not worth checking return values: if boot fails then the reason is clear enough
+static OSErr boot(void) {
+	lprintf("Emulating boot block\n");
+
+	// Populate low memory from the declarative part of the boot block.
+	// (We use the copy from our own globals. There is a copy A5+0x270.)
+	memcpy((void *)0xad8, bootBlock + 10, 16); // SysResName
+	memcpy((void *)0x2e0, bootBlock + 26, 16); // FinderName
+	memcpy((void *)0x970, bootBlock + 106, 16); // ScrapTag
+	*(void **)0x96c = (void *)0x970; // ScrapName pointer --> ScrapTag string
 
 	CallOSTrapUniversalProc(GetOSTrapAddress(_InitEvents), 0x33802, _InitEvents, 20);
 
@@ -329,21 +368,29 @@ static OSErr boot(void) {
 
 	installToExtFS();
 
-	struct IOParam mntPB = {.ioVRefNum=dqe.dqe.dQDrive};
-	PBMountVol((void *)&mntPB);
+	struct WDPBRec pb = {.ioVRefNum=dqe.dqe.dQDrive};
+	PBMountVol((void *)&pb);
 
-	struct WDPBRec wdPB = {.ioVRefNum=vcb.vcbVRefNum, .ioWDDirID=vcb.vcbFndrInfo[0], .ioWDProcID='ERIK'};
-	PBOpenWDSync((void *)&wdPB);
-	PBSetVolSync((void *)&wdPB);
+	// Is the System Folder not the root of the disk? (It usually isn't.)
+	// Make it a working directory and call that the default (fake) volume.
+	if (vcb.vcbFndrInfo[0] > 2) {
+		pb.ioWDDirID = vcb.vcbFndrInfo[0];
+		pb.ioWDProcID = 'ERIK';
+		PBOpenWDSync((void *)&pb);
+		PBSetVolSync((void *)&pb);
+	}
 
+	// Next startup stage
 	InitResources();
-
 	Handle boot2hdl = GetResource('boot', 2);
 
+	// boot 2 resource requires a3=handle and a4=startup app dirID
 	// movem.l (sp),a0/a3/a4; move.l (a3),-(sp); rts
 	static short thunk[6] = {0x4CD7, 0x1900, 0x2F13, 0x4E75};
 	BlockMove(thunk, thunk, sizeof thunk);
 
+	// Call boot 2, never to return
+	lprintf("Starting System file\n");
 	CallUniversalProc(
 		(void *)thunk,
 		kCStackBased
