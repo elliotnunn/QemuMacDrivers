@@ -295,7 +295,11 @@ static void installToExtFS(void) {
 
 	Patch68k(
 		0x3f2,      // ToExtFS:
-		"2f38 0110" //       move.l  StkLowPt,-(sp)
+		"0cb8 %l 03ee" //    cmp.l   #vcb,ReqstVol
+		"6706"      //       beq.s   yes
+		"0c28 000f 0007" //  cmp.b   #_MountVol&255,ioTrap(a0)
+		"6642"      //       bne.s   no
+		"2f38 0110" // yes:  move.l  StkLowPt,-(sp)
 		"42b8 0110" //       clr.l   StkLowPt
 		"23cf %l"   //       move.l  sp,stack-4
 		"2e7c %l"   //       move.l  #stack-4,sp
@@ -315,8 +319,9 @@ static void installToExtFS(void) {
 		"201f"      // punt: move.l  (sp)+,d0          ; hook failure: restore d0 for next FS
 		"2e57"      //       move.l  (sp),sp           ; unswitch stack
 		"21df 0110" //       move.l  (sp)+,StkLowPt
-		"4ef9 %o",  //       jmp     originalToExtFS
+		"4ef9 %o",  // no:   jmp     originalToExtFS
 
+		&vcb,
 		stack + STACKSIZE - 100,
 		stack + STACKSIZE - 100,
 		NewRoutineDescriptor((ProcPtr)fsCall,
