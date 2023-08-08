@@ -489,21 +489,6 @@ static OSErr fsMountVol(struct IOParam *pb) {
 // TODO: when given a WD refnum, return directory valence as the file count
 // TODO: fake used/free alloc blocks (there are limits depending on H bit)
 static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
-	if (pb->ioVolIndex > 0) {
-		// Index into volume queue
-		struct VCB *v = (struct VCB *)GetVCBQHdr()->qHead;
-		for (int i=1; i<pb->ioVolIndex && v!=NULL; i++)
-			v = (struct VCB *)v->qLink;
-		if (v != &vcb)
-			return extFSErr;
-	} else if (pb->ioVolIndex == 0) {
-		// Simple volume/drive refnum
-		if (!determineNum(pb)) return extFSErr;
-	} else if (pb->ioVolIndex < 0) {
-		// "Standard way"
-		if (!determineNumStr(pb)) return extFSErr;
-	}
-
 	pb->ioVCrDate = vcb.vcbCrDate;
 	pb->ioVLsMod = vcb.vcbLsMod; // old field ioVLsBkUp is DIFFERENT
 	pb->ioVAtrb = vcb.vcbAtrb;
@@ -554,8 +539,6 @@ static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
 // <--    40    ioActCount    long    length of vol parms data
 
 static OSErr fsGetVolParms(struct HIOParam *pb) {
-	if (!determineNumStr(pb)) return extFSErr;
-
 	struct GetVolParmsInfoBuffer buf = {
 		.vMVersion = 1, // goes up to version 4
 		.vMAttrib = 0
@@ -614,7 +597,6 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	int32_t cnid = pbDirID(pb);
 
 	if (idx > 0) {
-		if (!determineNum(pb)) return extFSErr;
 		lprintf("GCI index mode\n");
 
 		// Software commonly calls with index 1, 2, 3 etc
@@ -661,12 +643,10 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		cnid = makeCNID(cnid, name);
 		walkToCNID(cnid, MYFID);
 	} else if (idx == 0) {
-		if (!determineNumStr(pb)) return extFSErr;
 		lprintf("GCI name mode\n");
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
 		if (cnid < 0) return cnid;
 	} else {
-		if (!determineNum(pb)) return extFSErr;
 		lprintf("GCI ID mode\n");
 		cnid = browse(MYFID, cnid, "\p");
 		if (cnid < 0) return cnid;
