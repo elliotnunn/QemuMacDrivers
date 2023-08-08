@@ -441,7 +441,9 @@ static long disposePtrShield(Ptr ptr, void *caller) {
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
+	// This is the only call that needs to check that our volume is the right one
 	if (pb->ioVRefNum != dqe.dqe.dQDrive) return extFSErr;
+
 	if (mounted) return volOnLinErr;
 
 	if (preferName[0] != 0) {
@@ -789,8 +791,6 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 }
 
 static OSErr fsMakeFSSpec(struct HIOParam *pb) {
-	if (!determineNumStr(pb)) return extFSErr;
-
 	struct FSSpec *spec = (struct FSSpec *)pb->ioMisc;
 
 	int32_t cnid = pbDirID(pb);
@@ -847,8 +847,6 @@ static OSErr fsOpen(struct HFileParam *pb) {
 // 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
 
 	pb->ioFRefNum = 0;
-
-	if (!determineNumStr(pb)) return extFSErr;
 
 	bool rfork = (pb->ioTrap & 0xff) == 0x0a;
 
@@ -914,12 +912,6 @@ static OSErr fsGetEOF(struct IOParam *pb) {
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
-	if (fcb->fcbFlNm == 0)
-		return fnOpnErr;
-
-	if (fcb->fcbVPtr != &vcb)
-		return extFSErr;
-
 	pb->ioMisc = (Ptr)fcb->fcbEOF;
 
 	return noErr;
@@ -936,12 +928,6 @@ static OSErr fsClose(struct IOParam *pb) {
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
-	if (fcb->fcbFlNm == 0)
-		return fnOpnErr;
-
-	if (fcb->fcbVPtr != &vcb)
-		return extFSErr;
-
 	Clunk9(32 + pb->ioRefNum);
 	fcb->fcbFlNm = 0;
 
@@ -957,12 +943,6 @@ static OSErr fsRead(struct IOParam *pb) {
 	struct FCBRec *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
-
-	if (fcb->fcbFlNm == 0)
-		return fnOpnErr;
-
-	if (fcb->fcbVPtr != &vcb)
-		return extFSErr;
 
 	char seek = pb->ioPosMode & 3;
 
@@ -1035,8 +1015,6 @@ static OSErr fsRead(struct IOParam *pb) {
 // "Working directories" are a compatibility shim for apps expecting flat disks:
 // a table of fake volume reference numbers that actually refer to directories.
 static OSErr fsOpenWD(struct WDParam *pb) {
-	if (!determineNumStr(pb)) return extFSErr;
-
 	int32_t cnid = pbDirID(pb);
 	cnid = browse(12, cnid, pb->ioNamePtr);
 	if (cnid < 0) return cnid;
@@ -1082,15 +1060,6 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 	return tmwdoErr;
 }
 
-// The File Manager has very kindly populated this call for us,
-// and only asks that we return noErr (after checking we're the right fs!).
-// FM does pass the WDCB address in d1, but we don't need it.
-static OSErr fsGetWDInfo(struct WDParam *pb) {
-	if (pb->ioWDVRefNum != vcb.vcbVRefNum) return extFSErr;
-	return noErr;
-}
-
-// Does not actually check for the right volume: determine*() first.
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	enum {LISTFID=5};
 
@@ -1174,7 +1143,6 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	return cnid;
 }
 
-// Does not check whether our volume is the right one: use determineNumStr
 static int32_t pbDirID(void *_pb) {
 	struct HFileParam *pb = _pb;
 
@@ -1211,7 +1179,6 @@ static struct WDCBRec *findWD(short refnum) {
 	}
 }
 
-// Does not actually check for the right volume: determine*() first.
 // If positive, return the "type" field from the qid
 // If negative, an error
 static int walkToCNID(int32_t cnid, uint32_t fid) {
@@ -1463,7 +1430,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMCloseWD: return (struct handler){NULL, extFSErr};
 	case kFSMCatMove: return (struct handler){NULL, wPrErr};
 	case kFSMDirCreate: return (struct handler){NULL, wPrErr};
-	case kFSMGetWDInfo: return (struct handler){fsGetWDInfo};
+	case kFSMGetWDInfo: return (struct handler){NULL, noErr};
 	case kFSMGetFCBInfo: return (struct handler){fsGetFCBInfo};
 	case kFSMGetCatInfo: return (struct handler){fsGetFileInfo};
 	case kFSMSetCatInfo: return (struct handler){NULL, wPrErr};
