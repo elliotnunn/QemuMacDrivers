@@ -755,9 +755,8 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 	struct WDCBRec setDefWDCB;
 
 	if (pb->ioTrap & 0x200) {
-		if (!determineNumStr(pb)) return extFSErr;
-
-		// Check that it exists and is a directory
+		// HSetVol: any directory is fair game,
+		// so check that the path exists and is really a directory
 		int32_t cnid = browse(11, pbDirID(pb), pb->ioNamePtr);
 		if (cnid < 0) return cnid;
 		struct Qid9 qid;
@@ -767,24 +766,33 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 
 		setDefVCBPtr = &vcb;
 		setDefVRefNum = vcb.vcbVRefNum;
-		setDefWDCB = (struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID=cnid};
+		setDefWDCB = (struct WDCBRec){
+			.wdVCBPtr=&vcb,
+			.wdDirID=cnid
+		};
 	} else {
-		char how = determineNumStr(pb);
-		if (!how) {
-			return extFSErr;
-		} else if (how == 'w') { // working directory (not the root)
+		// SetVol: only the root or a Working Directory is allowed,
+		// and in either case the directory is known already to exist
+		if (determineNumStr(pb) == 'w') { // Working Directory
 			setDefVCBPtr = &vcb;
 			setDefVRefNum = pb->ioVRefNum;
-			setDefWDCB = (struct WDCBRec){.wdVCBPtr=&vcb,
-				.wdDirID=findWD(pb->ioVRefNum)->wdDirID};
-		} else { // path, volume number or drive number (the root)
+			setDefWDCB = (struct WDCBRec){
+				.wdVCBPtr=&vcb,
+				.wdDirID=findWD(pb->ioVRefNum)->wdDirID
+			};
+		} else { // Root (via path, volume number or drive number)
 			setDefVCBPtr = &vcb;
 			setDefVRefNum = vcb.vcbVRefNum;
-			setDefWDCB = (struct WDCBRec){.wdVCBPtr=&vcb, .wdDirID=2};
+			setDefWDCB = (struct WDCBRec){
+				.wdVCBPtr=&vcb,
+				.wdDirID=2
+			};
 		}
 	}
 
-	LMSetDefVCBPtr((Ptr)setDefVCBPtr);
+	// Set super secret globals
+	*(short *)0x352 = (long)setDefVCBPtr >> 16;
+	*(short *)0x354 = (long)setDefVCBPtr;
 	*(short *)0x384 = setDefVRefNum;
 	memcpy(findWD(0), &setDefWDCB, sizeof setDefWDCB);
 	return noErr;
