@@ -21,8 +21,8 @@ COMMON_PPC = \
 
 all: ../builds/qemu_vga.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
 
-../builds/bootstrap.img: ../builds/9p.ndrv
-	../mk-9p-bootstrapper.py ~/Documents/mac/MacROMan/TestImages/New\ World\ ROM/2003-04-03\ -\ Mac\ OS\ ROM\ 10.2.1.rom $^ $@
+../builds/bootstrap.img: ../builds/9p.ndrv ../mk-9p-bootstrapper.py
+	../mk-9p-bootstrapper.py ~/Documents/mac/MacROMan/TestImages/New\ World\ ROM/2003-04-03\ -\ Mac\ OS\ ROM\ 10.2.1.rom $< $@
 
 ../builds/9p.ndrv: device-9p.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
