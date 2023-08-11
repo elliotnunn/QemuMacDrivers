@@ -144,7 +144,7 @@ DriverDescription TheDriverDescription = {
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
-char BugWorkaroundExport1[] = "TheDriverDescription must not come first";
+char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
