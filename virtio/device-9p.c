@@ -79,8 +79,6 @@ static OSStatus initialize(DriverInitInfo *info);
 static void installToExtFS(void);
 static char *mkbb(OSErr (*booter)(void), struct bbnames names);
 static OSErr boot(void);
-static void workAroundROMBug(void);
-static long disposePtrShield(Ptr ptr, void *caller);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
@@ -129,6 +127,12 @@ static struct VCB vcb = {
 	.vcbDirCnt = 1,
 };
 
+// Work around a ROM bug:
+// If kDriverIsLoadedUponDiscovery is set, the ROM calls GetDriverDescription
+// for a pointer to the global below, then frees it with DisposePtr. Padding
+// the global to a positive offset within our global area defeats DisposePtr.
+char BugWorkaroundExport1[] = "TheDriverDescription must not come first";
+
 DriverDescription TheDriverDescription = {
 	kTheDescriptionSignature,
 	kInitialDriverDescriptor,
@@ -139,6 +143,8 @@ DriverDescription TheDriverDescription = {
 	{1, // nServices
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
+
+char BugWorkaroundExport1[] = "TheDriverDescription must not come first";
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
@@ -253,8 +259,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
 		PBMountVol((void *)&pb);
 	} else {
-		workAroundROMBug();
-
 		// Bootable filesystem?
 		// TODO: this needs to check for a ZSYS and FNDR file
 		int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
@@ -404,40 +408,6 @@ static OSErr boot(void) {
 		boot2hdl,
 		vcb.vcbFndrInfo[0] // a4 has in the past been the startup app dirID??
 	);
-}
-
-// Stop an early-boot ROM ?bug from nuking my data segment
-static void workAroundROMBug(void) {
-	Patch68k(
-		_DisposePtr,
-		"48e7 e0e0" // movem.l d0-d2/a0-a2,-(sp)
-		"2f2f 0034" // move.l  $34(sp),-(sp)
-		"2f08"      // move.l  a0,-(sp)
-		"4eb9 %l"   // jsr     disposePtrShield
-		"504f"      // addq    #8,sp
-		"4a80"      // tst.l   d0
-		"4cdf 0707" // movem.l (sp)+,d0-d2/a0-a2
-		"6606"      // bne.s   uninstall
-		"4ef9 %o",  // jmp     originalDisposePtr
-					// uninstall:
-		NewRoutineDescriptor((ProcPtr)disposePtrShield,
-			kCStackBased
-				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-				| RESULT_SIZE(kFourByteCode),
-			GetCurrentISA())
-	);
-}
-
-static long disposePtrShield(Ptr ptr, void *caller) {
-	static char myglobals; // a memory address inside our global area
-
-	if (ptr <= &myglobals && &myglobals < ptr+GetPtrSize(ptr)) {
-		lprintf("Foiled the ROM's attempt to DisposePtr my globals! Caller was %p.\n", caller);
-		return 1; // do not call the real DisposePtr
-	} else {
-		return 0; // call the real DisposePtr
-	}
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
