@@ -28,10 +28,27 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copyfile(driver, f"{tmp}/booter/Parcels.src/virtio9p.ndrv")
 
     # "Slipstream" the driver into the Parcels structure (Mac OS 8.6 and later)
+    #  Flag    Struct   Meaning of known flag
+    #  -----   ------   --------------------------------------------
+    #  F0000   parcel   (bitmask) number of new 'special' DT node
+    #  00200   parcel   edit DT node only if required for boot disk
+    #  00010   parcel   use only once
+    #  00008   parcel   match DT node if: ('device_type' == b field)
+    #  00004   parcel      AND  ('compatible' contains a field
+    #  00002   parcel           OR   parent 'name' == a field
+    #  00001   parcel           OR   'name' == a field)
+    #  -----   ------   --------------------------------------------
+    #  F0000   child    (bitmask) number of 'special' parent
+    #  00080   child    create DT prop under 'special' DT node above
+    #  00100   child    DT prop is for boot debugging only
+    #  00040   child    delete existing DT prop (vs create)
+    #  00020   child    do not replace existing DT prop
+    #  00010   child    use only once
+    #  00004   child    checksum enabled (crc32)
     with open(f"{tmp}/booter/Parcels.src/Parcelfile", "a") as pf:
         pf.write("# virtio 9p filesystem device\n")
         pf.write("prop flags=0x00001 a=pci1af4,1009\n")
-        pf.write("\tndrv flags=0x00006 name=driver,AAPL,MacOS,PowerPC src=virtio9p.ndrv\n\n")
+        pf.write("\tndrv flags=0x00036 name=driver,AAPL,MacOS,PowerPC src=virtio9p.ndrv.lzss deduplicate=0\n\n")
 
     os.makedirs(f"{tmp}/disk/System Folder")
 
