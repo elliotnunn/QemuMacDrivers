@@ -210,16 +210,16 @@ static OSStatus initialize(DriverInitInfo *info) {
 		lprintf_enable = 1;
 	}
 
-	lprintf(".virtio9p: primary init\n");
+	lprintf("Primary init\n");
 
 	// No need to signal FAILED if cannot communicate with device
 	if (!VInit(&info->deviceEntry)) {
-		lprintf(".virtio9p: failed VInit()\n");
+		lprintf("...failed VInit()\n");
 		return paramErr;
 	};
 
 	if (!VFeaturesOK()) {
-		lprintf(".virtio9p: failed VFeaturesOK()\n");
+		lprintf("...failed VFeaturesOK()\n");
 		return paramErr;
 	}
 
@@ -229,7 +229,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// More buffers allow us to tolerate more physical mem fragmentation
 	uint16_t viobufs = QInit(0, 256);
 	if (viobufs < 2) {
-		lprintf(".virtio9p: failed QInit()\n");
+		lprintf("...failed QInit()\n");
 		return paramErr;
 	}
 	QInterest(0, 1);
@@ -251,7 +251,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// Is the File Manager actually up yet?
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
-		lprintf("File Manager ready: mounting now\n");
+		lprintf("FM up: mounting now\n");
 		installToExtFS();
 
 		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
@@ -261,7 +261,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		// TODO: this needs to check for a ZSYS and FNDR file
 		int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
 		if (systemFolder > 0) {
-			lprintf("File Manager not ready, I am bootable: attempting to boot\n");
+			lprintf("FM down, bootable System Folder: I am the boot drive\n");
 			vcb.vcbFndrInfo[0] = systemFolder;
 
 			struct bbnames bbn = {};
@@ -275,10 +275,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 			SetTimeout(1); // give up on the default disk quickly
 		} else {
-			lprintf("File Manager not ready, I am not bootable: giving up\n");
+			lprintf("FM down, not bootable\n");
 		}
 	}
 
+	lprintf("...primary init succeeded\n");
 	return noErr;
 }
 
@@ -397,7 +398,7 @@ static OSErr boot(void) {
 	BlockMove(thunk, thunk, sizeof thunk);
 
 	// Call boot 2, never to return
-	lprintf("Starting System file\n");
+	lprintf("...starting System file\n");
 	CallUniversalProc(
 		(void *)thunk,
 		kCStackBased
@@ -433,7 +434,7 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	while (findVol(vcb.vcbVRefNum) != NULL) vcb.vcbVRefNum--;
 
-	lprintf(".virtio9p: refnums are driver=%d drive=%d volume=%d\n",
+	lprintf("refnums are driver=%d drive=%d volume=%d\n",
 		drvrRefNum, dqe.dqe.dQDrive, vcb.vcbVRefNum);
 
 	if (GetVCBQHdr()->qHead == NULL) {

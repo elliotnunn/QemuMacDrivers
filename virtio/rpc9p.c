@@ -129,11 +129,11 @@ bool Init9(uint16_t vioq, uint16_t viobuffers) {
 	Max9 -= 11; // subtract Rread/Twrite header from msize
 
 	if (strcmp(vers, "9P2000.L")) {
-		lprintf(".virtio9p: we offered 9P2000.L, server offered %s, cannot continue\n", vers);
+		lprintf("9P2000: we offered 9P2000.L, server offered %s, cannot continue\n", vers);
 		return true;
 	}
 
-	lprintf(".virtio9p: final msize = %d+11\n", Max9);
+	lprintf("9P2000: final msize = %d+11\n", Max9);
 
 	return false;
 }
@@ -521,11 +521,11 @@ static bool allocBigBuffer(uint16_t maxbufs) {
 
 	for (;; fileDataPages /= 2) {
 		if (fileDataPages == 0) {
-			lprintf(".virtio9p: Not enough memory to start\n");
+			lprintf("9P2000: Not enough memory to start\n");
 			return true;
 		}
 
-		lprintf(".virtio9p: Allocating %d+1 pages: ", fileDataPages);
+		lprintf("9P2000: Allocating %d+1 pages: ", fileDataPages);
 		logical = AllocPages(fileDataPages+1, pages);
 
 		if (logical == NULL) {
