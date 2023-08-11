@@ -204,13 +204,11 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
+	drvrRefNum = info->refNum;
+	sprintf(lprintf_prefix, ".virtio9p(%d) ", drvrRefNum);
 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		lprintf_enable = 1;
 	}
-
-	drvrRefNum = info->refNum;
-
-	OSStatus err;
 
 	lprintf(".virtio9p: primary init\n");
 
