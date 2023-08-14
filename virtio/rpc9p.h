@@ -45,6 +45,7 @@ char Readdir9(uint32_t fid, void *buf, size_t bufsize, struct Qid9 *retqid, char
 bool Getattr9(uint32_t fid, struct Qid9 *retqid, uint64_t *retsize, uint64_t *rettime);
 bool Clunk9(uint32_t fid);
 bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count);
+bool Write9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count);
 
 // TODO: tidy this up
 #define O_ACCMODE	00000003

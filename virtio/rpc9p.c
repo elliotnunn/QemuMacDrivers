@@ -437,7 +437,6 @@ bool Clunk9(uint32_t fid) {
 	lprintf(" -> (ok)\n");
 }
 
-// You can leave the data pointer empty, and peruse bigBuf, if you prefer
 bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count) {
 	enum {Tread = 116}; // size[4] Tread tag[2] fid[4] offset[8] count[4]
 	enum {Rread = 117}; // size[4] Rread tag[2] count[4] data[count]
@@ -458,6 +457,43 @@ bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count
 	lprintf("Tread(fid=%lu ofs=%lu cnt=%lu)", fid, (uint32_t)offset, count);
 
 	putSmlGetBig();
+
+	if (checkErr(bigBuf)) {
+		lprintf(" -> (fail)\n");
+		return true;
+	}
+
+	uint32_t got = READ32LE(bigBuf+4+1+2);
+
+	if (actual_count != NULL) {
+		*actual_count = got;
+	}
+
+	lprintf(" -> (cnt=%lu)\n", got);
+
+	return false;
+}
+
+bool Write9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count) {
+	enum {Twrite = 118}; // size[4] Twrite tag[2] fid[4] offset[8] count[4] data[count]
+	enum {Rwrite = 119}; // size[4] Rwrite tag[2] count[4]
+
+	if (actual_count != NULL) {
+		*actual_count = 0;
+	}
+
+	uint32_t size = 4+1+2+4+8+4+count;
+
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Twrite;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, fid);
+	WRITE64LE(smlBuf+4+1+2+4, offset);
+	WRITE32LE(smlBuf+4+1+2+4+8, count);
+
+	lprintf("Twrite(fid=%lu ofs=%lu cnt=%lu)", fid, (uint32_t)offset, count);
+
+	putBigGetSml();
 
 	if (checkErr(bigBuf)) {
 		lprintf(" -> (fail)\n");
