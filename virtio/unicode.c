@@ -20,15 +20,15 @@ void mr31name(unsigned char *roman, char *utf8) {
 	while (roman[0] < 31) {
 		int ch = toMacRoman(&this); // increments this
 		if (ch < 0) {
-			roman[++roman[0]] = '?';
+			roman[++(roman[0])] = '?';
 			badchar = 1;
 		} else if (ch == ':') {
-			roman[++roman[0]] = '/';
+			roman[++(roman[0])] = '/';
 		} else if (ch == 0) {
 			incomplete = 0;
 			break;
 		} else {
-			roman[++roman[0]] = ch;
+			roman[++(roman[0])] = ch;
 		}
 	}
 

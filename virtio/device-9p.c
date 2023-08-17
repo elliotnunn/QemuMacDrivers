@@ -103,7 +103,6 @@ static struct Qid9 root;
 static int32_t cnidCtr = 100;
 static Handle finderwin;
 static bool mounted;
-static char preferName[28];
 static char *bootBlock;
 static struct flagdqe dqe = {
 	.flags = 0x00080000, // fixed disk
@@ -215,6 +214,8 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	};
 
+	// Request mount_tag in the config area
+	VSetFeature(0, 1);
 	if (!VFeaturesOK()) {
 		lprintf("...failed VFeaturesOK()\n");
 		return paramErr;
@@ -242,9 +243,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 	dqe.dqe.dQDrive=4; // lower numbers reserved
 	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
 	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
-
-	RegPropertyValueSize size = sizeof(preferName);
-	RegistryPropertyGet(&info->deviceEntry, "mount", preferName, &size);
 
 	// Is the File Manager actually up yet?
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
@@ -412,11 +410,14 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	if (mounted) return volOnLinErr;
 
-	if (preferName[0] != 0) {
-		c2pstr(vcb.vcbVN, preferName);
-	} else {
-		autoVolName(vcb.vcbVN);
-	}
+	char name[128] = {};
+	long nameLen = *(unsigned char *)VConfig + 0x100 * *(unsigned char *)(VConfig+1);
+	if (nameLen > 127) nameLen = 127;
+	lprintf("%d\n", nameLen);
+	memcpy(name, VConfig + 2, nameLen);
+	lprintf("name is %d <%.*s>\n", nameLen, nameLen, name);
+	mr27name(vcb.vcbVN, name);
+	lprintf("name is now %d <%.*s>\n", vcb.vcbVN[0], vcb.vcbVN[0], vcb.vcbVN+1);
 
 	int32_t rootcnid = 2;
 	static struct record rootrec = {.parent=1, .name={[28]=0}};
