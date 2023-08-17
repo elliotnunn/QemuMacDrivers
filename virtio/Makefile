@@ -26,6 +26,7 @@ all: ../builds/qemu_vga.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
 
 ../builds/9p.ndrv: device-9p.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
+	cp $@ ../os9test/System\ Folder/Extensions/9p.ndrv || :
 
 ../builds/qemu_vga.ndrv: device-gpu.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
