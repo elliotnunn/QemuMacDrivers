@@ -52,6 +52,25 @@ void mr31name(unsigned char *roman, char *utf8) {
 	lprintf("Converted <%.*s>\n", roman[0], roman+1);
 }
 
+// Simpler rules and shorter limit for volume names
+void mr27name(unsigned char *roman, char *utf8) {
+	char *this = utf8;
+
+	roman[0] = 0;
+	while (roman[0] < 27) {
+		int ch = toMacRoman(&this); // increments this
+		if (ch < 0) {
+			roman[++(roman[0])] = '?';
+		} else if (ch == ':') {
+			roman[++(roman[0])] = '/';
+		} else if (ch == 0) {
+			break;
+		} else {
+			roman[++(roman[0])] = ch;
+		}
+	}
+}
+
 static int toMacRoman(char **utf8) {
 	int nbytes, roman;
 

@@ -89,7 +89,6 @@ static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
-static void autoVolName(unsigned char *pas);
 static bool visName(const char *name);
 static long fsCall(void *pb, long selector);
 static struct handler fsHandler(unsigned short selector);
@@ -410,14 +409,12 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	if (mounted) return volOnLinErr;
 
+	// Read mount_tag from config space into a C string
 	char name[128] = {};
 	long nameLen = *(unsigned char *)VConfig + 0x100 * *(unsigned char *)(VConfig+1);
 	if (nameLen > 127) nameLen = 127;
-	lprintf("%d\n", nameLen);
 	memcpy(name, VConfig + 2, nameLen);
-	lprintf("name is %d <%.*s>\n", nameLen, nameLen, name);
-	mr27name(vcb.vcbVN, name);
-	lprintf("name is now %d <%.*s>\n", vcb.vcbVN[0], vcb.vcbVN[0], vcb.vcbVN+1);
+	mr27name(vcb.vcbVN, name); // and convert to short Mac Roman pascal string
 
 	int32_t rootcnid = 2;
 	static struct record rootrec = {.parent=1, .name={[28]=0}};
@@ -1272,26 +1269,6 @@ static char determineNum(void *_pb) {
 		} else {
 			return 0;
 		}
-	}
-}
-
-static void autoVolName(unsigned char *pas) {
-	for (int i=1;; i++) {
-		strcpy((char *)pas+1, "Shared Folder");
-		if (i > 1) sprintf((char *)pas+14, " %d", i);
-		pas[0] = strlen((char *)pas+1);
-
-		// Find a volume with a matching name
-		struct VCB *v = (struct VCB *)GetVCBQHdr()->qHead;
-		while (v != NULL) {
-			if (RelString(pas, v->vcbVN, 0, 1) == 0) {
-				break;
-			}
-			v = (struct VCB *)v->qLink;
-		}
-
-		// None? Good.
-		if (v == NULL) return;
 	}
 }
 
