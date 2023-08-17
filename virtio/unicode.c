@@ -48,8 +48,6 @@ void mr31name(unsigned char *roman, char *utf8) {
 		memcpy(roman+1+roman[0], append, 5);
 		roman[0] += 5;
 	}
-
-	lprintf("Converted <%.*s>\n", roman[0], roman+1);
 }
 
 // Simpler rules and shorter limit for volume names
