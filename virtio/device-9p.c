@@ -76,7 +76,7 @@ struct bbnames {
 
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
-static void installToExtFS(void);
+static void installAndMountAndNotify(void);
 static char *mkbb(OSErr (*booter)(void), struct bbnames names);
 static OSErr boot(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
@@ -246,10 +246,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Is the File Manager actually up yet?
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
 		lprintf("FM up: mounting now\n");
-		installToExtFS();
-
-		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
-		PBMountVol((void *)&pb);
+		installAndMountAndNotify();
 	} else {
 		// Bootable filesystem?
 		// TODO: this needs to check for a ZSYS and FNDR file
@@ -278,7 +275,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 }
 
 // Run this only when the File Manager is up
-static void installToExtFS(void) {
+static void installAndMountAndNotify(void) {
 	static bool alreadyUp;
 	if (alreadyUp) return;
 	alreadyUp = true;
@@ -328,6 +325,11 @@ static void installToExtFS(void) {
 				| RESULT_SIZE(kFourByteCode),
 			GetCurrentISA())
 	);
+
+	struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
+	PBMountVol((void *)&pb);
+
+	PostEvent(diskEvt, dqe.dqe.dQDrive);
 }
 
 // Make (in the heap) a single 512-byte block that the ROM will boot from
@@ -368,16 +370,16 @@ static OSErr boot(void) {
 
 	CallOSTrapUniversalProc(GetOSTrapAddress(_InitFS), 0x33802, _InitFS, 10);
 
-	installToExtFS();
-
-	struct WDPBRec pb = {.ioVRefNum=dqe.dqe.dQDrive};
-	PBMountVol((void *)&pb);
+	installAndMountAndNotify();
 
 	// Is the System Folder not the root of the disk? (It usually isn't.)
 	// Make it a working directory and call that the default (fake) volume.
 	if (vcb.vcbFndrInfo[0] > 2) {
-		pb.ioWDDirID = vcb.vcbFndrInfo[0];
-		pb.ioWDProcID = 'ERIK';
+		struct WDPBRec pb = {
+			.ioVRefNum = vcb.vcbVRefNum,
+			.ioWDDirID = vcb.vcbFndrInfo[0],
+			.ioWDProcID = 'ERIK',
+		};
 		PBOpenWDSync((void *)&pb);
 		PBSetVolSync((void *)&pb);
 	}
@@ -442,8 +444,6 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	}
 
 	Enqueue((QElemPtr)&vcb, GetVCBQHdr());
-
-	PostEvent(diskEvt, dqe.dqe.dQDrive);
 
 	mounted = true;
 // 	if (vcb.vcbVRefNum & 1)
