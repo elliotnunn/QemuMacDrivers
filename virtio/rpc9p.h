@@ -40,6 +40,8 @@ bool Init9(uint16_t vioq, uint16_t viobuffers);
 bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 *retqid);
 bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, uint16_t *retnwqid, struct Qid9 *retqid);
 bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retiounit);
+bool Lcreate9(uint32_t fid, uint32_t flags, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid, uint32_t *retiounit);
+bool Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid);
 void Clrdirbuf9(void *buf, size_t bufsize);
 char Readdir9(uint32_t fid, void *buf, size_t bufsize, struct Qid9 *retqid, char *rettype, char retname[512]);
 bool Getattr9(uint32_t fid, struct Qid9 *retqid, uint64_t *retsize, uint64_t *rettime);

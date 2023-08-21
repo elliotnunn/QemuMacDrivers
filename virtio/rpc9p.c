@@ -298,6 +298,75 @@ bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retioun
 	return false;
 }
 
+bool Lcreate9(uint32_t fid, uint32_t flags, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid, uint32_t *retiounit) {
+	enum {Tlcreate = 14}; // size[4] Tlcreate tag[2] fid[4] name[s] flags[4] mode[4] gid[4]
+	enum {Rlcreate = 15}; // size[4] Rlcreate tag[2] qid[13] iounit[4]
+
+	size_t slen = strlen(name);
+	uint32_t size = 4+1+2+4+2+slen+4+4+4;
+
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tlcreate;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, fid);
+	WRITE16LE(smlBuf+4+1+2+4, slen);
+	memcpy(smlBuf+4+1+2+4+2, name, slen);
+	WRITE32LE(smlBuf+4+1+2+4+2+slen, flags);
+	WRITE32LE(smlBuf+4+1+2+4+2+slen+4, mode);
+	WRITE32LE(smlBuf+4+1+2+4+2+slen+4+4, gid);
+
+	lprintf("Tlcreate(fid=%lu name=%s flags=%lu mode=%lu gid=%lu)", fid, name, flags, mode, gid);
+
+	putSmlGetBig();
+
+	if (checkErr(bigBuf)) {
+		return true;
+	}
+
+	struct Qid9 qid = READQID(bigBuf+4+1+2);
+	uint32_t iounit = READ32LE(bigBuf+4+1+2+13);
+
+	lprintf(" -> (qid="QIDF" iounit=%lu)\n", QIDA(qid), iounit);
+
+	if (retqid != NULL) *retqid = qid;
+	if (retiounit != NULL) *retiounit = iounit;
+
+	return false;
+}
+
+bool Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid) {
+	enum {Tmkdir = 72}; // size[4] Tmkdir tag[2] dfid[4] name[s] mode[4] gid[4]
+	enum {Rmkdir = 73}; // size[4] Rmkdir tag[2] qid[13]
+
+	size_t slen = strlen(name);
+	uint32_t size = 4+1+2+4+2+slen+4+4;
+
+	WRITE32LE(smlBuf, size);
+	*(smlBuf+4) = Tmkdir;
+	WRITE16LE(smlBuf+4+1, ONLYTAG);
+	WRITE32LE(smlBuf+4+1+2, dfid);
+	WRITE16LE(smlBuf+4+1+2+4, slen);
+	memcpy(smlBuf+4+1+2+4+2, name, slen);
+	WRITE32LE(smlBuf+4+1+2+4+2+slen, mode);
+	WRITE32LE(smlBuf+4+1+2+4+2+slen+4, gid);
+
+	lprintf("Tmkdir(dfid=%lu name=%s mode=%lu gid=%lu)", dfid, name, mode, gid);
+
+	putSmlGetBig();
+
+	if (checkErr(bigBuf)) {
+		return true;
+	}
+
+	struct Qid9 qid = READQID(bigBuf+4+1+2);
+
+	lprintf(" -> (qid="QIDF")\n", QIDA(qid));
+
+	if (retqid != NULL) *retqid = qid;
+
+	return false;
+}
+
 void Clrdirbuf9(void *buf, size_t bufsize) {
 	size_t clear = bufsize;
 	if (clear > 32) clear = 32;
