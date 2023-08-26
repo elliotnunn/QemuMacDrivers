@@ -45,8 +45,6 @@ enum {
 	WDLO = -32767,
 	WDHI = -4096,
 	STACKSIZE = 12 * 1024,
-	HASHFWD = '>',
-	HASHBACK = '<',
 };
 
 // of a File Manager call
@@ -92,10 +90,17 @@ static struct VCB *findVol(short num);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
 static bool visName(const char *name);
+static const char *getDBName(int32_t cnid);
+static void setDBName(int32_t cnid, const char *name);
+static int32_t getDBParent(int32_t cnid);
+static void setDBParent(int32_t cnid, int32_t pcnid);
+static int32_t getDBChild(int32_t cnid, const char *name);
+static void setDBChild(int32_t cnid, const char *name, int32_t ccnid);
 static long fsCall(void *pb, long selector);
 static struct handler fsHandler(unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static struct handler controlStatusHandler(long selector);
+static void panic(const char *panicstr);
 
 static char *stack;
 static short drvrRefNum;
@@ -420,10 +425,8 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	memcpy(name, VConfig + 2, nameLen);
 	mr27name(vcb.vcbVN, name); // and convert to short Mac Roman pascal string
 
-	int32_t rootcnid = 2;
-	static struct record rootrec = {.parent=1, .name={[28]=0}};
-	p2cstr(rootrec.name, vcb.vcbVN);
-	HTinstall(HASHBACK, &rootcnid, sizeof(rootcnid), &rootrec, sizeof(rootrec)+strlen(rootrec.name)+1);
+	setDBParent(2 /*root CNID*/, 1 /*parent-of-root CNID*/);
+	setDBName(2, name);
 
 	finderwin = NewHandleSysClear(2);
 
@@ -627,13 +630,9 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		lprintf("GCI found "); cnidPrint(cnid); lprintf("\n");
 	}
 
-	// MYFID and cnid point to the correct file
-	struct record *detail = HTlookup(HASHBACK, &cnid, sizeof(cnid));
-	if (detail == NULL) lprintf("BAD LOOKUP\n");
-
 	// Return the filename
 	if (idx!=0 && pb->ioNamePtr!=NULL) {
-		mr31name(pb->ioNamePtr, detail->name);
+		mr31name(pb->ioNamePtr, getDBName(cnid));
 	}
 
 	uint64_t size, time;
@@ -645,7 +644,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 
 	// This is outside the GetFileInfo block: anticipate catastrophe
 	if (longform) {
-		pb->ioFlParID = detail->parent; // alias ioDrDirID
+		pb->ioFlParID = getDBParent(cnid); // alias ioDrDirID
 	}
 
 	if (qid.type & 0x80) { // directory
@@ -671,7 +670,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	} else { // file
 		uint64_t rsize = 0;
 		char rname[512];
-		sprintf(rname, "%s.rsrc", detail->name);
+		sprintf(rname, "%s.rsrc", getDBName(cnid));
 		uint16_t oksteps = 0;
 
 		Walk9(MYFID, 19, 2, (const char *[]){"..", rname}, &oksteps, NULL);
@@ -697,7 +696,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		}
 
 		char iname[512];
-		sprintf(iname, "%s.idump", detail->name);
+		sprintf(iname, "%s.idump", getDBName(cnid));
 		oksteps = 0;
 
 		Walk9(MYFID, 19, 2, (const char *[]){"..", iname}, &oksteps, NULL);
@@ -771,16 +770,14 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	cnid = browse(10, cnid, pb->ioNamePtr);
 	if (cnid > 0) {
 		// The target exists
-		struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
-
 		if (cnid == 2) {
 			spec->vRefNum = vcb.vcbVRefNum;
 			spec->parID = 2;
 			spec->name[0] = 0;
 		} else {
 			spec->vRefNum = vcb.vcbVRefNum;
-			spec->parID = rec->parent;
-			mr31name(spec->name, rec->name);
+			spec->parID = getDBParent(cnid);
+			mr31name(spec->name, getDBName(cnid));
 		}
 
 		return noErr;
@@ -835,12 +832,9 @@ static OSErr fsOpen(struct HFileParam *pb) {
 	cnid = browse(fid, cnid, pb->ioNamePtr);
 	if (cnid < 0) return cnid;
 
-	struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
-	if (!rec) return fnfErr;
-
 	if (rfork) {
 		char rname[512];
-		sprintf(rname, "%s.rsrc", rec->name);
+		sprintf(rname, "%s.rsrc", getDBName(cnid));
 
 		uint16_t oksteps = 0;
 		Walk9(fid, fid, 2, (const char *[]){"..", rname}, &oksteps, NULL);
@@ -871,10 +865,10 @@ static OSErr fsOpen(struct HFileParam *pb) {
 		.fcbExtRec = {}, // own use
 		.fcbFType = 'APPL',
 		.fcbCatPos = 0, // own use
-		.fcbDirID = rec->parent,
+		.fcbDirID = getDBParent(cnid),
 	};
 
-	mr31name(fcb->fcbCName, rec->name);
+	mr31name(fcb->fcbCName, getDBName(cnid));
 
 	pb->ioFRefNum = refn;
 
@@ -1048,12 +1042,6 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	for (; comp<cpath+pathlen; comp+=strlen(comp)+1) {
 		if (comp[0] == 0) {
 			// Consecutive colons are like ".."
-			struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
-			if (rec == NULL) {
-				lprintf("DANGLING CNID!");
-				return fnfErr;
-			}
-
 			if (Walk9(fid, fid, 1, (const char *[]){".."}, NULL, NULL))
 				return fnfErr;
 		} else {
@@ -1137,15 +1125,12 @@ static int walkToCNID(int32_t cnid, uint32_t fid) {
 	static struct Qid9 qids[256];
 
 	while (cnid != 2) {
-		struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
-		if (rec == NULL) return -1;
-
 		*--compptr = blobptr;
 		compcnt++;
-		strcpy(blobptr, rec->name);
+		strcpy(blobptr, getDBName(cnid));
 		blobptr += strlen(blobptr)+1;
 
-		cnid = rec->parent;
+		cnid = getDBParent(cnid);
 	}
 
 	bool bad = Walk9(ROOTFID, fid, compcnt, (const char **)compptr, NULL/*numok*/, qids);
@@ -1156,19 +1141,14 @@ static int walkToCNID(int32_t cnid, uint32_t fid) {
 
 // Need a perfect UTF-8 filename match, which must therefore come from readdir
 static int32_t makeCNID(int32_t parent, char *name) {
-	// Big, so keep outside stack. Hack to make space for flexible array member.
-	static struct record lookup = {.name={[511]=0}};
+	int32_t cnid = getDBChild(parent, name);
+	if (cnid > 0) return cnid; // if negative, it's an error code
 
-	// Already exists in our db?
-	lookup.parent = parent;
-	strcpy(lookup.name, name);
-	int32_t *existing = HTlookup(HASHFWD, &lookup, sizeof(struct record)+strlen(lookup.name)+1);
-	if (existing != NULL) return *existing;
-
-	// No, we must create the entry
-	int32_t cnid = ++cnidCtr;
-	HTinstall(HASHBACK, &cnid, sizeof(cnid), &lookup, 4+strlen(lookup.name)+1);
-	HTinstall(HASHFWD, &lookup, 4+strlen(lookup.name)+1, &cnid, sizeof(cnid));
+	// Need to create one
+	cnid = ++cnidCtr;
+	setDBChild(parent, name, cnid);
+	setDBParent(cnid, parent);
+	setDBName(cnid, name);
 	return cnid;
 }
 
@@ -1176,15 +1156,8 @@ static void cnidPrint(int32_t cnid) {
 	char **path; uint16_t pathcnt;
 
 	while (cnid != 2) {
-		struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
-		if (rec == NULL) {
-			lprintf("(DANGLING)");
-			return;
-		}
-
-		lprintf("%s<-", rec->name);
-
-		cnid = rec->parent;
+		lprintf("%s<-", getDBName(cnid));
+		cnid = getDBParent(cnid);
 	}
 	lprintf("(root)");
 }
@@ -1283,6 +1256,50 @@ static bool visName(const char *name) {
 	if (len >= 6 && !strcmp(name+len-6, ".idump")) return false;
 
 	return true;
+}
+
+// Hash table accessors
+
+// Panic on failure (means database corruption or bad CNID)
+static const char *getDBName(int32_t cnid) {
+	const char *ptr = HTlookup('$', &cnid, sizeof cnid);
+	if (!ptr) panic(__func__);
+	return ptr;
+}
+
+static void setDBName(int32_t cnid, const char *name) {
+	// Cast away the const -- but the name should not be modified by us
+	HTinstall('$', &cnid, sizeof cnid, (char *)name, strlen(name) + 1);
+}
+
+// Panic on failure (means database corruption or bad CNID)
+static int32_t getDBParent(int32_t cnid) {
+	const int32_t *ptr = HTlookup('^', &cnid, sizeof cnid);
+	if (!ptr) panic(__func__);
+	return *ptr;
+}
+
+static void setDBParent(int32_t cnid, int32_t pcnid) {
+	HTinstall('^', &cnid, sizeof cnid, &pcnid, sizeof pcnid);
+}
+
+// Return fnfErr on failure
+static int32_t getDBChild(int32_t cnid, const char *name) {
+	char key[600];
+	memcpy(key, &cnid, sizeof cnid);
+	strcpy(key + sizeof cnid, name);
+
+	const int32_t *ptr = HTlookup('>', key, sizeof cnid + strlen(name) + 1);
+	if (!ptr) return fnfErr;
+	return *ptr;
+}
+
+static void setDBChild(int32_t cnid, const char *name, int32_t ccnid) {
+	char key[600];
+	memcpy(key, &cnid, sizeof cnid);
+	strcpy(key + sizeof cnid, name);
+
+	HTinstall('>', key, sizeof cnid + strlen(name) + 1, &ccnid, sizeof ccnid);
 }
 
 static long fsCall(void *pb, long selector) {
@@ -1480,4 +1497,11 @@ static struct handler controlStatusHandler(long selector) {
 // 	case 'boot': return (struct handler){MyDCBoot};
 	default: return (struct handler){NULL, selector>0 ? statusErr : controlErr};
 	}
+}
+
+static void panic(const char *panicstr) {
+	lprintf_enable = 1;
+	lprintf_prefix[0] = 0;
+	lprintf("\npanic: %s\n", panicstr);
+	for (;;) *(volatile char *)0x68f168f1 = 1;
 }

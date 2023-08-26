@@ -22,10 +22,10 @@ struct entry {
 struct entry *table[1<<12];
 char *blob, *bump, *limit;
 
-static unsigned long hash(void *key, short klen);
+static unsigned long hash(const void *key, short klen);
 static void alloc(long bytes);
 
-void HTinstall(int tag, void *key, short klen, void *val, short vlen) {
+void HTinstall(int tag, const void *key, short klen, const void *val, short vlen) {
 // 	if (klen == 4)
 // 		lprintf("HTInstall %08x -> %08x.%s\n", *(unsigned long *)key, *(unsigned long *)val, (char *)val+4);
 // 	else
@@ -51,10 +51,17 @@ void HTinstall(int tag, void *key, short klen, void *val, short vlen) {
 		}
 	}
 
+	struct entry ent = {
+		.next = *root,
+		.tag = tag,
+		.klen = klen,
+		.vlen = vlen,
+	};
+
 	// Key can be unaligned
 	alloc(klen);
 	memcpy(bump, key, klen);
-	key = bump;
+	ent.key = bump;
 	bump += klen;
 
 	// Value must be aligned
@@ -63,19 +70,17 @@ void HTinstall(int tag, void *key, short klen, void *val, short vlen) {
 		bump++;
 	}
 	memcpy(bump, val, vlen);
-	val = bump;
+	ent.val = bump;
 	bump += vlen;
 
 	// Struct quite strict with alignment
 	alloc(sizeof(struct entry) + alignof(struct entry));
 	while ((uintptr_t)bump % alignof(struct entry)) bump++;
-	struct entry *e = (struct entry *)bump;
-	*e = (struct entry){*root, key, val, klen, vlen, tag};
-	*root = e;
-	bump += sizeof(*e);
+	*root = memcpy(bump, &ent, sizeof(struct entry));
+	bump += sizeof(struct entry);
 }
 
-void *HTlookup(int tag, void *key, short klen) {
+void *HTlookup(int tag, const void *key, short klen) {
 	struct entry *root = table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
 
 // 	if (klen == 4)
@@ -98,7 +103,7 @@ void *HTlookup(int tag, void *key, short klen) {
 	return NULL;
 }
 
-static unsigned long hash(void *key, short klen) {
+static unsigned long hash(const void *key, short klen) {
 	unsigned long hashval = 0;
 	for (short i=0; i<klen; i++) {
 		hashval = hashval * 31 + ((unsigned char *)key)[i];

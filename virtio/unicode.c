@@ -12,7 +12,7 @@ Represent unknown chars with fewer than one-per-UTF8-byte "?"s
 
 static int toMacRoman(char **utf8);
 
-void mr31name(unsigned char *roman, char *utf8) {
+void mr31name(unsigned char *roman, const char *utf8) {
 	char *this = utf8;
 	int badchar = 0, incomplete = 1;
 
@@ -51,8 +51,8 @@ void mr31name(unsigned char *roman, char *utf8) {
 }
 
 // Simpler rules and shorter limit for volume names
-void mr27name(unsigned char *roman, char *utf8) {
-	char *this = utf8;
+void mr27name(unsigned char *roman, const char *utf8) {
+	const char *this = utf8;
 
 	roman[0] = 0;
 	while (roman[0] < 27) {
