@@ -1015,28 +1015,25 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 		if (cpath[i] == ':') cpath[i] = 0;
 	}
 
-	char *comp=cpath;
+	// Ready to iterate through components
+	char *comp = cpath;
+
+	// Trust that the File Manager already ensured the call is for this volume,
+	// and remove the volume name from absolute paths.
 	if (pathAbsolute) {
-		unsigned char pas[256];
-		c2pstr(pas, comp)
-		if (RelString(pas, vcb.vcbVN, 0, 1) != 0) {
-			return extFSErr;
-		}
-
-		// Cut the disk name off, leaving the leading colon
 		comp += strlen(comp);
-
-		cnid = 2;
-	} else if (cnid <= 2) {
 		cnid = 2;
 	}
-
-	// Walk to that CNID
-	if (walkToCNID(cnid, fid) < 0) return fnfErr;
 
 	// Trim empty component from the start
 	// so that ":subdir" doesn't become ".." but "::subdir" does
 	if (comp[0] == 0) comp++;
+
+	// "Current directory" or "parent of root" can mean root
+	if (cnid < 2) cnid = 2;
+
+	// Walk to that CNID
+	if (walkToCNID(cnid, fid) < 0) return fnfErr;
 
 	// Compare each path component with the filesystem
 	for (; comp<cpath+pathlen; comp+=strlen(comp)+1) {
