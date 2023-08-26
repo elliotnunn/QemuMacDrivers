@@ -10,10 +10,10 @@ Preserve file extensions
 Represent unknown chars with fewer than one-per-UTF8-byte "?"s
 */
 
-static int toMacRoman(char **utf8);
+static int toMacRoman(const char **utf8);
 
 void mr31name(unsigned char *roman, const char *utf8) {
-	char *this = utf8;
+	const char *this = utf8;
 	int badchar = 0, incomplete = 1;
 
 	roman[0] = 0;
@@ -69,7 +69,7 @@ void mr27name(unsigned char *roman, const char *utf8) {
 	}
 }
 
-static int toMacRoman(char **utf8) {
+static int toMacRoman(const char **utf8) {
 	int nbytes, roman;
 
 	if ((*utf8)[0]<0x80) {
