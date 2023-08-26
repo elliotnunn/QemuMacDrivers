@@ -1041,6 +1041,8 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 			// Consecutive colons are like ".."
 			if (Walk9(fid, fid, 1, (const char *[]){".."}, NULL, NULL))
 				return fnfErr;
+
+			cnid = getDBParent(cnid);
 		} else {
 			unsigned char want[32], got[32];
 			char gotutf8[512];
