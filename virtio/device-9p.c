@@ -45,6 +45,8 @@ enum {
 	WDLO = -32767,
 	WDHI = -4096,
 	STACKSIZE = 12 * 1024,
+	HASHFWD = '>',
+	HASHBACK = '<',
 };
 
 // of a File Manager call
@@ -421,7 +423,7 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	int32_t rootcnid = 2;
 	static struct record rootrec = {.parent=1, .name={[28]=0}};
 	p2cstr(rootrec.name, vcb.vcbVN);
-	HTinstall(&rootcnid, sizeof(rootcnid), &rootrec, sizeof(rootrec)+strlen(rootrec.name)+1);
+	HTinstall(HASHBACK, &rootcnid, sizeof(rootcnid), &rootrec, sizeof(rootrec)+strlen(rootrec.name)+1);
 
 	finderwin = NewHandleSysClear(2);
 
@@ -626,7 +628,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	}
 
 	// MYFID and cnid point to the correct file
-	struct record *detail = HTlookup(&cnid, sizeof(cnid));
+	struct record *detail = HTlookup(HASHBACK, &cnid, sizeof(cnid));
 	if (detail == NULL) lprintf("BAD LOOKUP\n");
 
 	// Return the filename
@@ -769,7 +771,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	cnid = browse(10, cnid, pb->ioNamePtr);
 	if (cnid > 0) {
 		// The target exists
-		struct record *rec = HTlookup(&cnid, sizeof(cnid));
+		struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
 
 		if (cnid == 2) {
 			spec->vRefNum = vcb.vcbVRefNum;
@@ -833,7 +835,7 @@ static OSErr fsOpen(struct HFileParam *pb) {
 	cnid = browse(fid, cnid, pb->ioNamePtr);
 	if (cnid < 0) return cnid;
 
-	struct record *rec = HTlookup(&cnid, sizeof(cnid));
+	struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
 	if (!rec) return fnfErr;
 
 	if (rfork) {
@@ -1046,7 +1048,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	for (; comp<cpath+pathlen; comp+=strlen(comp)+1) {
 		if (comp[0] == 0) {
 			// Consecutive colons are like ".."
-			struct record *rec = HTlookup(&cnid, sizeof(cnid));
+			struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
 			if (rec == NULL) {
 				lprintf("DANGLING CNID!");
 				return fnfErr;
@@ -1135,7 +1137,7 @@ static int walkToCNID(int32_t cnid, uint32_t fid) {
 	static struct Qid9 qids[256];
 
 	while (cnid != 2) {
-		struct record *rec = HTlookup(&cnid, sizeof(cnid));
+		struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
 		if (rec == NULL) return -1;
 
 		*--compptr = blobptr;
@@ -1160,13 +1162,13 @@ static int32_t makeCNID(int32_t parent, char *name) {
 	// Already exists in our db?
 	lookup.parent = parent;
 	strcpy(lookup.name, name);
-	int32_t *existing = HTlookup(&lookup, sizeof(struct record)+strlen(lookup.name)+1);
+	int32_t *existing = HTlookup(HASHFWD, &lookup, sizeof(struct record)+strlen(lookup.name)+1);
 	if (existing != NULL) return *existing;
 
 	// No, we must create the entry
 	int32_t cnid = ++cnidCtr;
-	HTinstall(&cnid, sizeof(cnid), &lookup, 4+strlen(lookup.name)+1);
-	HTinstall(&lookup, 4+strlen(lookup.name)+1, &cnid, sizeof(cnid));
+	HTinstall(HASHBACK, &cnid, sizeof(cnid), &lookup, 4+strlen(lookup.name)+1);
+	HTinstall(HASHFWD, &lookup, 4+strlen(lookup.name)+1, &cnid, sizeof(cnid));
 	return cnid;
 }
 
@@ -1174,7 +1176,7 @@ static void cnidPrint(int32_t cnid) {
 	char **path; uint16_t pathcnt;
 
 	while (cnid != 2) {
-		struct record *rec = HTlookup(&cnid, sizeof(cnid));
+		struct record *rec = HTlookup(HASHBACK, &cnid, sizeof(cnid));
 		if (rec == NULL) {
 			lprintf("(DANGLING)");
 			return;

@@ -16,6 +16,7 @@ struct entry {
 	void *val;
 	short klen;
 	short vlen;
+	int tag;
 };
 
 struct entry *table[1<<12];
@@ -24,7 +25,7 @@ char *blob, *bump, *limit;
 static unsigned long hash(void *key, short klen);
 static void alloc(long bytes);
 
-void HTinstall(void *key, short klen, void *val, short vlen) {
+void HTinstall(int tag, void *key, short klen, void *val, short vlen) {
 // 	if (klen == 4)
 // 		lprintf("HTInstall %08x -> %08x.%s\n", *(unsigned long *)key, *(unsigned long *)val, (char *)val+4);
 // 	else
@@ -33,7 +34,7 @@ void HTinstall(void *key, short klen, void *val, short vlen) {
 	struct entry **root = &table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
 
 	for (struct entry *e=*root; e!=NULL; e=e->next) {
-		if (e->klen == klen && !memcmp(e->key, key, klen)) {
+		if (e->tag == tag && e->klen == klen && !memcmp(e->key, key, klen)) {
 			if (vlen <= e->vlen) {
 				// Replace the value in-place
 				memcpy(e->val, val, vlen);
@@ -69,12 +70,12 @@ void HTinstall(void *key, short klen, void *val, short vlen) {
 	alloc(sizeof(struct entry) + alignof(struct entry));
 	while ((uintptr_t)bump % alignof(struct entry)) bump++;
 	struct entry *e = (struct entry *)bump;
-	*e = (struct entry){*root, key, val, klen, vlen};
+	*e = (struct entry){*root, key, val, klen, vlen, tag};
 	*root = e;
 	bump += sizeof(*e);
 }
 
-void *HTlookup(void *key, short klen) {
+void *HTlookup(int tag, void *key, short klen) {
 	struct entry *root = table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
 
 // 	if (klen == 4)
@@ -83,7 +84,7 @@ void *HTlookup(void *key, short klen) {
 // 		lprintf("HTLookup %08x.%s -> ", *(unsigned long *)key, (char *)key+4);
 
 	for (struct entry *e=root; e!=NULL; e=e->next) {
-		if (e->klen == klen && !memcmp(e->key, key, klen)) {
+		if (e->tag == tag && e->klen == klen && !memcmp(e->key, key, klen)) {
 // 			if (klen == 4)
 // 				lprintf("%08x.%s\n", *(unsigned long *)e->val, (char *)e->val+4);
 // 			else
@@ -127,8 +128,8 @@ static void alloc(long bytes) {
 
 #include <stdio.h>
 int main(int argc, char **argv) {
-#define SETSTR(k, v) HTinstall(k, strlen(k)+1, v, strlen(v)+1)
-#define GETSTR(k) ((char *)HTlookup(k, strlen(k)+1))
+#define SETSTR(k, v) HTinstall(0, k, strlen(k)+1, v, strlen(v)+1)
+#define GETSTR(k) ((char *)HTlookup(0, k, strlen(k)+1))
 
 	SETSTR("one", "alpha");
 	SETSTR("two", "beta");

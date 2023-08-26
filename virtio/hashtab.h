@@ -1,4 +1,4 @@
 #pragma once
 
-void HTinstall(void *key, short klen, void *val, short vlen);
-void *HTlookup(void *key, short klen);
+void HTinstall(int tag, void *key, short klen, void *val, short vlen);
+void *HTlookup(int tag, void *key, short klen);
