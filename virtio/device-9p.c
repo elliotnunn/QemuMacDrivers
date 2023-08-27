@@ -83,7 +83,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
 static int walkToCNID(int32_t cnid, uint32_t fid);
-static int32_t makeCNID(int32_t parent, char *name);
+static int32_t qid2cnid(struct Qid9 qid);
 static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
@@ -106,7 +106,6 @@ static char *stack;
 static short drvrRefNum;
 static unsigned long callcnt;
 static struct Qid9 root;
-static int32_t cnidCtr = 100;
 static Handle finderwin;
 static bool mounted;
 static char *bootBlock;
@@ -122,7 +121,7 @@ static struct VCB vcb = {
 	.vcbNmAlBlks = 0xf000,
 	.vcbAlBlkSiz = 512,
 	.vcbClpSiz = 512,
-	.vcbNxtCNID = 100,
+	.vcbNxtCNID = 16, // the first "user" cnid... we will never use this field
 	.vcbFreeBks = 0xe000,
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
@@ -589,11 +588,12 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		}
 
 		char name[512];
+		struct Qid9 qid;
 
 		// Fast-forward
 		while (lastIdx < idx) {
 			char type;
-			int err = Readdir9(LISTFID, scratch, sizeof scratch, NULL, &type, name);
+			int err = Readdir9(LISTFID, scratch, sizeof scratch, &qid, &type, name);
 
 			if (err) {
 				lastCNID = 0;
@@ -611,8 +611,15 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 			lastIdx++;
 		}
 
-		cnid = makeCNID(cnid, name);
+		int32_t childcnid = qid2cnid(qid);
+		setDBParent(childcnid, cnid);
+		setDBName(childcnid, name);
+		setDBChild(cnid, name, childcnid);
+		cnid = childcnid;
+
+		lprintf("!! walking to the cnid\n");
 		walkToCNID(cnid, MYFID);
+
 	} else if (idx == 0) {
 		lprintf("GCI name mode\n");
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
@@ -816,6 +823,9 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 
 static OSErr fsOpen(struct HFileParam *pb) {
 // 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
+
+	// OpenSync is allowed to move memory
+	if ((pb & 0x200) == 0) HTprealloc();
 
 	pb->ioFRefNum = 0;
 
@@ -1056,19 +1066,24 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 			// Need to list the directory and see what matches!
 			// (A shortcut might be to query the CNID table)
 			char scratch[2048];
+			struct Qid9 qid;
 			Clrdirbuf9(scratch, sizeof scratch);
 			int err;
-			while ((err=Readdir9(LISTFID, scratch, sizeof scratch, NULL, NULL, gotutf8)) == 0) {
+			while ((err=Readdir9(LISTFID, scratch, sizeof scratch, &qid, NULL, gotutf8)) == 0) {
 				mr31name(got, gotutf8);
 				if (RelString(want, got, 0, 1) == 0) break;
 			}
 			Clunk9(LISTFID);
 			if (err) return fnfErr; // Or dirNFErr?
 
+			int32_t childcnid = qid2cnid(qid);
+			setDBParent(childcnid, cnid);
+			setDBName(childcnid, gotutf8);
+			setDBChild(cnid, gotutf8, childcnid);
+			cnid = childcnid;
+
 			// We were promised that this exists
 			Walk9(fid, fid, 1, (const char *[]){gotutf8}, NULL, NULL);
-
-			cnid = makeCNID(cnid, gotutf8);
 		}
 	}
 
@@ -1138,16 +1153,15 @@ static int walkToCNID(int32_t cnid, uint32_t fid) {
 	return (int)(unsigned char)qids[compcnt-1].type;
 }
 
-// Need a perfect UTF-8 filename match, which must therefore come from readdir
-static int32_t makeCNID(int32_t parent, char *name) {
-	int32_t cnid = getDBChild(parent, name);
-	if (cnid > 0) return cnid; // if negative, it's an error code
-
-	// Need to create one
-	cnid = ++cnidCtr;
-	setDBChild(parent, name, cnid);
-	setDBParent(cnid, parent);
-	setDBName(cnid, name);
+// Remember that Qemu lets the qid path change between boots
+// TODO: make folder and file CNIDs different
+// (problem is, the qid type field from Readdir9 is nonsense)
+static int32_t qid2cnid(struct Qid9 qid) {
+	int32_t cnid = 0; // needs to be positive (I reserve negative for error codes)
+	cnid ^= (0x7fffffffULL & qid.path);
+	cnid ^= ((0x3fffffff80000000ULL & qid.path) >> 31);
+	cnid ^= ((0xc000000000000000ULL & qid.path) >> 40); // don't forget the upper two bits
+	if (cnid < 16) cnid += 0x12342454; // low numbers reserved for system
 	return cnid;
 }
 
