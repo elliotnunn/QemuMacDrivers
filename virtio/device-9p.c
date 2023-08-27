@@ -824,9 +824,6 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 static OSErr fsOpen(struct HFileParam *pb) {
 // 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
 
-	// OpenSync is allowed to move memory
-	if ((pb & 0x200) == 0) HTprealloc();
-
 	pb->ioFRefNum = 0;
 
 	bool rfork = (pb->ioTrap & 0xff) == 0x0a;

@@ -12,8 +12,14 @@ TODO: make opportunistically resizable (will need SysTask time hook)
 
 struct entry {
 	struct entry *next;
-	void *key;
-	void *val;
+	union {
+		void *ptr;
+		char inln[4];
+	} key;
+	union {
+		void *ptr;
+		char inln[4];
+	} val;
 	short klen;
 	short vlen;
 	int tag;
@@ -24,83 +30,87 @@ char *blob, *bump, *limit;
 
 static unsigned long hash(const void *key, short klen);
 static void alloc(long bytes);
+static struct entry *find(int tag, const void *key, short klen);
 
 void HTinstall(int tag, const void *key, short klen, const void *val, short vlen) {
-// 	if (klen == 4)
-// 		lprintf("HTInstall %08x -> %08x.%s\n", *(unsigned long *)key, *(unsigned long *)val, (char *)val+4);
-// 	else
-// 		lprintf("HTInstall %08x.%s -> %08x\n", *(unsigned long *)key, (char *)key+4, *(unsigned long *)val);
+	struct entry *found = find(tag, key, klen);
 
-	struct entry **root = &table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
-
-	for (struct entry *e=*root; e!=NULL; e=e->next) {
-		if (e->tag == tag && e->klen == klen && !memcmp(e->key, key, klen)) {
-			if (vlen <= e->vlen) {
-				// Replace the value in-place
-				memcpy(e->val, val, vlen);
-				e->vlen = vlen;
-			} else {
-				// Allocate room for new value
-				while ((uintptr_t)bump % 8) bump++;
-				e->val = bump;
-				e->vlen = vlen;
-				memcpy(bump, val, vlen);
-				bump += vlen;
-			}
-			return;
+	if (found) {
+		void *val;
+		if (vlen <= 4) {
+			val = found->val.inln;
+		} else {
+			val = found->val.ptr;
 		}
+
+		if (vlen <= 4) {
+			// Inline
+			memcpy(found->val.inln, val, vlen);
+			found->vlen = vlen;
+		} else if (vlen <= found->vlen) {
+			// Out of line but shorter
+			memcpy(found->val.ptr, val, vlen);
+			found->vlen = vlen;
+		} else {
+			// Allocate room for new value
+			while ((uintptr_t)bump % 8) bump++;
+			found->val.ptr = bump;
+			memcpy(bump, val, vlen);
+			bump += vlen;
+			found->vlen = vlen;
+		}
+	} else { // create a new entry
+		struct entry **root = &table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
+
+		struct entry ent = {
+			.next = *root,
+			.tag = tag,
+			.klen = klen,
+			.vlen = vlen,
+		};
+
+		if (klen <= 4) {
+			// Store key within the entry
+			memcpy(ent.key.inln, key, klen);
+		} else {
+			// Key can be unaligned
+			alloc(klen);
+			memcpy(bump, key, klen);
+			ent.key.ptr = bump;
+			bump += klen;
+		}
+
+		if (vlen <= 4) {
+			// Store value within the entry
+			memcpy(ent.val.inln, val, klen);
+		} else {
+			// Value must be aligned
+			while ((uintptr_t)bump % 8) {
+				alloc(1);
+				bump++;
+			}
+			memcpy(bump, val, vlen);
+			ent.val.ptr = bump;
+			bump += vlen;
+		}
+
+		// Struct quite strict with alignment
+		alloc(sizeof(struct entry) + alignof(struct entry));
+		while ((uintptr_t)bump % alignof(struct entry)) bump++;
+		*root = memcpy(bump, &ent, sizeof(struct entry));
+		bump += sizeof(struct entry);
 	}
-
-	struct entry ent = {
-		.next = *root,
-		.tag = tag,
-		.klen = klen,
-		.vlen = vlen,
-	};
-
-	// Key can be unaligned
-	alloc(klen);
-	memcpy(bump, key, klen);
-	ent.key = bump;
-	bump += klen;
-
-	// Value must be aligned
-	while ((uintptr_t)bump % 8) {
-		alloc(1);
-		bump++;
-	}
-	memcpy(bump, val, vlen);
-	ent.val = bump;
-	bump += vlen;
-
-	// Struct quite strict with alignment
-	alloc(sizeof(struct entry) + alignof(struct entry));
-	while ((uintptr_t)bump % alignof(struct entry)) bump++;
-	*root = memcpy(bump, &ent, sizeof(struct entry));
-	bump += sizeof(struct entry);
 }
 
 void *HTlookup(int tag, const void *key, short klen) {
-	struct entry *root = table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
+	struct entry *found = find(tag, key, klen);
+	if (!found) return NULL;
 
-// 	if (klen == 4)
-// 		lprintf("HTLookup %08x -> ", *(unsigned long *)key);
-// 	else
-// 		lprintf("HTLookup %08x.%s -> ", *(unsigned long *)key, (char *)key+4);
-
-	for (struct entry *e=root; e!=NULL; e=e->next) {
-		if (e->tag == tag && e->klen == klen && !memcmp(e->key, key, klen)) {
-// 			if (klen == 4)
-// 				lprintf("%08x.%s\n", *(unsigned long *)e->val, (char *)e->val+4);
-// 			else
-// 				lprintf("%08x\n", *(unsigned long *)e->val);
-			return e->val;
-		}
+	if (found->vlen <= 4) {
+		return found->val.inln;
+	} else {
+		return found->val.ptr;
 	}
-
-// 	lprintf("not found\n");
-
-	return NULL;
 }
 
 static unsigned long hash(const void *key, short klen) {
@@ -129,6 +139,22 @@ static void alloc(long bytes) {
 
 	bump = blob;
 	limit = blob + size;
+}
+
+static struct entry *find(int tag, const void *key, short klen) {
+	struct entry *root = table[hash(key, klen) % (sizeof(table)/sizeof(*table))];
+
+	for (struct entry *e=root; e!=NULL; e=e->next) {
+		if (e->tag != tag || e->klen != klen) continue;
+
+		if (klen <= 4) {
+			if (!memcmp(key, e->key.inln, klen)) return e; // inline key
+		} else {
+			if (!memcmp(key, e->key.ptr, klen)) return e; // separate key
+		}
+	}
+
+	return NULL;
 }
 
 #include <stdio.h>
