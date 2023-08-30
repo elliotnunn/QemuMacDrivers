@@ -161,6 +161,8 @@ static size_t store(const void *data, size_t bytes) {
 		*(volatile char *)0x68f168f1 = 1;
 	}
 
+	memcpy(*blob + blobused, data, bytes);
+
 	size_t ret = blobused;
 	blobused += (bytes + 7) & -8; // everything aligned to 8 bytes forever
 	return ret;
