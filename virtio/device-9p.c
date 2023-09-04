@@ -23,6 +23,7 @@ Therefore we need this mapping:
 #include "paramblkprint.h"
 #include "patch68k.h"
 #include "rpc9p.h"
+#include "timing.h"
 #include "transport.h"
 #include "unicode.h"
 #include "universalfcb.h"
@@ -102,6 +103,7 @@ static OSErr controlStatusCall(struct CntrlParam *pb);
 static struct handler controlStatusHandler(long selector);
 static void panic(const char *panicstr);
 
+static unsigned long hfsTimer, browseTimer, relistTimer;
 static char *stack;
 static short drvrRefNum;
 static unsigned long callcnt;
@@ -1012,6 +1014,8 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 }
 
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
+	TIMEFUNC(browseTimer);
+
 	enum {LISTFID=5};
 
 	// Null termination makes tokenisation easier (just convert : to null)
@@ -1067,6 +1071,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 
 			// Need to list the directory and see what matches!
 			// (A shortcut might be to query the CNID table)
+			TIMESTART(relistTimer);
 			char scratch[2048];
 			struct Qid9 qid;
 			Clrdirbuf9(scratch, sizeof scratch);
@@ -1076,6 +1081,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 				if (RelString(want, got, 0, 1) == 0) break;
 			}
 			Clunk9(LISTFID);
+			TIMESTOP(relistTimer);
 			if (err) return fnfErr; // Or dirNFErr?
 
 			int32_t childcnid = qid2cnid(qid);
@@ -1318,6 +1324,13 @@ static void setDBChild(int32_t cnid, const char *name, int32_t ccnid) {
 }
 
 static long fsCall(void *pb, long selector) {
+	static unsigned char hdr;
+	if (hdr++ == 0) {
+		lprintf("%lu%% (browse/total) %d%% (relist/total)\n", browseTimer*100/hfsTimer, relistTimer*100/hfsTimer);
+	}
+
+	TIMEFUNC(hfsTimer);
+
 	unsigned short trap = ((struct IOParam *)pb)->ioTrap;
 
 	// Use the selector format of the File System Manager
