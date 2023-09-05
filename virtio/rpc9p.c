@@ -212,7 +212,7 @@ bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 
 	return false;
 }
 
-bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, uint16_t *retnwqid, struct Qid9 *retqid) {
+bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char *const *name, uint16_t *retnwqid, struct Qid9 *retqid) {
 	enum {Twalk = 110}; // size[4] Twalk tag[2] fid[4] newfid[4] nwname[2] nwname*(wname[s])
 	enum {Rwalk = 111}; // size[4] Rwalk tag[2] nwqid[2] nwqid*(wqid[13])
 

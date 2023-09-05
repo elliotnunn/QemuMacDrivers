@@ -47,3 +47,12 @@ for mr, uc in enumerate(mr2uc):
 		print(f"\tsrc += {len(variant)};")
 
 		print("} ", end="")
+
+print()
+print()
+
+for i in range(128, 256):
+	cps = mrdecomposed(i)
+	nums = int.from_bytes(cps.encode('utf8').ljust(4, b'\0')[::-1])
+	names = ' + '.join(cpname(n) for n in cps)
+	print(f"{nums:#010x}, // {names}")

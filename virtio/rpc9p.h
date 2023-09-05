@@ -38,7 +38,7 @@ extern uint32_t Err9;
 
 bool Init9(uint16_t vioq, uint16_t viobuffers);
 bool Attach9(uint32_t fid, uint32_t afid, char *uname, char *aname, struct Qid9 *retqid);
-bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char **name, uint16_t *retnwqid, struct Qid9 *retqid);
+bool Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char *const *name, uint16_t *retnwqid, struct Qid9 *retqid);
 bool Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retiounit);
 bool Lcreate9(uint32_t fid, uint32_t flags, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid, uint32_t *retiounit);
 bool Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid);

@@ -81,6 +81,8 @@ static void installAndMountAndNotify(void);
 static char *mkbb(OSErr (*booter)(void), struct bbnames names);
 static OSErr boot(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
+static void setPath(int32_t cnid);
+static void appendPath(const unsigned char *path);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
 static int walkToCNID(int32_t cnid, uint32_t fid);
@@ -95,13 +97,20 @@ static const char *getDBName(int32_t cnid);
 static void setDBName(int32_t cnid, const char *name);
 static int32_t getDBParent(int32_t cnid);
 static void setDBParent(int32_t cnid, int32_t pcnid);
-static int32_t getDBChild(int32_t cnid, const char *name);
-static void setDBChild(int32_t cnid, const char *name, int32_t ccnid);
 static long fsCall(void *pb, long selector);
 static struct handler fsHandler(unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static struct handler controlStatusHandler(long selector);
 static void panic(const char *panicstr);
+
+// Single statically allocated array of path components
+// UTF-8, null-terminated
+// (Final component can be edited safely)
+static char *pathComps[100];
+static int32_t expectCNID[100];
+static int pathCompCnt;
+static char pathBlob[512];
+static int pathBlobSize;
 
 static unsigned long hfsTimer, browseTimer, relistTimer;
 static char *stack;
@@ -618,7 +627,6 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		int32_t childcnid = qid2cnid(qid);
 		setDBParent(childcnid, cnid);
 		setDBName(childcnid, name);
-		setDBChild(cnid, name, childcnid);
 		cnid = childcnid;
 
 		lprintf("!! walking to the cnid\n");
@@ -1016,86 +1024,215 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	TIMEFUNC(browseTimer);
 
-	enum {LISTFID=5};
-
-	// Null termination makes tokenisation easier (just convert : to null)
-	char cpath[256] = "";
-	if (paspath != NULL) p2cstr(cpath, paspath);
-	int pathlen=strlen(cpath);
-
-	bool pathAbsolute = ((cpath[0] != ':') && (strstr(cpath, ":") != NULL))
-		|| (cnid == 1);
-
-	// Tokenize
-	for (int i=0; i<sizeof cpath; i++) {
-		if (cpath[i] == ':') cpath[i] = 0;
+	setPath(cnid);
+	appendPath(paspath);
+	lprintf("Browsing for /");
+	const char *suffix = "/";
+	for (int i=0; i<pathCompCnt; i++) {
+		lprintf(i<pathCompCnt-1 ? "%s/" : "%s", pathComps[i]);
 	}
+	lprintf("\n");
 
-	// Ready to iterate through components
-	char *comp = cpath;
+	struct Qid9 qidarray[100] = {root};
+	struct Qid9 *qids = qidarray + 1; // so that root is index -1
+	int progress = 0;
+	uint32_t tip = ROOTFID; // as soon as a Walk9 succeeds, this equals fid
 
-	// Trust that the File Manager already ensured the call is for this volume,
-	// and remove the volume name from absolute paths.
-	if (pathAbsolute) {
-		comp += strlen(comp);
-		cnid = 2;
-	}
+	while (progress < pathCompCnt) {
+		// The aim of a loop iteration is to advance "progress"
+		// (an index into pathComps) by up to 16 steps.
+		// The complexity is mainly in the error handling (Tolstoyan).
 
-	// Trim empty component from the start
-	// so that ":subdir" doesn't become ".." but "::subdir" does
-	if (comp[0] == 0) comp++;
+		uint16_t curDepth = progress;
+		uint16_t tryDepth = pathCompCnt;
+		if (tryDepth > curDepth+16) tryDepth = curDepth+16; // a 9P protocol limitation
 
-	// "Current directory" or "parent of root" can mean root
-	if (cnid < 2) cnid = 2;
+		uint16_t numOK = 0;
+		Walk9(tip, fid, tryDepth-curDepth, (const char **)pathComps+curDepth, &numOK, qids+curDepth);
+		// cast is unfortunate... values won't change while Walk9 is running
 
-	// Walk to that CNID
-	if (walkToCNID(cnid, fid) < 0) return fnfErr;
+		// The call fully succeeded, so fid does indeed point where requested
+		// (if only a lesser number of steps succeeded, fid didn't move)
+		if (curDepth+numOK == tryDepth) {
+			curDepth = tryDepth;
+			tip = fid;
+		}
 
-	// Compare each path component with the filesystem
-	for (; comp<cpath+pathlen; comp+=strlen(comp)+1) {
-		if (comp[0] == 0) {
-			// Consecutive colons are like ".."
-			if (Walk9(fid, fid, 1, (const char *[]){".."}, NULL, NULL))
-				return fnfErr;
+		// Some of the inodes might be wrong though: discard these
+		int16_t keepDepth = curDepth;
 
-			cnid = getDBParent(cnid);
-		} else {
-			unsigned char want[32], got[32];
-			char gotutf8[512];
-			if (strlen(comp) > 31) return bdNamErr;
-			c2pstr(want, comp);
-
-			// Read the directory
-			Walk9(fid, LISTFID, 0, NULL, NULL, NULL); // duplicate
-			Lopen9(LISTFID, O_RDONLY, NULL, NULL);
-
-			// Need to list the directory and see what matches!
-			// (A shortcut might be to query the CNID table)
-			TIMESTART(relistTimer);
-			char scratch[2048];
-			struct Qid9 qid;
-			Clrdirbuf9(scratch, sizeof scratch);
-			int err;
-			while ((err=Readdir9(LISTFID, scratch, sizeof scratch, &qid, NULL, gotutf8)) == 0) {
-				mr31name(got, gotutf8);
-				if (RelString(want, got, 0, 1) == 0) break;
+		// Discard components that have the "wrong" CNID
+		for (int i=progress; i<keepDepth; i++) {
+			if (expectCNID[i] != 0) {
+				if (expectCNID[i] != qid2cnid(qids[i])) {
+					keepDepth = i;
+					break;
+				}
 			}
-			Clunk9(LISTFID);
-			TIMESTOP(relistTimer);
-			if (err) return fnfErr; // Or dirNFErr?
+		}
 
-			int32_t childcnid = qid2cnid(qid);
-			setDBParent(childcnid, cnid);
-			setDBName(childcnid, gotutf8);
-			setDBChild(cnid, gotutf8, childcnid);
-			cnid = childcnid;
+		// Point tip to the final correct path member
+		if (curDepth > keepDepth) {
+			const char *const dotDot[] = {
+				"..", "..", "..", "..", "..", "..", "..", "..",
+				"..", "..", "..", "..", "..", "..", "..", ".."};
 
-			// We were promised that this exists
-			Walk9(fid, fid, 1, (const char *[]){gotutf8}, NULL, NULL);
+			Walk9(tip, fid, curDepth-keepDepth, dotDot, NULL, NULL);
+			tip = fid;
+			curDepth = keepDepth;
+		} else if (curDepth > keepDepth) {
+			Walk9(tip, fid, keepDepth-curDepth, (const char **)pathComps+progress, NULL, NULL);
+			// again an unfortunate cast
+			// assume it succeeded...
+			tip = fid;
+			curDepth = keepDepth;
+		}
+
+		// Put confirmed path components in the database
+		for (int i=progress; i<curDepth; i++) {
+			setDBParent(qid2cnid(qids[i]), qid2cnid(qids[i-1]));
+			if (expectCNID[i] == 0) {
+				setDBName(qid2cnid(qids[i]), pathComps[i]);
+			}
+		}
+
+		// There has been a lookup failure...
+		// Do an exhaustive directory search to resolve it
+		if (curDepth < tryDepth) {
+			// Are we looking for a name match, or a number match?
+			int32_t wantCNID = expectCNID[curDepth];
+			const char *wantName = pathComps[curDepth];
+
+			// If there is no chance of the name matching then we might fail here:
+			// (lookup is by name and not CNID)
+			// AND
+			// (fs case insensitive OR no letters in name)
+			// AND
+			// (fs norm insensitive OR no accents in name)
+			// AND
+			// (name is not mangled for length)
+
+			// Exhaustive directory listing
+			Walk9(tip, 27, 0, NULL, NULL, NULL); // dupe shouldn't fail
+			if (Lopen9(27, O_RDONLY|O_DIRECTORY, NULL, NULL)) return fnfErr;
+			Clrdirbuf9(Buf9, Max9);
+
+			int err;
+			struct Qid9 qid;
+			char type;
+			char filename[512];
+			while ((err=Readdir9(27, Buf9, Max9, &qid, &type, filename)) == 0) {
+				if (wantCNID) {
+					// Check for a number match
+					if (qid2cnid(qid) == wantCNID) {
+						break;
+					}
+				} else {
+					// Check for a name match
+					// TODO: fuzzy filename comparison
+				}
+			}
+			Clunk9(27);
+
+			if (err != 0) return fnfErr;
+
+			if (Walk9(tip, fid, 1, (const char *[]){filename}, NULL, NULL))
+				return fnfErr;
+			tip = fid;
+
+			qids[curDepth] = qid;
+			setDBParent(qid2cnid(qid), qid2cnid(qids[curDepth-1]));
+			setDBName(qid2cnid(qid), filename);
+
+			curDepth++;
+		}
+
+		progress = curDepth;
+	}
+
+	return qid2cnid(qids[pathCompCnt-1]);
+}
+
+// Panics if the CNID is invalid... bad interface
+static void setPath(int32_t cnid) {
+	int nbytes = 0;
+	int npath = 0;
+
+	// Preflight: number of components and their total length
+	for (int32_t i=cnid; i!=2; i=getDBParent(i)) {
+		nbytes += strlen(getDBName(i)) + 1;
+		npath++;
+	}
+
+	pathBlobSize = nbytes;
+	pathCompCnt = npath;
+
+	for (int32_t i=cnid; i!=2; i=getDBParent(i)) {
+		npath--;
+		expectCNID[npath] = i;
+		const char *name = getDBName(i);
+		nbytes -= strlen(name) + 1;
+		pathComps[npath] = strcpy(pathBlob + nbytes, name);
+	}
+}
+
+// Make a host-friendly array of path components (which can be dot-dot)
+// Returns data in own static storage, invalidated by next call
+// It is okay to append things to the final path component
+static void appendPath(const unsigned char *path) {
+	// Absolute paths have a colon but not as the first character
+	bool isabs = memchr(path + 1, ':', path[0]) > (void *)path + 1;
+
+	// Erase the parts that got us here
+	if (isabs) {
+		pathCompCnt = 0;
+	}
+
+	// Divide path components so each is either:
+	// [^:]*:
+	// [^:]*$
+	// So an empty component conveniently corresponds with dot-dot
+
+	const unsigned char *component = path + 1;
+	const unsigned char *limit = path + 1 + path[0];
+
+	// Preprocess path: remove disk name (we know it implicitly)
+	if (isabs) {
+		while (component[0] != ':') {
+			component++;
 		}
 	}
 
-	return cnid;
+	// Preprocess path: remove leading colon (means "relative path")
+	if (component != limit && component[0] == ':') {
+		component++;
+	}
+
+	// Component conversion loop
+	int len = -1;
+	while ((component += len + 1) < limit) {
+		len = 0;
+		while (component + len < limit && component[len] != ':') len++;
+
+		expectCNID[pathCompCnt] = 0;
+		pathComps[pathCompCnt] = pathBlob + pathBlobSize;
+		pathCompCnt++;
+
+		if (len == 0) {
+			strcpy(pathBlob + pathBlobSize, "..");
+			pathBlobSize += 3;
+		} else {
+			for (int i=0; i<len; i++) {
+				long bytes = utf8char(component[i]);
+				if (bytes == '/') bytes = ':';
+				do {
+					pathBlob[pathBlobSize++] = bytes;
+					bytes >>= 8;
+				} while (bytes);
+			}
+			pathBlob[pathBlobSize++] = 0;
+		}
+	}
 }
 
 static int32_t pbDirID(void *_pb) {
@@ -1165,6 +1302,7 @@ static int walkToCNID(int32_t cnid, uint32_t fid) {
 // TODO: make folder and file CNIDs different
 // (problem is, the qid type field from Readdir9 is nonsense)
 static int32_t qid2cnid(struct Qid9 qid) {
+	if (qid.path == root.path) return 2;
 	int32_t cnid = 0; // needs to be positive (I reserve negative for error codes)
 	cnid ^= (0x7fffffffULL & qid.path);
 	cnid ^= ((0x3fffffff80000000ULL & qid.path) >> 31);
@@ -1283,44 +1421,33 @@ static bool visName(const char *name) {
 
 // Panic on failure (means database corruption or bad CNID)
 static const char *getDBName(int32_t cnid) {
+	lprintf("getDBName(%d)\n", cnid);
+
 	const char *ptr = HTlookup('$', &cnid, sizeof cnid);
 	if (!ptr) panic(__func__);
 	return ptr;
 }
 
 static void setDBName(int32_t cnid, const char *name) {
+	lprintf("setDBName(%d, \"%s\")\n", cnid, name);
+
 	// Cast away the const -- but the name should not be modified by us
 	HTinstall('$', &cnid, sizeof cnid, (char *)name, strlen(name) + 1);
 }
 
 // Panic on failure (means database corruption or bad CNID)
 static int32_t getDBParent(int32_t cnid) {
+	lprintf("getDBParent(%d)\n", cnid);
+
 	const int32_t *ptr = HTlookup('^', &cnid, sizeof cnid);
 	if (!ptr) panic(__func__);
 	return *ptr;
 }
 
 static void setDBParent(int32_t cnid, int32_t pcnid) {
+	lprintf("setDBParent(%d, %d)\n", cnid, pcnid);
+
 	HTinstall('^', &cnid, sizeof cnid, &pcnid, sizeof pcnid);
-}
-
-// Return fnfErr on failure
-static int32_t getDBChild(int32_t cnid, const char *name) {
-	char key[600];
-	memcpy(key, &cnid, sizeof cnid);
-	strcpy(key + sizeof cnid, name);
-
-	const int32_t *ptr = HTlookup('>', key, sizeof cnid + strlen(name) + 1);
-	if (!ptr) return fnfErr;
-	return *ptr;
-}
-
-static void setDBChild(int32_t cnid, const char *name, int32_t ccnid) {
-	char key[600];
-	memcpy(key, &cnid, sizeof cnid);
-	strcpy(key + sizeof cnid, name);
-
-	HTinstall('>', key, sizeof cnid + strlen(name) + 1, &ccnid, sizeof ccnid);
 }
 
 static long fsCall(void *pb, long selector) {
@@ -1531,5 +1658,8 @@ static void panic(const char *panicstr) {
 	lprintf_enable = 1;
 	lprintf_prefix[0] = 0;
 	lprintf("\npanic: %s\n", panicstr);
+	unsigned char pstring[256];
+	c2pstr(pstring, panicstr);
+	DebugStr(pstring);
 	for (;;) *(volatile char *)0x68f168f1 = 1;
 }
