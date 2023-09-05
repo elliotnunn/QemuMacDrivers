@@ -54,12 +54,6 @@ struct handler {
 	short err; // If func==NULL then return ret
 };
 
-// in the hash table
-struct record {
-	int32_t parent;
-	char name[];
-};
-
 struct flagdqe {
 	uint32_t flags; // 4 bytes of flags at neg offset
 	DrvQEl dqe; // AddDrive points here
@@ -94,10 +88,9 @@ static struct VCB *findVol(short num);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
 static bool visName(const char *name);
+static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 static const char *getDBName(int32_t cnid);
-static void setDBName(int32_t cnid, const char *name);
 static int32_t getDBParent(int32_t cnid);
-static void setDBParent(int32_t cnid, int32_t pcnid);
 static long fsCall(void *pb, long selector);
 static struct handler fsHandler(unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
@@ -438,8 +431,7 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	memcpy(name, VConfig + 2, nameLen);
 	mr27name(vcb.vcbVN, name); // and convert to short Mac Roman pascal string
 
-	setDBParent(2 /*root CNID*/, 1 /*parent-of-root CNID*/);
-	setDBName(2, name);
+	setDB(2, 1, name);
 
 	finderwin = NewHandleSysClear(2);
 
@@ -626,8 +618,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		}
 
 		int32_t childcnid = qid2cnid(qid);
-		setDBParent(childcnid, cnid);
-		setDBName(childcnid, name);
+		setDB(childcnid, cnid, name);
 		cnid = childcnid;
 
 		lprintf("!! walking to the cnid\n");
@@ -1104,9 +1095,9 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 
 		// Put confirmed path components in the database
 		for (int i=progress; i<curDepth; i++) {
-			setDBParent(qid2cnid(qids[i]), qid2cnid(qids[i-1]));
+			// If this was a CNID component, then we know its details well
 			if (expectCNID[i] == 0) {
-				setDBName(qid2cnid(qids[i]), pathComps[i]);
+				setDB(qid2cnid(qids[i]), qid2cnid(qids[i-1]), pathComps[i]);
 			}
 		}
 
@@ -1155,8 +1146,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 			tip = fid;
 
 			qids[curDepth] = qid;
-			setDBParent(qid2cnid(qid), qid2cnid(qids[curDepth-1]));
-			setDBName(qid2cnid(qid), filename);
+			setDB(qid2cnid(qid), qid2cnid(qids[curDepth-1]), filename);
 
 			curDepth++;
 		}
@@ -1441,27 +1431,34 @@ static bool visName(const char *name) {
 	return true;
 }
 
-// Hash table accessors
+// Hash table accessors, tuned to minimise slot usage
+
+struct rec {
+	int32_t parent;
+	char name[512];
+};
 
 // NULL on failure (bad CNID)
-static const char *getDBName(int32_t cnid) {
-	return HTlookup('$', &cnid, sizeof cnid);
+static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
+	struct rec rec;
+	rec.parent = pcnid;
+	strcpy(rec.name, name);
+
+	// Cast away the const -- but the name should not be modified by us
+	HTinstall('$', &cnid, sizeof cnid, &rec, 4+strlen(name)+1); // dodgy size calc
 }
 
-static void setDBName(int32_t cnid, const char *name) {
-	// Cast away the const -- but the name should not be modified by us
-	HTinstall('$', &cnid, sizeof cnid, (char *)name, strlen(name) + 1);
+static const char *getDBName(int32_t cnid) {
+	struct rec *rec = HTlookup('$', &cnid, sizeof cnid);
+	if (!rec) return NULL;
+	return rec->name;
 }
 
 // Zero on failure (bad CNID)
 static int32_t getDBParent(int32_t cnid) {
-	const int32_t *ptr = HTlookup('^', &cnid, sizeof cnid);
-	if (!ptr) return 0;
-	return *ptr;
-}
-
-static void setDBParent(int32_t cnid, int32_t pcnid) {
-	HTinstall('^', &cnid, sizeof cnid, &pcnid, sizeof pcnid);
+	struct rec *rec = HTlookup('$', &cnid, sizeof cnid);
+	if (!rec) return 0;
+	return rec->parent;
 }
 
 static long fsCall(void *pb, long selector) {
