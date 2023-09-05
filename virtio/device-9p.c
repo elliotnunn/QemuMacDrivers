@@ -81,8 +81,9 @@ static void installAndMountAndNotify(void);
 static char *mkbb(OSErr (*booter)(void), struct bbnames names);
 static OSErr boot(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
-static void setPath(int32_t cnid);
-static void appendPath(const unsigned char *path);
+static bool setPath(int32_t cnid);
+static bool appendPath(const unsigned char *path);
+static bool isAbs(const unsigned char *path);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
 static int walkToCNID(int32_t cnid, uint32_t fid);
@@ -1024,8 +1025,15 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	TIMEFUNC(browseTimer);
 
-	setPath(cnid);
-	appendPath(paspath);
+	if (isAbs(paspath)) {
+		pathCompCnt = 0;
+		pathBlobSize = 0;
+	} else {
+		if (setPath(cnid)) return dirNFErr;
+	}
+
+	if (appendPath(paspath)) return bdNamErr;
+
 	lprintf("Browsing for /");
 	const char *suffix = "/";
 	for (int i=0; i<pathCompCnt; i++) {
@@ -1154,12 +1162,13 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 }
 
 // Panics if the CNID is invalid... bad interface
-static void setPath(int32_t cnid) {
+static bool setPath(int32_t cnid) {
 	int nbytes = 0;
 	int npath = 0;
 
 	// Preflight: number of components and their total length
 	for (int32_t i=cnid; i!=2; i=getDBParent(i)) {
+		if (i == 0) return true; // bad cnid
 		nbytes += strlen(getDBName(i)) + 1;
 		npath++;
 	}
@@ -1174,20 +1183,14 @@ static void setPath(int32_t cnid) {
 		nbytes -= strlen(name) + 1;
 		pathComps[npath] = strcpy(pathBlob + nbytes, name);
 	}
+
+	return false;
 }
 
 // Make a host-friendly array of path components (which can be dot-dot)
 // Returns data in own static storage, invalidated by next call
 // It is okay to append things to the final path component
-static void appendPath(const unsigned char *path) {
-	// Absolute paths have a colon but not as the first character
-	bool isabs = memchr(path + 1, ':', path[0]) > (void *)path + 1;
-
-	// Erase the parts that got us here
-	if (isabs) {
-		pathCompCnt = 0;
-	}
-
+static bool appendPath(const unsigned char *path) {
 	// Divide path components so each is either:
 	// [^:]*:
 	// [^:]*$
@@ -1197,13 +1200,17 @@ static void appendPath(const unsigned char *path) {
 	const unsigned char *limit = path + 1 + path[0];
 
 	// Preprocess path: remove disk name (we know it implicitly)
-	if (isabs) {
+	if (isAbs(path)) {
 		while (component[0] != ':') {
 			component++;
 		}
+
+		// Also erase setPath (because this is not relative to a know CNID)
+		pathCompCnt = 0;
+		pathBlobSize = 0;
 	}
 
-	// Preprocess path: remove leading colon (means "relative path")
+	// Preprocess path: remove leading colon (means "relative path" not dot-dot)
 	if (component != limit && component[0] == ':') {
 		component++;
 	}
@@ -1213,6 +1220,8 @@ static void appendPath(const unsigned char *path) {
 	while ((component += len + 1) < limit) {
 		len = 0;
 		while (component + len < limit && component[len] != ':') len++;
+
+		if (pathCompCnt >= sizeof pathComps/sizeof *pathComps) return true; // oom
 
 		expectCNID[pathCompCnt] = 0;
 		pathComps[pathCompCnt] = pathBlob + pathBlobSize;
@@ -1226,13 +1235,22 @@ static void appendPath(const unsigned char *path) {
 				long bytes = utf8char(component[i]);
 				if (bytes == '/') bytes = ':';
 				do {
+					if (pathBlobSize >= sizeof pathBlob) return true; // oom
 					pathBlob[pathBlobSize++] = bytes;
 					bytes >>= 8;
 				} while (bytes);
 			}
+			if (pathBlobSize >= sizeof pathBlob) return true; // oom
 			pathBlob[pathBlobSize++] = 0;
 		}
 	}
+
+	return false;
+}
+
+static bool isAbs(const unsigned char *path) {
+	unsigned char *firstColon = memchr(path+1, ':', path[0]);
+	return (firstColon != NULL && firstColon != path+1);
 }
 
 static int32_t pbDirID(void *_pb) {
@@ -1419,34 +1437,24 @@ static bool visName(const char *name) {
 
 // Hash table accessors
 
-// Panic on failure (means database corruption or bad CNID)
+// NULL on failure (bad CNID)
 static const char *getDBName(int32_t cnid) {
-	lprintf("getDBName(%d)\n", cnid);
-
-	const char *ptr = HTlookup('$', &cnid, sizeof cnid);
-	if (!ptr) panic(__func__);
-	return ptr;
+	return HTlookup('$', &cnid, sizeof cnid);
 }
 
 static void setDBName(int32_t cnid, const char *name) {
-	lprintf("setDBName(%d, \"%s\")\n", cnid, name);
-
 	// Cast away the const -- but the name should not be modified by us
 	HTinstall('$', &cnid, sizeof cnid, (char *)name, strlen(name) + 1);
 }
 
-// Panic on failure (means database corruption or bad CNID)
+// Zero on failure (bad CNID)
 static int32_t getDBParent(int32_t cnid) {
-	lprintf("getDBParent(%d)\n", cnid);
-
 	const int32_t *ptr = HTlookup('^', &cnid, sizeof cnid);
-	if (!ptr) panic(__func__);
+	if (!ptr) return 0;
 	return *ptr;
 }
 
 static void setDBParent(int32_t cnid, int32_t pcnid) {
-	lprintf("setDBParent(%d, %d)\n", cnid, pcnid);
-
 	HTinstall('^', &cnid, sizeof cnid, &pcnid, sizeof pcnid);
 }
 
