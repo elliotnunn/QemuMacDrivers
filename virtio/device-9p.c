@@ -234,7 +234,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
-	HTpreallocate();
+	HTallocate();
 
 	// More buffers allow us to tolerate more physical mem fragmentation
 	uint16_t viobufs = QInit(0, 256);
@@ -829,7 +829,7 @@ static OSErr fsOpen(struct HFileParam *pb) {
 // 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
 
 	// OpenSync is allowed to move memory
-	if ((pb->ioTrap & 0x200) == 0) HTpreallocate();
+ 	if ((pb->ioTrap & 0x200) == 0) HTallocate();
 
 	pb->ioFRefNum = 0;
 
@@ -1468,6 +1468,8 @@ static long fsCall(void *pb, long selector) {
 	}
 
 	TIMEFUNC(hfsTimer);
+
+	HTallocatelater(); // schedule some system task time if needed
 
 	unsigned short trap = ((struct IOParam *)pb)->ioTrap;
 

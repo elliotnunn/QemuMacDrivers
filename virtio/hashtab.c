@@ -3,10 +3,9 @@ Layering the File Mgr API on 9P semantics requires a growable hash table
 
 File Mgr calls are not allowed to move memory (i.e. call the Memory Mgr at all,
 or access an unlocked block). The only exceptions are synchronous MountVol,
-Open and OpenWD calls. So the HTpreallocate() call can be made at those times.
+Open and OpenWD calls. So the HTallocate() call can be made at those times.
 
 TODO:
-Access system task time for another opportunity to grow
 Reclaim stale data in the array (e.g. free list inside the heap block)
 */
 
@@ -44,6 +43,11 @@ static size_t tablesize, tableused;
 static Handle blob;
 static size_t blobsize, blobused;
 
+static int notificationPending;
+
+static size_t chooseTableSize(void);
+static size_t chooseBlobSize(void);
+static void notificationProc(NMRecPtr nmReqPtr);
 static unsigned long hash(int tag, const void *key, short klen);
 static size_t store(const void *data, size_t bytes);
 static struct entry *find(int tag, const void *key, short klen);
@@ -51,13 +55,14 @@ static void *entrykey(struct entry *e);
 static void *entryval(struct entry *e);
 static void dump(void);
 
-void HTpreallocate(void) {
+// Calls the Memory Manager -- only when moving memory is safe
+// e.g. "system task time" or a synchronous Open call
+void HTallocate(void) {
 	short saveMemErr = LMGetMemErr();
 
-	size_t newtablesize = 4096;
-	while (newtablesize/2 <= tableused) newtablesize *= 2;
+	size_t newtablesize = chooseTableSize();
 
-	if (newtablesize != tablesize) {
+	if (newtablesize > tablesize) {
 		struct entry *newtable = (void *)NewPtrSysClear(newtablesize * sizeof (struct entry));
 		if (newtable != NULL) {
 			// Copy entries across
@@ -75,10 +80,9 @@ void HTpreallocate(void) {
 		}
 	}
 
-	size_t newblobsize = 64*1024;
-	while (newblobsize/2 <= blobused) newblobsize *= 2;
+	size_t newblobsize = chooseBlobSize();
 
-	if (newblobsize != blobsize) {
+	if (newblobsize > blobsize) {
 		if (blob == NULL) {
 			blob = NewHandleClear(newblobsize);
 			if (blob) HLock(blob);
@@ -93,6 +97,44 @@ void HTpreallocate(void) {
 	}
 
 	LMSetMemErr(saveMemErr);
+}
+
+static size_t chooseTableSize(void) {
+	size_t s = 4096;
+	while (s/2 <= tableused) s *= 2;
+	return s;
+}
+
+static size_t chooseBlobSize(void) {
+	size_t s = 64*1024;
+	while (s/2 <= blobused) s *= 2;
+	return s;
+}
+
+void HTallocatelater(void) {
+	// If CurApName has a negative length byte, system is still booting, don't use
+	if (*(char *)0x910 < 0) return;
+
+	if (notificationPending) return;
+	if (chooseTableSize() <= tablesize || chooseBlobSize() <= blobsize) return;
+
+	lprintf("Hash table needs memory: posting notification task\n");
+
+	static RoutineDescriptor descriptor = BUILD_ROUTINE_DESCRIPTOR(
+		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
+		notificationProc);
+
+	static struct NMRec rec = {.qType=8, .nmResp=&descriptor};
+	NMInstall(&rec);
+	notificationPending = 1;
+}
+
+static void notificationProc(NMRecPtr nmReqPtr) {
+	NMRemove(nmReqPtr);
+	notificationPending = 0;
+
+	HTallocate(); // call Memory Manager
+	HTallocatelater(); // reschedule in case there was a failure
 }
 
 void HTinstall(int tag, const void *key, short klen, const void *val, short vlen) {
