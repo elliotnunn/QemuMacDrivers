@@ -38,11 +38,11 @@ struct entry {
 
 // Linearly probed hash table
 // Grow exponentially to keep occupancy between 25% and 50%
-struct entry *table;
-size_t tablesize, tableused;
+static struct entry *table;
+static size_t tablesize, tableused;
 
-Handle blob;
-size_t blobsize, blobused;
+static Handle blob;
+static size_t blobsize, blobused;
 
 static unsigned long hash(int tag, const void *key, short klen);
 static size_t store(const void *data, size_t bytes);
