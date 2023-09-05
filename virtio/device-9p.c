@@ -1041,6 +1041,12 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	}
 	lprintf("\n");
 
+	// Fast case: root only
+	if (pathCompCnt == 0) {
+		Walk9(ROOTFID, fid, 0, NULL, NULL, NULL); // dupe shouldn't fail
+		return 2;
+	}
+
 	struct Qid9 qidarray[100] = {root};
 	struct Qid9 *qids = qidarray + 1; // so that root is index -1
 	int progress = 0;
