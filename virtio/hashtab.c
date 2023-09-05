@@ -54,7 +54,7 @@ static void dump(void);
 void HTpreallocate(void) {
 	short saveMemErr = LMGetMemErr();
 
-	size_t newtablesize = 2048;
+	size_t newtablesize = 4096;
 	while (newtablesize/2 <= tableused) newtablesize *= 2;
 
 	if (newtablesize != tablesize) {
@@ -158,7 +158,7 @@ static unsigned long hash(int tag, const void *key, short klen) {
 static size_t store(const void *data, size_t bytes) {
 	if (blobused + bytes > blobsize) {
 		lprintf("Hash table out of storage area!\n");
-		*(volatile char *)0x68f168f1 = 1;
+		*(volatile char *)0x68f16851 = 1;
 	}
 
 	memcpy(*blob + blobused, data, bytes);
