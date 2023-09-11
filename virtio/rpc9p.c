@@ -528,7 +528,6 @@ bool Read9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_count
 	putSmlGetBig();
 
 	if (checkErr(bigBuf)) {
-		lprintf(" -> (fail)\n");
 		return true;
 	}
 
@@ -565,7 +564,6 @@ bool Write9(uint32_t fid, uint64_t offset, uint32_t count, uint32_t *actual_coun
 	putBigGetSml();
 
 	if (checkErr(bigBuf)) {
-		lprintf(" -> (fail)\n");
 		return true;
 	}
 
