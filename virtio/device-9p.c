@@ -20,9 +20,10 @@ Therefore we need this mapping:
 
 #include "hashtab.h"
 #include "lprintf.h"
+#include "panic.h"
 #include "paramblkprint.h"
 #include "patch68k.h"
-#include "rpc9p.h"
+#include "9p.h"
 #include "timing.h"
 #include "transport.h"
 #include "unicode.h"
@@ -45,7 +46,7 @@ enum {
 	ROOTFID = 2,
 	WDLO = -32767,
 	WDHI = -4096,
-	STACKSIZE = 12 * 1024,
+	STACKSIZE = 32 * 1024,
 };
 
 // of a File Manager call
@@ -95,7 +96,6 @@ static long fsCall(void *pb, long selector);
 static struct handler fsHandler(unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static struct handler controlStatusHandler(long selector);
-static void panic(const char *panicstr);
 
 // Single statically allocated array of path components
 // UTF-8, null-terminated
@@ -244,11 +244,12 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 	QInterest(0, 1);
 
-	if (Init9(0, viobufs)) {
+	int err9;
+	if ((err9 = Init9(viobufs)) != 0) {
 		return paramErr;
 	}
 
-	if (Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", &root)) {
+	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", &root)) != 0) {
 		return paramErr;
 	}
 
@@ -297,8 +298,8 @@ static void installAndMountAndNotify(void) {
 
 	// External filesystems need a big stack, and they can't
 	// share the FileMgr stack because of reentrancy problems
-	stack = NewPtrSys(STACKSIZE);
-	if (stack == NULL) stack = (char *)0x68f168f1;
+	stack = NewPtrSysClear(STACKSIZE);
+	if (stack == NULL) panic("failed extfs stack allocation");
 
 	Patch68k(
 		0x3f2,      // ToExtFS:
@@ -465,6 +466,10 @@ static OSErr fsMountVol(struct IOParam *pb) {
 // TODO: when given a WD refnum, return directory valence as the file count
 // TODO: fake used/free alloc blocks (there are limits depending on H bit)
 static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
+	if (pb->ioVRefNum < -256) {
+		panic("GetVolInfo on a WD: not implemented");
+	}
+
 	pb->ioVCrDate = vcb.vcbCrDate;
 	pb->ioVLsMod = vcb.vcbLsMod; // old field ioVLsBkUp is DIFFERENT
 	pb->ioVAtrb = vcb.vcbAtrb;
@@ -587,9 +592,9 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		if (cnid != lastCNID || idx <= lastIdx) {
 			lastCNID = 0;
 			lastIdx = 0;
-			Clrdirbuf9(scratch, sizeof scratch);
 			if (walkToCNID(cnid, LISTFID) < 0) return fnfErr;
 			if (Lopen9(LISTFID, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
+			InitReaddir9(LISTFID, scratch, sizeof scratch);
 			lastCNID = cnid;
 		}
 
@@ -599,7 +604,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		// Fast-forward
 		while (lastIdx < idx) {
 			char type;
-			int err = Readdir9(LISTFID, scratch, sizeof scratch, &qid, &type, name);
+			int err = Readdir9(scratch, &qid, &type, name);
 
 			if (err) {
 				lastCNID = 0;
@@ -621,7 +626,6 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		setDB(childcnid, cnid, name);
 		cnid = childcnid;
 
-		lprintf("!! walking to the cnid\n");
 		walkToCNID(cnid, MYFID);
 
 	} else if (idx == 0) {
@@ -646,9 +650,8 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		mr31name(pb->ioNamePtr, getDBName(cnid));
 	}
 
-	uint64_t size, time;
-	struct Qid9 qid;
-	if (Getattr9(MYFID, &qid, &size, &time)) return permErr;
+	struct Stat9 stat;
+	if (Getattr9(MYFID, STAT_ALL, &stat)) return permErr;
 
 	pb->ioDirID = cnid; // alias ioDrDirID
 	pb->ioFRefNum = 0;
@@ -658,13 +661,15 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		pb->ioFlParID = getDBParent(cnid); // alias ioDrDirID
 	}
 
-	if (qid.type & 0x80) { // directory
+	if (stat.qid.type & 0x80) { // directory
+		if (!longform) return fnfErr; // GetFileInfo doesn't do hierarchical
+
 		int n=0;
 		char childname[512];
 		Lopen9(MYFID, O_RDONLY, NULL, NULL); // iterate
-		char scratch[2048];
-		Clrdirbuf9(Buf9, Max9);
-		while (Readdir9(MYFID, Buf9, Max9, NULL, NULL, childname) == 0) {
+		char scratch[4096];
+		InitReaddir9(MYFID, scratch, sizeof scratch);
+		while (Readdir9(scratch, NULL, NULL, childname) == 0) {
 			if (!visName(childname)) continue;
 			n++;
 		}
@@ -679,25 +684,25 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 			pb->ioFlXFndrInfo = (struct FXInfo){0}; // alias ioDrFndrInfo
 		}
 	} else { // file
-		uint64_t rsize = 0;
+		struct Stat9 rstat = {};
 		char rname[512];
 		sprintf(rname, "%s.rsrc", getDBName(cnid));
 		uint16_t oksteps = 0;
 
 		Walk9(MYFID, 19, 2, (const char *[]){"..", rname}, &oksteps, NULL);
 		if (oksteps == 2) {
-			Getattr9(19, NULL, &rsize, NULL);
+			Getattr9(19, STAT_SIZE, &rstat);
 		}
 
 		pb->ioFlAttrib = 0;
 		pb->ioACUser = 0;
 		pb->ioFlFndrInfo = (struct FInfo){0};
 		pb->ioFlStBlk = 0;
-		pb->ioFlLgLen = size;
-		pb->ioFlPyLen = (size + 511) & -512;
+		pb->ioFlLgLen = stat.size;
+		pb->ioFlPyLen = (stat.size + 511) & -512;
 		pb->ioFlRStBlk = 0;
-		pb->ioFlRLgLen = rsize;
-		pb->ioFlRPyLen = (rsize + 511) & -512;
+		pb->ioFlRLgLen = rstat.size;
+		pb->ioFlRPyLen = (rstat.size + 511) & -512;
 		pb->ioFlCrDat = 0;
 		pb->ioFlMdDat = 0;
 		if (longform) {
@@ -713,11 +718,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		Walk9(MYFID, 19, 2, (const char *[]){"..", iname}, &oksteps, NULL);
 		if (oksteps == 2) {
 			if (!Lopen9(19, O_RDONLY, NULL, NULL)) {
-				uint32_t act = 0;
-				Read9(19, 0, 8, &act);
-				if (act == 8) {
-					memcpy(&pb->ioFlFndrInfo, Buf9, 8);
-				}
+				Read9(19, &pb->ioFlFndrInfo, 0, 8, NULL); // don't care about actual count
 			}
 		}
 	}
@@ -735,9 +736,9 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 		// so check that the path exists and is really a directory
 		int32_t cnid = browse(11, pbDirID(pb), pb->ioNamePtr);
 		if (cnid < 0) return cnid;
-		struct Qid9 qid;
-		if (Getattr9(11, &qid, NULL, NULL)) return permErr;
-		if ((qid.type & 0x80) == 0) return dirNFErr;
+		struct Stat9 stat;
+		if (Getattr9(11, 0, &stat)) return permErr;
+		if ((stat.qid.type & 0x80) == 0) return dirNFErr;
 		Clunk9(11);
 
 		setDefVCBPtr = &vcb;
@@ -855,10 +856,9 @@ static OSErr fsOpen(struct HFileParam *pb) {
 		if (oksteps != 2) return fnfErr;
 	}
 
-	uint64_t size = 0;
-	struct Qid9 qid;
-	if (Getattr9(fid, &qid, &size, NULL)) return permErr;
-	if (qid.type & 0x80) return fnfErr; // better not be a folder!
+	struct Stat9 stat;
+	if (Getattr9(fid, 0, &stat)) return permErr;
+	if (stat.qid.type & 0x80) return fnfErr; // better not be a folder!
 
 	if (Lopen9(fid, O_RDONLY, NULL, NULL))
 		return permErr;
@@ -868,8 +868,8 @@ static OSErr fsOpen(struct HFileParam *pb) {
 		.fcbFlags = (rfork ? 2 : 0) | 0x20, // locked ?resource
 		.fcbTypByt = 0, // MFS only
 		.fcbSBlk = 99, // free for our use
-		.fcbEOF = size,
-		.fcbPLen = (size + 511) & -512,
+		.fcbEOF = stat.size,
+		.fcbPLen = (stat.size + 511) & -512,
 		.fcbCrPs = 0,
 		.fcbVPtr = &vcb,
 		.fcbBfAdr = NULL, // reserved
@@ -951,9 +951,9 @@ static OSErr fsRead(struct IOParam *pb) {
 		if (want > Max9) want = Max9;
 
 		uint32_t got = 0;
-		Read9(32 + pb->ioRefNum, fcb->fcbCrPs, want, &got);
+		int err = Read9(32 + pb->ioRefNum, pb->ioBuffer + pb->ioActCount, fcb->fcbCrPs, want, &got);
 
-		BlockMoveData(Buf9, pb->ioBuffer + pb->ioActCount, got);
+		if (err) return ioErr;
 
 		pb->ioActCount += got;
 		fcb->fcbCrPs += got;
@@ -979,9 +979,9 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 	}
 
 	// Ensure it's actually a directory
-	struct Qid9 qid;
-	if (Getattr9(12, &qid, NULL, NULL)) return permErr;
-	if ((qid.type & 0x80) == 0) return dirNFErr;
+	struct Stat9 stat;
+	if (Getattr9(12, STAT_ALL, &stat)) return permErr;
+	if ((stat.qid.type & 0x80) == 0) return dirNFErr;
 
 	// A copy of the desired WDCB (a straight comparison is okay)
 	struct WDCBRec wdcb = {
@@ -1015,6 +1015,8 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	TIMEFUNC(browseTimer);
+
+	if (paspath == NULL) paspath = "";
 
 	if (isAbs(paspath)) {
 		pathCompCnt = 0;
@@ -1118,15 +1120,16 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 			// (name is not mangled for length)
 
 			// Exhaustive directory listing
+			char scratch[4096];
 			Walk9(tip, 27, 0, NULL, NULL, NULL); // dupe shouldn't fail
 			if (Lopen9(27, O_RDONLY|O_DIRECTORY, NULL, NULL)) return fnfErr;
-			Clrdirbuf9(Buf9, Max9);
+			InitReaddir9(27, scratch, sizeof scratch);
 
 			int err;
 			struct Qid9 qid;
 			char type;
 			char filename[512];
-			while ((err=Readdir9(27, Buf9, Max9, &qid, &type, filename)) == 0) {
+			while ((err=Readdir9(scratch, &qid, &type, filename)) == 0) {
 				if (wantCNID) {
 					// Check for a number match
 					if (qid2cnid(qid) == wantCNID) {
@@ -1326,13 +1329,24 @@ static int32_t qid2cnid(struct Qid9 qid) {
 }
 
 static void cnidPrint(int32_t cnid) {
-	char **path; uint16_t pathcnt;
+	if (!lprintf_enable) return;
+
+	char big[512];
+	int remain = sizeof big;
 
 	while (cnid != 2) {
-		lprintf("%s<-", getDBName(cnid));
+		const char *name = getDBName(cnid);
+		int nsize = strlen(name);
+		if (remain < nsize+1) break;
+
+		remain -= nsize;
+		memcpy(big + remain, name, nsize);
+		big[--remain] = '/';
+
 		cnid = getDBParent(cnid);
 	}
-	lprintf("(root)");
+
+	lprintf("%.*s", sizeof big - remain, big + remain);
 }
 
 static struct DrvQEl *findDrive(short num) {
@@ -1503,6 +1517,10 @@ static long fsCall(void *pb, long selector) {
 		lprintf("%s", PBPrint(pb, selector, result));
 	}
 
+	for (int i=0; i<512; i++) {
+		if (stack[i]) panic("blown stack");
+	}
+
 	return result;
 }
 
@@ -1665,14 +1683,4 @@ static struct handler controlStatusHandler(long selector) {
 // 	case 'boot': return (struct handler){MyDCBoot};
 	default: return (struct handler){NULL, selector>0 ? statusErr : controlErr};
 	}
-}
-
-static void panic(const char *panicstr) {
-	lprintf_enable = 1;
-	lprintf_prefix[0] = 0;
-	lprintf("\npanic: %s\n", panicstr);
-	unsigned char pstring[256];
-	c2pstr(pstring, panicstr);
-	DebugStr(pstring);
-	for (;;) *(volatile char *)0x68f168f1 = 1;
 }

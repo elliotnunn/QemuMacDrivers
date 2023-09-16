@@ -17,6 +17,7 @@ COMMON_PPC = \
 	atomic-ppc.o \
 	lprintf.o \
 	patch68k.o \
+	panic.o \
 	scc.o \
 
 all: ../builds/qemu_vga.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
@@ -34,7 +35,7 @@ all: ../builds/qemu_vga.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
 device-gpu.so: device-gpu.o blit.o virgl.o dirtyrectpatch.o gammatables.o ${COMMON_PPC}
 	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
 
-device-9p.so: device-9p.o rpc9p.o hashtab.o paramblkprint.o unicode.o universalfcb.o ${COMMON_PPC}
+device-9p.so: device-9p.o 9p.o hashtab.o paramblkprint.o unicode.o universalfcb.o ${COMMON_PPC}
 	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
 
 clean:

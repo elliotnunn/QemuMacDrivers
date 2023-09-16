@@ -19,6 +19,7 @@ Reclaim stale data in the array (e.g. free list inside the heap block)
 #include "hashtab.h"
 
 #include "lprintf.h"
+#include "panic.h"
 
 // Keep to 16 bytes
 struct entry {
@@ -141,8 +142,7 @@ void HTinstall(int tag, const void *key, short klen, const void *val, short vlen
 	struct entry *found = find(tag, key, klen);
 
 	if (!found) {
-		lprintf("Hash table out of slots!\n");
-		*(volatile char *)0x68f168f1 = 1;
+		panic("Hash table out of slots!");
 	} else if (found->klen != 0) {
 		// Overwrite existing table entry
 		if (vlen <= 4) {
@@ -199,8 +199,7 @@ static unsigned long hash(int tag, const void *key, short klen) {
 // Bump-allocate inside our large block
 static size_t store(const void *data, size_t bytes) {
 	if (blobused + bytes > blobsize) {
-		lprintf("Hash table out of storage area!\n");
-		*(volatile char *)0x68f16851 = 1;
+		panic("Hash table out of storage area!");
 	}
 
 	memcpy(*blob + blobused, data, bytes);
