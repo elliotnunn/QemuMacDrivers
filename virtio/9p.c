@@ -95,12 +95,12 @@ int Init9(int bufs) {
 	return 0;
 }
 
-int Attach9(uint32_t fid, uint32_t afid, const char *uname, const char *aname, struct Qid9 *retqid) {
+int Attach9(uint32_t fid, uint32_t afid, const char *uname, const char *aname, uint32_t n_uname, struct Qid9 *retqid) {
 	enum {Tattach = 104}; // size[4] Tattach tag[2] fid[4] afid[4] uname[s] aname[s] n_uname[4]
 	enum {Rattach = 105}; // size[4] Rattach tag[2] qid[13]
 
 	return transact(Tattach, "ddssd", "Q",
-		fid, afid, uname, aname,
+		fid, afid, uname, aname, n_uname,
 		retqid);
 }
 

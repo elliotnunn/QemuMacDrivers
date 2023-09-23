@@ -196,7 +196,7 @@ struct Stat9 {
 };
 
 int Init9(int bufs);
-int Attach9(uint32_t fid, uint32_t afid, const char *uname, const char *aname, struct Qid9 *retqid);
+int Attach9(uint32_t fid, uint32_t afid, const char *uname, const char *aname, uint32_t n_uname, struct Qid9 *retqid);
 int Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char *const *name, uint16_t *retnwqid, struct Qid9 *retqid);
 int Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retiounit);
 int Lcreate9(uint32_t fid, uint32_t flags, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid, uint32_t *retiounit);

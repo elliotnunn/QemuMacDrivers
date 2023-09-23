@@ -249,7 +249,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	}
 
-	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", &root)) != 0) {
+	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", 0, &root)) != 0) {
 		return paramErr;
 	}
 
