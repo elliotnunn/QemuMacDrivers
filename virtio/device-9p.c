@@ -42,11 +42,13 @@ Therefore we need this mapping:
 #define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1));
 
 enum {
+	// FSID is used by the ExtFS hook to version volume and drive structures,
+	// so if the dispatch mechanism changes, this constant must change:
 	FSID = ('9'<<8) | 'p',
 	ROOTFID = 2,
 	WDLO = -32767,
 	WDHI = -4096,
-	STACKSIZE = 32 * 1024,
+	STACKSIZE = 64 * 1024, // large stack bc memory is so hard to allocate
 };
 
 // of a File Manager call
@@ -55,9 +57,10 @@ struct handler {
 	short err; // If func==NULL then return ret
 };
 
-struct flagdqe {
+struct longdqe {
 	uint32_t flags; // 4 bytes of flags at neg offset
 	DrvQEl dqe; // AddDrive points here
+	void *dispatcher;
 };
 
 struct bbnames {
@@ -97,6 +100,13 @@ static struct handler fsHandler(unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static struct handler controlStatusHandler(long selector);
 
+static struct RoutineDescriptor fsCallDesc = BUILD_ROUTINE_DESCRIPTOR(
+	kCStackBased
+		| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+		| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
+		| RESULT_SIZE(kFourByteCode),
+	fsCall);
+
 // Single statically allocated array of path components
 // UTF-8, null-terminated
 // (Final component can be edited safely)
@@ -107,16 +117,16 @@ static char pathBlob[512];
 static int pathBlobSize;
 
 static unsigned long hfsTimer, browseTimer, relistTimer;
-static char *stack;
 static short drvrRefNum;
 static unsigned long callcnt;
 static struct Qid9 root;
 static Handle finderwin;
 static bool mounted;
 static char *bootBlock;
-static struct flagdqe dqe = {
+static struct longdqe dqe = {
 	.flags = 0x00080000, // fixed disk
 	.dqe = {.dQFSID = FSID},
+	.dispatcher = &fsCallDesc,
 };
 static struct VCB vcb = {
 	.vcbAtrb = 0x8080, // hw and sw locked
@@ -131,6 +141,7 @@ static struct VCB vcb = {
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
+	.vcbCtlBuf = (void *)&fsCallDesc, // cheeky overload
 };
 
 // Work around a ROM bug:
@@ -294,51 +305,78 @@ static void installAndMountAndNotify(void) {
 	if (alreadyUp) return;
 	alreadyUp = true;
 
-	lprintf("Hooking ToExtFS\n");
+	long selector = FSID<<16 | 'h'<<8 | 'k';
+	long patched = 0;
+	Gestalt(selector, &patched);
 
-	// External filesystems need a big stack, and they can't
-	// share the FileMgr stack because of reentrancy problems
-	stack = NewPtrSysClear(STACKSIZE);
-	if (stack == NULL) panic("failed extfs stack allocation");
+	lprintf("ToExtFS hook (Gestalt %.4s): ", &selector);
+	if (patched) {
+		lprintf("already installed\n");
+	} else {
+		// External filesystems need a big stack, and they can't
+		// share the FileMgr stack because of reentrancy problems
+		// (Note that this is shared between .virtio9p instances)
+		char *stack = NewPtrSysClear(STACKSIZE);
+		if (stack == NULL) panic("failed extfs stack allocation");
 
-	Patch68k(
-		0x3f2,      // ToExtFS:
-		"0cb8 %l 03ee" //    cmp.l   #vcb,ReqstVol
-		"6706"      //       beq.s   yes
-		"0c28 000f 0007" //  cmp.b   #_MountVol&255,ioTrap(a0)
-		"6642"      //       bne.s   no
-		"2f38 0110" // yes:  move.l  StkLowPt,-(sp)
-		"42b8 0110" //       clr.l   StkLowPt
-		"23cf %l"   //       move.l  sp,stack-4
-		"2e7c %l"   //       move.l  #stack-4,sp
-		"2f00"      //       move.l  d0,-(sp)          ; restore d0 only if hook fails
-		"48e7 60e0" //       movem.l d1-d2/a0-a2,-(sp)
-		"2f00"      //       move.l  d0,-(sp)
-		"2f08"      //       move.l  a0,-(sp)
-		"4eb9 %l"   //       jsr     fsCall
-		"504f"      //       addq    #8,sp
-		"4cdf 0706" //       movem.l (sp)+,d1-d2/a0-a2
-		"0c40 ffc6" //       cmp.w   #extFSErr,d0
-		"670a"      //       beq.s   punt
-		"584f"      //       addq    #4,sp             ; hook success: don't restore d0
-		"2e57"      //       move.l  (sp),sp           ; unswitch stack
-		"21df 0110" //       move.l  (sp)+,StkLowPt
-		"4e75"      //       rts
-		"201f"      // punt: move.l  (sp)+,d0          ; hook failure: restore d0 for next FS
-		"2e57"      //       move.l  (sp),sp           ; unswitch stack
-		"21df 0110" //       move.l  (sp)+,StkLowPt
-		"4ef9 %o",  // no:   jmp     originalToExtFS
+		// All instances of this driver share the one 68k hook (and one stack)
+		Patch68k(
+			0x3f2, // ToExtFS:
+			// Fast path is when ReqstVol points to a 9p device (inspect VCB)
+			"2438 03ee "      // move.l  ReqstVol,d2
+			"67 %MOUNTCK "    // beq.s   MOUNTCK
+			"2242 "           // move.l  d2,a1
+			"0c69 %w 004c "   // cmp.w   #FSID,vcbFSID(a1)
+			"66 %PUNT "       // bne.s   PUNT
 
-		&vcb,
-		stack + STACKSIZE - 100,
-		stack + STACKSIZE - 100,
-		NewRoutineDescriptor((ProcPtr)fsCall,
-			kCStackBased
-				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-				| RESULT_SIZE(kFourByteCode),
-			GetCurrentISA())
-	);
+			"2429 00a8 "      // move.l  vcbCtlBuf(a1),d2
+
+			// Commit to calling the 9p routine (d2)
+			"GO: "
+			"2f38 0110 "      // move.l  StkLowPt,-(sp)
+			"42b8 0110 "      // clr.l   StkLowPt
+			"43f9 %l "        // lea.l   stack,a1
+			"230f "           // move.l  sp,-(a1)
+			"2e49 "           // move.l  a1,sp
+			"2f00 "           // move.l  d0,-(sp)
+			"2f08 "           // move.l  a0,-(sp)
+			"2042 "           // move.l  d2,a0
+			"4e90 "           // jsr     (a0)
+			"504f "           // addq    #8,sp
+			"2e57 "           // move.l  (sp),sp
+			"21df 0110 "      // move.l  (sp)+,StkLowPt
+			"4e75 "           // rts
+
+			// Slow path is MountVol on a 9p device (find and inspect DQE)
+			"MOUNTCK: "
+			"0c28 000f 0007 " // cmp.b   #_MountVol&255,ioTrap+1(a0)
+			"66 %PUNT "       // bne.s   PUNT
+
+			"43f8 030a "      // lea     DrvQHdr+QHead,a1
+			"LOOP: "
+			"2251 "           // move.l  (a1),a1
+			"2409 "           // move.l  a1,d2
+			"67 %PUNT "       // beq.s   PUNT
+			"3428 0016 "      // move.w  ioVRefNum(a0),d2
+			"b469 0006 "      // cmp.w   dQDrive(a1),d2
+			"66 %LOOP "       // bne.s   LOOP
+
+			// Found matching drive, is it one of ours?
+			"2429 %w "        // move.l  dispatcher(a1),d2
+			"0c69 %w 000a "   // cmp.w   #FSID,dQFSID(a1)
+			"67 %GO "         // beq.s   GO
+
+			"PUNT: "
+			"4ef9 %o ",       // jmp     original
+
+			FSID,
+			stack + STACKSIZE - 100,
+			offsetof(struct longdqe, dispatcher) - offsetof(struct longdqe, dqe),
+			FSID
+		);
+
+		SetGestaltValue(selector, 1);
+	}
 
 	struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
 	PBMountVol((void *)&pb);
@@ -420,9 +458,6 @@ static OSErr boot(void) {
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
-	// This is the only call that needs to check that our volume is the right one
-	if (pb->ioVRefNum != dqe.dqe.dQDrive) return extFSErr;
-
 	if (mounted) return volOnLinErr;
 
 	// Read mount_tag from config space into a C string
@@ -896,12 +931,6 @@ static OSErr fsGetEOF(struct IOParam *pb) {
 
 	pb->ioMisc = (Ptr)fcb->fcbEOF;
 
-	return noErr;
-}
-
-// File Manager has populated the PB for us
-static OSErr fsGetFCBInfo(struct FCBPBRec *pb) {
-	if (pb->ioFCBVRefNum != vcb.vcbVRefNum) return extFSErr;
 	return noErr;
 }
 
@@ -1517,10 +1546,6 @@ static long fsCall(void *pb, long selector) {
 		lprintf("%s", PBPrint(pb, selector, result));
 	}
 
-	for (int i=0; i<512; i++) {
-		if (stack[i]) panic("blown stack");
-	}
-
 	return result;
 }
 
@@ -1559,7 +1584,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMCatMove: return (struct handler){NULL, wPrErr};
 	case kFSMDirCreate: return (struct handler){NULL, wPrErr};
 	case kFSMGetWDInfo: return (struct handler){NULL, noErr};
-	case kFSMGetFCBInfo: return (struct handler){fsGetFCBInfo};
+	case kFSMGetFCBInfo: return (struct handler){NULL, noErr};
 	case kFSMGetCatInfo: return (struct handler){fsGetFileInfo};
 	case kFSMSetCatInfo: return (struct handler){NULL, wPrErr};
 	case kFSMSetVolInfo: return (struct handler){NULL, wPrErr};
