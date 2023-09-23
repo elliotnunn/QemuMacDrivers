@@ -60,23 +60,30 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	char *code = block->code;
 	int midhex = 0;
 
-	for (const char *i=fmt; *i!=0; i++) {
+	int labels[26] = {};
+	int fixups[64];
+	int nfixups = 0;
+
+	for (const char *i=fmt; *i!=0;) {
 		if (*i == '%') {
 			i++;
-			char kind = *i;
-			if (kind == 'b') {
+			if (*i == 'b') {
+				i++;
 				*code++ = va_arg(argp, int);
-			} else if (kind == 'w') {
+			} else if (*i == 'w') {
+				i++;
 				short word = va_arg(argp, int);
 				*code++ = word >> 8;
 				*code++ = word;
-			} else if (kind == 'l') {
+			} else if (*i == 'l') {
+				i++;
 				long lword = va_arg(argp, long);
 				*code++ = lword >> 24;
 				*code++ = lword >> 16;
 				*code++ = lword >> 8;
 				*code++ = lword;
-			} else if (kind == 'o') {
+			} else if (*i == 'o') {
+				i++;
 				long lword = (long)block->original;
 
 				// Special case: never JMP or JSR to NULL or 0xffffffff
@@ -94,7 +101,16 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 				*code++ = lword >> 16;
 				*code++ = lword >> 8;
 				*code++ = lword;
+			} else if (*i >= 'A' && *i <= 'Z') {
+				fixups[nfixups++] = code - block->code;
+				*code++ = *i;
+				i++;
+				while (*i >= 'A' && *i <= 'Z') i++; // ignore extra letters
 			}
+		} else if (*i >= 'A' && *i <= 'Z') {
+			labels[*i-'A'] = code - block->code;
+			i++;
+			while (*i >= 'A' && *i <= 'Z') i++; // ignore extra letters
 		} else if (hex(*i) != -1) {
 			if (midhex) {
 				*code++ |= hex(*i);
@@ -102,10 +118,22 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 				*code = hex(*i) << 4;
 			}
 			midhex = !midhex;
+			i++;
+		} else {
+			i++; // ignore other letters
 		}
 	}
 
 	va_end(argp);
+
+	for (int i=0; i<nfixups; i++) {
+		char *caller = block->code + fixups[i];
+		lprintf("Letter %c ", *caller);
+		char *callee = block->code + labels[*caller-'A'];
+		lprintf("fixup at %#x -> %#x ", caller-block->code, callee-block->code);
+		*caller = (signed char)(callee - caller - 1);
+		lprintf("delta %02x\n", 255 & *caller);
+	}
 
 	// Fallthrough code to remove the patch
 	*code++ = 0x48; // MOVEM.L d0-d2/a0-a2,-(sp)
