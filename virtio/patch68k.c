@@ -23,7 +23,6 @@ static struct RoutineDescriptor unpatcher = BUILD_ROUTINE_DESCRIPTOR(
 static int hex(char c) {
 	if ('0'<=c && c<='9') return c - '0';
 	if ('a'<=c && c<='f') return c - 'a' + 10;
-	if ('A'<=c && c<='F') return c - 'A' + 10;
 	return -1;
 }
 
@@ -128,11 +127,11 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 
 	for (int i=0; i<nfixups; i++) {
 		char *caller = block->code + fixups[i];
-		lprintf("Letter %c ", *caller);
+// 		lprintf("Letter %c ", *caller);
 		char *callee = block->code + labels[*caller-'A'];
-		lprintf("fixup at %#x -> %#x ", caller-block->code, callee-block->code);
+// 		lprintf("fixup at %#x -> %#x ", caller-block->code, callee-block->code);
 		*caller = (signed char)(callee - caller - 1);
-		lprintf("delta %02x\n", 255 & *caller);
+// 		lprintf("delta %02x\n", 255 & *caller);
 	}
 
 	// Fallthrough code to remove the patch
