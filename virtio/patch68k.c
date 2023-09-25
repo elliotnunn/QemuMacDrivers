@@ -127,11 +127,14 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 
 	for (int i=0; i<nfixups; i++) {
 		char *caller = block->code + fixups[i];
-// 		lprintf("Letter %c ", *caller);
 		char *callee = block->code + labels[*caller-'A'];
-// 		lprintf("fixup at %#x -> %#x ", caller-block->code, callee-block->code);
-		*caller = (signed char)(callee - caller - 1);
-// 		lprintf("delta %02x\n", 255 & *caller);
+		if (fixups[i] % 2) {
+			// At odd offsets, the off-by-one offset byte in a bra.s
+			*caller = (signed char)(callee - caller - 1);
+		} else {
+			// At even offsets, the two-byte offset in lea, bra etc
+			*(short *)caller = (signed short)(callee - caller);
+		}
 	}
 
 	// Fallthrough code to remove the patch
