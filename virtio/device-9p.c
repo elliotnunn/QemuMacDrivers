@@ -319,6 +319,21 @@ static void installAndMountAndNotify(void) {
 		char *stack = NewPtrSysClear(STACKSIZE);
 		if (stack == NULL) panic("failed extfs stack allocation");
 
+
+// .virtio9p(-49) stack return addresses = 0x22171ae 0x2216db6
+// .virtio9p(-49) stack return addresses = 0xffc253f4 0xffc24fac
+
+// proximal is the jsr (a1) inside ExtFSHookPatch
+// (ROM version subtly hints at stackery)
+// (RAM version *checks* the stack pointer for the HFS private one)
+
+// distal is the jsr (a1) in FSDispatch
+// hopefully this tolerates a totally different stack pointer!
+
+
+// selector should actually be changed to a short word
+
+
 		// All instances of this driver share the one 68k hook (and one stack)
 		Patch68k(
 			0x3f2, // ToExtFS:
