@@ -183,6 +183,14 @@ int Lcreate9(uint32_t fid, uint32_t flags, uint32_t mode, uint32_t gid, const ch
 		retqid, retiounit);
 }
 
+int Remove9(uint32_t fid) {
+	enum {Tremove = 122}; // size[4] Tremove tag[2] fid[4]
+	enum {Rremove = 123}; // size[4] Rremove tag[2]
+
+	return transact(Tremove, "d", "",
+		fid);
+}
+
 int Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid) {
 	enum {Tmkdir = 72}; // size[4] Tmkdir tag[2] dfid[4] name[s] mode[4] gid[4]
 	enum {Rmkdir = 73}; // size[4] Rmkdir tag[2] qid[13]
