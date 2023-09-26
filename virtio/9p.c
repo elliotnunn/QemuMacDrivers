@@ -277,7 +277,7 @@ int Getattr9(uint32_t fid, uint64_t request_mask, struct Stat9 *ret) {
 	                      // ctime_sec[8] ctime_nsec[8] btime_sec[8]
 	                      // btime_nsec[8] gen[8] data_version[8]
 
-	/*return */transact(Tgetattr, "dq", "qQdddqqqqqqqqqqqqqqq",
+	transact(Tgetattr, "dq", "qQdddqqqqqqqqqqqqqqq",
 		fid, request_mask,
 
 		// very many return fields
@@ -287,8 +287,6 @@ int Getattr9(uint32_t fid, uint64_t request_mask, struct Stat9 *ret) {
 		&ret->mtime_sec, &ret->mtime_nsec,
 		&ret->ctime_sec, &ret->ctime_nsec,
 		NULL, NULL, NULL, NULL); // discard btime, gen and data_version fields
-
-	return 0;
 }
 
 int Clunk9(uint32_t fid) {
