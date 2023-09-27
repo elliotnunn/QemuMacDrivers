@@ -165,6 +165,18 @@ enum {
 };
 
 enum {
+	SET_MODE      = 0x00000001,
+	SET_UID       = 0x00000002,
+	SET_GID       = 0x00000004,
+	SET_SIZE      = 0x00000008,
+	SET_ATIME     = 0x00000010,
+	SET_MTIME     = 0x00000020,
+	SET_CTIME     = 0x00000040,
+	SET_ATIME_SET = 0x00000080, // if these aren't set, times are "current time"
+	SET_MTIME_SET = 0x00000100,
+};
+
+enum {
 	NOFID = -1,
 };
 
@@ -205,6 +217,7 @@ int Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct 
 void InitReaddir9(uint32_t fid, void *buf, size_t bufsize);
 int Readdir9(void *buf, struct Qid9 *retqid, char *rettype, char retname[512]);
 int Getattr9(uint32_t fid, uint64_t request_mask, struct Stat9 *ret);
+int Setattr9(uint32_t fid, uint32_t request_mask, struct Stat9 to);
 int Clunk9(uint32_t fid);
 int Read9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);
 int Write9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *actual_count);

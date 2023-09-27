@@ -289,6 +289,18 @@ int Getattr9(uint32_t fid, uint64_t request_mask, struct Stat9 *ret) {
 		NULL, NULL, NULL, NULL); // discard btime, gen and data_version fields
 }
 
+int Setattr9(uint32_t fid, uint32_t request_mask, struct Stat9 to) {
+	enum {Tsetattr = 26}; // size[4] Tsetattr tag[2] fid[4] valid[4]
+	                      // mode[4] uid[4] gid[4] size[8]
+                          // atime_sec[8] atime_nsec[8] mtime_sec[8] mtime_nsec[8]
+	enum {Rsetattr = 27}; // size[4] Rsetattr tag[2]
+
+	transact(Tsetattr, "dddddqqqqq", "",
+		fid, request_mask,
+		to.mode, to.uid, to.gid, to.size,
+		to.atime_sec, to.atime_nsec, to.mtime_sec, to.mtime_nsec);
+}
+
 int Clunk9(uint32_t fid) {
 	enum {Tclunk = 120}; // size[4] Tclunk tag[2] fid[4]
 	enum {Rclunk = 121}; // size[4] Rclunk tag[2]
