@@ -41,6 +41,10 @@ Therefore we need this mapping:
 
 #define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1));
 
+// rename some FCB fields for our own use
+#define fcb9FID fcbSBlk // type is unsigned short
+#define fcb9Link fcbFlPos
+
 enum {
 	// FSID is used by the ExtFS hook to version volume and drive structures,
 	// so if the dispatch mechanism changes, this constant must change:
@@ -89,6 +93,7 @@ static int32_t qid2cnid(struct Qid9 qid);
 static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
+static void pathSplit(const unsigned char *path, unsigned char *dir, unsigned char *name);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
 static bool visName(const char *name);
@@ -129,7 +134,7 @@ static struct longdqe dqe = {
 	.dispatcher = &fsCallDesc,
 };
 static struct VCB vcb = {
-	.vcbAtrb = 0x8080, // hw and sw locked
+	.vcbAtrb = 0x0000, // no locks
 	.vcbSigWord = kHFSSigWord,
 	.vcbNmFls = 1234,
 	.vcbNmRtDirs = 6, // "number of directories in root" -- why?
@@ -497,50 +502,35 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	return noErr;
 }
 
-// TODO: search the FCB array for open files on this volume, set bit 6
 // TODO: when given a WD refnum, return directory valence as the file count
 // TODO: fake used/free alloc blocks (there are limits depending on H bit)
 static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
-	if (pb->ioVRefNum < -256) {
-		panic("GetVolInfo on a WD: not implemented");
+	enum {MYFID = 9};
+
+	// Allow working directories to pretend to be disks
+	int32_t cnid = 2;
+	if (pb->ioVRefNum <= WDHI) {
+		struct WDCBRec *wdcb = findWD(pb->ioVRefNum);
+		if (wdcb) cnid = wdcb->wdDirID;
 	}
 
-	pb->ioVCrDate = vcb.vcbCrDate;
-	pb->ioVLsMod = vcb.vcbLsMod; // old field ioVLsBkUp is DIFFERENT
-	pb->ioVAtrb = vcb.vcbAtrb;
-	pb->ioVNmFls = vcb.vcbNmFls;
-	pb->ioVBitMap = vcb.vcbVBMSt; // old field ioVDirSt is DIFFERENT
-	pb->ioAllocPtr = vcb.vcbAllocPtr; // old field ioVBlLn is DIFFERENT
-	pb->ioVNmAlBlks = vcb.vcbNmAlBlks;
-	pb->ioVAlBlkSiz = vcb.vcbAlBlkSiz;
-	pb->ioVClpSiz = vcb.vcbClpSiz;
-	pb->ioAlBlSt = vcb.vcbAlBlSt;
-	pb->ioVNxtCNID = vcb.vcbNxtCNID; // old ioVNxtFNum field is equivalent
-	pb->ioVFrBlk = vcb.vcbFreeBks;
+	if (cnid != 2) lprintf("GetVolInfo on subdir\n");
 
-	if ((char *)LMGetDefVCBPtr() == (char *)&vcb)
-		pb->ioVAtrb |= 1<<5;
+	// Count contained files
+	pb->ioVNmFls = 0;
 
-	if (pb->ioVRefNum == 0) {
-		pb->ioVRefNum = vcb.vcbVRefNum;
-	}
+	int err = browse(MYFID, cnid, "");
+	if (err < 0) return err;
 
-	if (pb->ioNamePtr != NULL) {
-		pstrcpy(pb->ioNamePtr, vcb.vcbVN);
-	}
+	if (Lopen9(MYFID, O_RDONLY|O_DIRECTORY, NULL, NULL)) return noErr;
 
-	if (pb->ioTrap & 0x200) { // ***H***GetVolInfo
-		pb->ioVRefNum = vcb.vcbVRefNum; // return irrespective of original val
-		pb->ioVSigWord = vcb.vcbSigWord;
-		pb->ioVDrvInfo = vcb.vcbDrvNum;
-		pb->ioVDRefNum = vcb.vcbDRefNum;
-		pb->ioVFSID = vcb.vcbFSID;
-		pb->ioVBkUp = vcb.vcbVolBkUp;
-		pb->ioVSeqNum = vcb.vcbVSeqNum;
-		pb->ioVWrCnt = vcb.vcbWrCnt;
-		pb->ioVFilCnt = vcb.vcbFilCnt;
-		pb->ioVDirCnt = vcb.vcbDirCnt;
-		memcpy(&pb->ioVFndrInfo, &vcb.vcbFndrInfo, 32);
+	char scratch[4096];
+	InitReaddir9(MYFID, scratch, sizeof scratch);
+
+	char type;
+	char childname[512];
+	while (Readdir9(scratch, NULL, &type, childname) == 0) {
+		if (visName(childname) && type != 4 /*not folder*/) pb->ioVNmFls++;
 	}
 
 	return noErr;
@@ -689,7 +679,6 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	if (Getattr9(MYFID, STAT_ALL, &stat)) return permErr;
 
 	pb->ioDirID = cnid; // alias ioDrDirID
-	pb->ioFRefNum = 0;
 
 	// This is outside the GetFileInfo block: anticipate catastrophe
 	if (longform) {
@@ -701,7 +690,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 
 		int n=0;
 		char childname[512];
-		Lopen9(MYFID, O_RDONLY, NULL, NULL); // iterate
+		Lopen9(MYFID, O_RDONLY|O_DIRECTORY, NULL, NULL); // iterate
 		char scratch[4096];
 		InitReaddir9(MYFID, scratch, sizeof scratch);
 		while (Readdir9(scratch, NULL, NULL, childname) == 0) {
@@ -709,6 +698,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 			n++;
 		}
 
+		pb->ioFRefNum = 0;
 		pb->ioFlAttrib = 0x10;
 		pb->ioFlFndrInfo = (struct FInfo){}; // alias ioDrUsrWds
 		pb->ioFlStBlk = n; // alias ioDrNmFls
@@ -727,6 +717,18 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		Walk9(MYFID, 19, 2, (const char *[]){"..", rname}, &oksteps, NULL);
 		if (oksteps == 2) {
 			Getattr9(19, STAT_SIZE, &rstat);
+		}
+
+		// Check whether the file is open
+		pb->ioFRefNum = 0;
+		short openFork = 0;
+		FCBRec *openFCB;
+		while (UnivIndexFCB(&vcb, &openFork, &openFCB) == noErr) {
+			if (openFCB->fcbFlNm == cnid) {
+				lprintf("yes! a doubly open file!\n");
+				pb->ioFRefNum = openFork;
+				break;
+			}
 		}
 
 		pb->ioFlAttrib = 0;
@@ -833,7 +835,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	if (!pb->ioNamePtr) return dirNFErr;
 
 	// The target doesn't (yet) exist
-	// TODO this is messy
+	// TODO this is messy -- replace with pathSplit
 	int leafstart = pb->ioNamePtr[0];
 	int leaflen = 0;
 	if (leafstart && pb->ioNamePtr[leafstart] == ':') leafstart--;
@@ -861,13 +863,13 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	return fnfErr;
 }
 
-static OSErr fsOpen(struct HFileParam *pb) {
+static OSErr fsOpen(struct HIOParam *pb) {
 // 	memcpy(LMGetCurrentA5() + 0x278, "CB", 2); // Force early MacsBug, TODO absolutely will crash
 
 	// OpenSync is allowed to move memory
  	if ((pb->ioTrap & 0x200) == 0) HTallocate();
 
-	pb->ioFRefNum = 0;
+	pb->ioRefNum = 0;
 
 	bool rfork = (pb->ioTrap & 0xff) == 0x0a;
 
@@ -882,33 +884,52 @@ static OSErr fsOpen(struct HFileParam *pb) {
 	cnid = browse(fid, cnid, pb->ioNamePtr);
 	if (cnid < 0) return cnid;
 
-	if (rfork) {
-		char rname[512];
-		sprintf(rname, "%s.rsrc", getDBName(cnid));
-
-		uint16_t oksteps = 0;
-		Walk9(fid, fid, 2, (const char *[]){"..", rname}, &oksteps, NULL);
-		if (oksteps != 2) return fnfErr;
-	}
-
 	struct Stat9 stat;
 	if (Getattr9(fid, 0, &stat)) return permErr;
 	if (stat.qid.type & 0x80) return fnfErr; // better not be a folder!
 
-	if (Lopen9(fid, O_RDONLY, NULL, NULL))
-		return permErr;
+	if (rfork) {
+		char rname[512];
+		sprintf(rname, "%s.rsrc", getDBName(cnid));
+
+		lprintf("CREATING RSRC %s\n", rname);
+
+		// Make sure the sidecar file exists
+		Walk9(fid, 10, 1, (const char *[]){".."}, NULL, NULL); // parent dir
+		if (Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, rname, NULL, NULL) == 0) lprintf("created otherwise missing sidecar file!");
+		Clunk9(10);
+
+		if (Walk9(fid, fid, 2, (const char *[]){"..", rname}, NULL, NULL)) return ioErr;
+		if (Getattr9(fid, 0, &stat)) return permErr;
+		if (stat.qid.type & 0x80) return fnfErr; // again, better not be a folder!
+	}
+
+	// Open with the best permissions we can get
+	if (pb->ioPermssn == fsRdPerm) {
+		if (Lopen9(fid, O_RDONLY, NULL, NULL)) {
+			return permErr;
+		}
+	} else {
+		if (Lopen9(fid, O_RDWR, NULL, NULL)) {
+			lprintf("did sadly fail to get write permission\n");
+			pb->ioPermssn = fsRdPerm;
+			if (Lopen9(fid, O_RDONLY, NULL, NULL)) {
+				return permErr;
+			}
+		}
+	}
 
 	*fcb = (struct FCBRec){
 		.fcbFlNm = cnid,
-		.fcbFlags = (rfork ? 2 : 0) | 0x20, // locked ?resource
+		.fcbFlags = (rfork ? 2 : 0) | (pb->ioPermssn == fsRdPerm ? 0 : 1),
 		.fcbTypByt = 0, // MFS only
-		.fcbSBlk = 99, // free for our use
+		.fcb9FID = fid,
+		.fcb9Link = refn,
 		.fcbEOF = stat.size,
 		.fcbPLen = (stat.size + 511) & -512,
 		.fcbCrPs = 0,
 		.fcbVPtr = &vcb,
 		.fcbBfAdr = NULL, // reserved
-		.fcbFlPos = 0, // free for own use
 		.fcbClmpSize = 512,
 		.fcbBTCBPtr = NULL, // reserved
 		.fcbExtRec = {}, // own use
@@ -919,7 +940,21 @@ static OSErr fsOpen(struct HFileParam *pb) {
 
 	mr31name(fcb->fcbCName, getDBName(cnid));
 
-	pb->ioFRefNum = refn;
+	// Arrange FCBs of the same fork into a circular linked list
+	// Do a linear search for any other same-fork FCB
+	short fellowFile = 0;
+	FCBRec *fellowFCB;
+	while (UnivIndexFCB(&vcb, &fellowFile, &fellowFCB) == noErr) {
+		if (fellowFile == refn) continue; // can't be literally the same FCB
+		if (fellowFCB->fcbFlNm != fcb->fcbFlNm) continue; // must be same CNID
+		if ((fellowFCB->fcbFlags & 2) != (fcb->fcbFlags & 2)) continue; // must be same data/rsrc
+
+		fcb->fcb9Link = fellowFCB->fcb9Link;
+		fellowFCB->fcb9Link = refn;
+		break;
+	}
+
+	pb->ioRefNum = refn;
 
 	return noErr;
 }
@@ -934,29 +969,80 @@ static OSErr fsGetEOF(struct IOParam *pb) {
 	return noErr;
 }
 
+static OSErr fsSetEOF(struct IOParam *pb) {
+	struct FCBRec *fcb;
+	if (UnivResolveFCB(pb->ioRefNum, &fcb))
+		return paramErr;
+
+	long len = (long)pb->ioMisc;
+
+	int err = Setattr9(fcb->fcb9FID, SET_SIZE, (struct Stat9){.size=len});
+
+	if (err) panic("seteof error");
+
+	// Tell all the other FCBs about this new length
+	short fellowFile = pb->ioRefNum;
+	FCBRec *fellowFCB;
+	for (;;) {
+		if (UnivResolveFCB(fellowFile, &fellowFCB)) panic("FCB linked list broken (SE)");
+
+		fellowFCB->fcbEOF = len;
+		if (fellowFCB->fcbCrPs > len) fellowFCB->fcbCrPs = len;
+
+		fellowFile = fellowFCB->fcb9Link;
+		if (fellowFile == pb->ioRefNum) break;
+	}
+
+	return noErr;
+}
+
 static OSErr fsClose(struct IOParam *pb) {
 	struct FCBRec *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
-	Clunk9(32 + pb->ioRefNum);
+	// Remove this FCB from the linked list of this fork
+	short fellowFile = pb->ioRefNum;
+	FCBRec *fellowFCB;
+	for (;;) {
+		if (UnivResolveFCB(fellowFile, &fellowFCB) != noErr) panic("FCB linked list broken (Close)");
+
+		if (fellowFCB->fcb9Link == pb->ioRefNum) {
+			fellowFCB->fcb9Link = fcb->fcb9Link;
+			break;
+		}
+		fellowFile = fellowFCB->fcb9Link;
+	}
+
+	Clunk9(fcb->fcb9FID);
 	fcb->fcbFlNm = 0;
 
 	return noErr;
 }
 
-static OSErr fsRead(struct IOParam *pb) {
-	if ((pb->ioTrap & 0xa8ff) == (_SetFPos & 0xa8ff))
-		pb->ioReqCount = 0;
+static OSErr fsReadWrite(struct IOParam *pb) {
+	// Are we being asked to touch non-DMA-able memory?
+	char stackbuf[512];
+	bool usestackbuf = ((uint32_t)pb->ioBuffer >> 16) >= *(uint16_t *)0x2ae; // ROMBase
 
-	if (pb->ioReqCount < 0) return paramErr;
+	pb->ioActCount = 0;
 
 	struct FCBRec *fcb;
 	if (UnivResolveFCB(pb->ioRefNum, &fcb))
 		return paramErr;
 
-	char seek = pb->ioPosMode & 3;
+	if ((pb->ioTrap & 0xff) == (_GetFPos & 0xff)) {
+		pb->ioPosMode = 0;
+		pb->ioReqCount = 0;
+	} else if ((pb->ioTrap & 0xff) == (_SetFPos & 0xff)) {
+		pb->ioReqCount = 0;
+	}
 
+	bool iswrite = ((pb->ioTrap & 0xff) == (_Write & 0xff));
+
+	if (iswrite && (fcb->fcbFlags & 1) == 0) return wrPermErr;
+
+	char seek = pb->ioPosMode & 3;
 	if (seek == fsAtMark) {
 		// leave fcb->fcbCrPs alone
 	} else if (seek == fsFromStart) {
@@ -967,8 +1053,7 @@ static OSErr fsRead(struct IOParam *pb) {
 		fcb->fcbCrPs = fcb->fcbCrPs + pb->ioPosOffset;
 	}
 
-	pb->ioActCount = 0;
-
+	// Cannot position before start of file
 	if (fcb->fcbCrPs < 0) {
 		fcb->fcbCrPs = 0;
 		return posErr;
@@ -978,18 +1063,127 @@ static OSErr fsRead(struct IOParam *pb) {
 	while (pb->ioActCount < pb->ioReqCount) {
 		uint32_t want = pb->ioReqCount - pb->ioActCount;
 		if (want > Max9) want = Max9;
+		if (usestackbuf && want > sizeof stackbuf) want = sizeof stackbuf;
 
 		uint32_t got = 0;
-		int err = Read9(32 + pb->ioRefNum, pb->ioBuffer + pb->ioActCount, fcb->fcbCrPs, want, &got);
+		int err;
 
-		if (err) return ioErr;
+		if (iswrite) {
+			char *buf = pb->ioBuffer + pb->ioActCount;
+			if (usestackbuf) {
+				memcpy(stackbuf, buf, want);
+				buf = stackbuf;
+			}
+
+			err = Write9(fcb->fcb9FID, buf, fcb->fcbCrPs, want, &got);
+		} else {
+			char *buf = pb->ioBuffer + pb->ioActCount;
+			if (usestackbuf) {
+				buf = stackbuf; // discard: editing ROM is silently ignored
+			}
+
+			err = Read9(fcb->fcb9FID, buf, fcb->fcbCrPs, want, &got);
+		}
 
 		pb->ioActCount += got;
 		fcb->fcbCrPs += got;
 		pb->ioPosOffset = fcb->fcbCrPs;
 
+		if (err) panic("io error... no idea what to do!");
+
 		if (got < want) break;
 	}
+
+	// Is the fork (now) longer than we thought?
+	if (pb->ioPosOffset > fcb->fcbEOF) {
+		if (pb->ioActCount == 0) {
+			// Just a SetFPos, doesn't prove the file is longer
+			fcb->fcbCrPs = fcb->fcbEOF;
+			pb->ioPosOffset = fcb->fcbEOF;
+			return eofErr;
+		} else {
+			// Yes, a read/write succeeded beyond EOF, so the file is longer
+			// Tell all the other FCBs about this
+			lprintf("Lengthening fork to %d:", pb->ioPosOffset);
+			short fellowFile = pb->ioRefNum;
+			FCBRec *fellowFCB;
+			for (;;) {
+				lprintf(" refnum-%d", fellowFile);
+
+				if (UnivResolveFCB(fellowFile, &fellowFCB)) panic("FCB linked list broken (RW)");
+
+				fellowFCB->fcbEOF = pb->ioPosOffset;
+
+				fellowFile = fellowFCB->fcb9Link;
+				if (fellowFile == pb->ioRefNum) break;
+			}
+			lprintf("\n");
+		}
+	}
+
+	if (pb->ioActCount != pb->ioReqCount) {
+		if (iswrite) {
+			return ioErr; // this shouldn't really happen
+		} else {
+			return eofErr;
+		}
+	}
+
+	return noErr;
+}
+
+static OSErr fsCreate(struct IOParam *pb) {
+	int err = browse(10, pbDirID(pb), pb->ioNamePtr);
+
+	if (err > 0) { // actually found a file
+		return dupFNErr;
+	} else if (err != fnfErr) {
+		return err;
+	}
+
+	unsigned char dir[256], name[256];
+	pathSplit(pb->ioNamePtr, dir, name);
+
+	if (name[0] == 0) return bdNamErr;
+
+	if (browse(10, pbDirID(pb), dir) < 0) return dirNFErr;
+
+	char uniname[1024];
+	int n=0;
+	for (int i=0; i<name[0]; i++) {
+		long bytes = utf8char(name[i+1]);
+		if (bytes == '/') bytes = ':';
+		do {
+			uniname[n++] = bytes;
+			bytes >>= 8;
+		} while (bytes);
+	}
+	uniname[n++] = 0;
+
+	if ((pb->ioTrap & 0xff) == (_Create & 0xff)) {
+		if (Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, uniname, NULL, NULL) || Clunk9(10)) return ioErr;
+	} else {
+		if (Mkdir9(10, 0777, 0, uniname, NULL) || Clunk9(10)) return ioErr;
+	}
+
+	return noErr;
+}
+
+static OSErr fsDelete(struct IOParam *pb) {
+	int cnid = browse(10, pbDirID(pb), pb->ioNamePtr);
+
+	if (cnid < 0) return cnid;
+
+	// Do not allow removal of open files
+	short openFork = 0;
+	FCBRec *openFCB;
+	while (UnivIndexFCB(&vcb, &openFork, &openFCB) == noErr) {
+		if (openFCB->fcbFlNm == cnid) {
+			return fBsyErr;
+		}
+	}
+
+	if (Remove9(10)) return fBsyErr; // assume it was a full directory
 
 	return noErr;
 }
@@ -1398,6 +1592,22 @@ static struct VCB *findVol(short num) {
 	return NULL;
 }
 
+static void pathSplit(const unsigned char *path, unsigned char *dir, unsigned char *name) {
+	int dirlen = path[0], namelen = 0;
+
+	if (path[dirlen] == ':') dirlen--;
+
+	while (dirlen && path[dirlen] != ':') {
+		dirlen--;
+		namelen++;
+	}
+
+	dir[0] = dirlen;
+	memcpy(dir+1, path+1, dirlen);
+	name[0] = namelen;
+	memcpy(name+1, path+1+dirlen, namelen);
+}
+
 // The "standard way":
 // 1. ioNamePtr: absolute path with correct volume name? Return 'p'.
 // 2. ioVRefNum: correct volume/drive/WD? See determineNum for return values.
@@ -1554,40 +1764,40 @@ static struct handler fsHandler(unsigned short selector) {
 	switch (selector & 0xf0ff) {
 	case kFSMOpen: return (struct handler){fsOpen};
 	case kFSMClose: return (struct handler){fsClose};
-	case kFSMRead: return (struct handler){fsRead};
-	case kFSMWrite: return (struct handler){NULL, wPrErr};
+	case kFSMRead: return (struct handler){fsReadWrite};
+	case kFSMWrite: return (struct handler){fsReadWrite};
 	case kFSMGetVolInfo: return (struct handler){fsGetVolInfo};
-	case kFSMCreate: return (struct handler){NULL, wPrErr};
-	case kFSMDelete: return (struct handler){NULL, wPrErr};
+	case kFSMCreate: return (struct handler){fsCreate};
+	case kFSMDelete: return (struct handler){fsDelete};
 	case kFSMOpenRF: return (struct handler){fsOpen};
 	case kFSMRename: return (struct handler){NULL, wPrErr};
 	case kFSMGetFileInfo: return (struct handler){fsGetFileInfo};
-	case kFSMSetFileInfo: return (struct handler){NULL, wPrErr};
+	case kFSMSetFileInfo: return (struct handler){noErr};
 	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
 	case kFSMMountVol: return (struct handler){fsMountVol};
 	case kFSMAllocate: return (struct handler){NULL, wPrErr};
 	case kFSMGetEOF: return (struct handler){fsGetEOF};
-	case kFSMSetEOF: return (struct handler){NULL, wPrErr};
+	case kFSMSetEOF: return (struct handler){fsSetEOF};
 	case kFSMFlushVol: return (struct handler){NULL, noErr};
 	case kFSMGetVol: return (struct handler){NULL, extFSErr};
 	case kFSMSetVol: return (struct handler){fsSetVol};
 	case kFSMEject: return (struct handler){NULL, extFSErr};
-	case kFSMGetFPos: return (struct handler){NULL, extFSErr};
+	case kFSMGetFPos: return (struct handler){fsReadWrite};
 	case kFSMOffline: return (struct handler){NULL, extFSErr};
 	case kFSMSetFilLock: return (struct handler){NULL, extFSErr};
 	case kFSMRstFilLock: return (struct handler){NULL, extFSErr};
 	case kFSMSetFilType: return (struct handler){NULL, extFSErr};
-	case kFSMSetFPos: return (struct handler){fsRead};
+	case kFSMSetFPos: return (struct handler){fsReadWrite};
 	case kFSMFlushFile: return (struct handler){NULL, wPrErr};
 	case kFSMOpenWD: return (struct handler){fsOpenWD};
 	case kFSMCloseWD: return (struct handler){NULL, extFSErr};
 	case kFSMCatMove: return (struct handler){NULL, wPrErr};
-	case kFSMDirCreate: return (struct handler){NULL, wPrErr};
+	case kFSMDirCreate: return (struct handler){fsCreate};
 	case kFSMGetWDInfo: return (struct handler){NULL, noErr};
 	case kFSMGetFCBInfo: return (struct handler){NULL, noErr};
 	case kFSMGetCatInfo: return (struct handler){fsGetFileInfo};
-	case kFSMSetCatInfo: return (struct handler){NULL, wPrErr};
-	case kFSMSetVolInfo: return (struct handler){NULL, wPrErr};
+	case kFSMSetCatInfo: return (struct handler){NULL, noErr};
+	case kFSMSetVolInfo: return (struct handler){NULL, noErr};
 	case kFSMLockRng: return (struct handler){NULL, extFSErr};
 	case kFSMUnlockRng: return (struct handler){NULL, extFSErr};
 	case kFSMXGetVolInfo: return (struct handler){NULL, extFSErr};
