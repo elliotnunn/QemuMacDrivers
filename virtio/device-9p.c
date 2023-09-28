@@ -1236,6 +1236,12 @@ static OSErr fsOpenWD(struct WDParam *pb) {
 	return tmwdoErr;
 }
 
+static OSErr fsCloseWD(struct WDParam *pb) {
+	struct WDCBRec *rec = findWD(pb->ioVRefNum);
+	if (rec) memset(rec, 0, sizeof *rec);
+	return noErr;
+}
+
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) {
 	TIMEFUNC(browseTimer);
 
@@ -1790,7 +1796,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMSetFPos: return (struct handler){fsReadWrite};
 	case kFSMFlushFile: return (struct handler){NULL, wPrErr};
 	case kFSMOpenWD: return (struct handler){fsOpenWD};
-	case kFSMCloseWD: return (struct handler){NULL, extFSErr};
+	case kFSMCloseWD: return (struct handler){fsCloseWD};
 	case kFSMCatMove: return (struct handler){NULL, wPrErr};
 	case kFSMDirCreate: return (struct handler){fsCreate};
 	case kFSMGetWDInfo: return (struct handler){NULL, noErr};
