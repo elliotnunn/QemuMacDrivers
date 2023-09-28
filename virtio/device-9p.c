@@ -1794,7 +1794,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMRstFilLock: return (struct handler){NULL, extFSErr};
 	case kFSMSetFilType: return (struct handler){NULL, extFSErr};
 	case kFSMSetFPos: return (struct handler){fsReadWrite};
-	case kFSMFlushFile: return (struct handler){NULL, wPrErr};
+	case kFSMFlushFile: return (struct handler){NULL, noErr};
 	case kFSMOpenWD: return (struct handler){fsOpenWD};
 	case kFSMCloseWD: return (struct handler){fsCloseWD};
 	case kFSMCatMove: return (struct handler){NULL, wPrErr};
@@ -1858,7 +1858,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMGetForkSize: return (struct handler){NULL, extFSErr};
 	case kFSMSetForkSize: return (struct handler){NULL, extFSErr};
 	case kFSMAllocateFork: return (struct handler){NULL, extFSErr};
-	case kFSMFlushFork: return (struct handler){NULL, extFSErr};
+	case kFSMFlushFork: return (struct handler){NULL, noErr};
 	case kFSMCloseFork: return (struct handler){NULL, extFSErr};
 	case kFSMGetForkCBInfo: return (struct handler){NULL, extFSErr};
 	case kFSMCloseIterator: return (struct handler){NULL, extFSErr};
