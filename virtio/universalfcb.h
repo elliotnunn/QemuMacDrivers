@@ -1,5 +1,5 @@
 // File System Manager functions (UT_*) to access the FCB table may be:
-// unavailable and unnecessary (-7.1)
+// unavailable and unnecessary (-7.1, or System file hasn't loaded yet)
 // available but unnecessary (7.5-8.6)
 // available and necessary (9.0-)
 // And the accessors weren't in InterfaceLib until 8.5!
