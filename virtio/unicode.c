@@ -204,7 +204,7 @@ long utf8char(unsigned char roman) {
 	if (roman < 128) {
 		return roman;
 	} else {
-		table[roman-128];
+		return table[roman-128];
 	}
 }
 
