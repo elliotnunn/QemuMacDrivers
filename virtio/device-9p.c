@@ -501,7 +501,6 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	return noErr;
 }
 
-// TODO: when given a WD refnum, return directory valence as the file count
 // TODO: fake used/free alloc blocks (there are limits depending on H bit)
 static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
 	enum {MYFID = 9};
@@ -830,25 +829,11 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 		return noErr;
 	}
 
-	if (!pb->ioNamePtr) return dirNFErr;
-
 	// The target doesn't (yet) exist
-	// TODO this is messy -- replace with pathSplit
-	int leafstart = pb->ioNamePtr[0];
-	int leaflen = 0;
-	if (leafstart && pb->ioNamePtr[leafstart] == ':') leafstart--;
-	while (leafstart && pb->ioNamePtr[leafstart] != ':') {
-		leafstart--;
-		leaflen++;
-	}
-
-	if (leaflen == 0) return dirNFErr;
-
 	unsigned char path[256], leaf[256];
-	path[0] = leafstart;
-	memcpy(path+1, pb->ioNamePtr+1, leafstart);
-	leaf[0] = leaflen;
-	memcpy(leaf+1, pb->ioNamePtr+1+leafstart, leaflen);
+	if (pb->ioNamePtr == NULL) return dirNFErr;
+	pathSplit(pb->ioNamePtr, path, leaf);
+	if (leaf[0] == 0) return dirNFErr;
 
 	cnid = pbDirID(pb);
 	cnid = browse(10, cnid, path);
