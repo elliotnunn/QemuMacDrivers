@@ -88,7 +88,6 @@ static bool appendPath(const unsigned char *path);
 static bool isAbs(const unsigned char *path);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
-static int walkToCNID(int32_t cnid, uint32_t fid);
 static int32_t qid2cnid(struct Qid9 qid);
 static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
@@ -617,7 +616,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		if (cnid != lastCNID || idx <= lastIdx) {
 			lastCNID = 0;
 			lastIdx = 0;
-			if (walkToCNID(cnid, LISTFID) < 0) return fnfErr;
+			if (browse(LISTFID, cnid, "") < 0) return fnfErr;
 			if (Lopen9(LISTFID, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
 			InitReaddir9(LISTFID, scratch, sizeof scratch);
 			lastCNID = cnid;
@@ -651,8 +650,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		setDB(childcnid, cnid, name);
 		cnid = childcnid;
 
-		walkToCNID(cnid, MYFID);
-
+		browse(MYFID, cnid, "");
 	} else if (idx == 0) {
 		lprintf("GCI name mode\n");
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
@@ -1579,33 +1577,6 @@ static struct WDCBRec *findWD(short refnum) {
 	} else {
 		return NULL;
 	}
-}
-
-// If positive, return the "type" field from the qid
-// If negative, an error
-static int walkToCNID(int32_t cnid, uint32_t fid) {
-	char *components[256];
-	char **compptr = &components[256]; // fully descending
-	int compcnt = 0;
-
-	static char blob[2048];
-	char *blobptr = blob; // empty ascending
-
-	static struct Qid9 qids[256];
-
-	while (cnid != 2) {
-		*--compptr = blobptr;
-		compcnt++;
-		strcpy(blobptr, getDBName(cnid));
-		blobptr += strlen(blobptr)+1;
-
-		cnid = getDBParent(cnid);
-	}
-
-	bool bad = Walk9(ROOTFID, fid, compcnt, (const char **)compptr, NULL/*numok*/, qids);
-	if (bad) return -1;
-
-	return (int)(unsigned char)qids[compcnt-1].type;
 }
 
 // Remember that Qemu lets the qid path change between boots
