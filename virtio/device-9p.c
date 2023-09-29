@@ -1385,14 +1385,6 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 			curDepth = keepDepth;
 		}
 
-		// Put confirmed path components in the database
-		for (int i=progress; i<curDepth; i++) {
-			// If this was a CNID component, then we know its details well
-			if (expectCNID[i] == 0) {
-				setDB(qid2cnid(qids[i]), qid2cnid(qids[i-1]), pathComps[i]);
-			}
-		}
-
 		// There has been a lookup failure...
 		// Do an exhaustive directory search to resolve it
 		if (curDepth < tryDepth) {
@@ -1439,12 +1431,40 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 			tip = fid;
 
 			qids[curDepth] = qid;
-			setDB(qid2cnid(qid), qid2cnid(qids[curDepth-1]), filename);
 
 			curDepth++;
 		}
 
 		progress = curDepth;
+	}
+
+	// We are about to return a CNID to the caller, which MUST be connected
+	// to the root by the hash-table CNID database, otherwise attempts to use it
+	// will fnfErr.
+
+	// Build a breadcrumb trail of filenames and QIDs, with the dot-dots removed,
+	// so we can clearly see the parent-child relationships:
+	const char *nametrail[100];
+	struct Qid9 qidtrail[100];
+	int ntrail = 0;
+	for (int i=0; i<pathCompCnt; i++) {
+		if (!strcmp(pathComps[i], "..")) {
+			ntrail--;
+		} else {
+			nametrail[ntrail] = pathComps[i];
+			qidtrail[ntrail] = qids[i];
+			ntrail++;
+		}
+
+		const char *theName = nametrail[ntrail-1];
+		int32_t theCNID = qid2cnid(qidtrail[ntrail-1]);
+		int32_t parentCNID = (ntrail == 1) ? 2 : qid2cnid(qidtrail[ntrail-2]); // "2" means root
+
+		// If this was a CNID component, then it is already in the database,
+		// and possibly with more correct case than we have here
+		if (expectCNID[i] == 0) {
+			setDB(theCNID, parentCNID, theName);
+		}
 	}
 
 	return qid2cnid(qids[pathCompCnt-1]);
