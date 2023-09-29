@@ -1132,7 +1132,7 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 	return noErr;
 }
 
-static OSErr fsCreate(struct IOParam *pb) {
+static OSErr fsCreate(struct HFileParam *pb) {
 	int err = browse(10, pbDirID(pb), pb->ioNamePtr);
 
 	if (err > 0) { // actually found a file
@@ -1146,7 +1146,9 @@ static OSErr fsCreate(struct IOParam *pb) {
 
 	if (name[0] == 0) return bdNamErr;
 
-	if (browse(10, pbDirID(pb), dir) < 0) return dirNFErr;
+	int32_t parentCNID = browse(10, pbDirID(pb), dir);
+
+	if (parentCNID < 0) return dirNFErr;
 
 	char uniname[1024];
 	int n=0;
@@ -1163,7 +1165,13 @@ static OSErr fsCreate(struct IOParam *pb) {
 	if ((pb->ioTrap & 0xff) == (_Create & 0xff)) {
 		if (Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, uniname, NULL, NULL) || Clunk9(10)) return ioErr;
 	} else {
-		if (Mkdir9(10, 0777, 0, uniname, NULL) || Clunk9(10)) return ioErr;
+		struct Qid9 qid;
+		if (Mkdir9(10, 0777, 0, uniname, &qid) || Clunk9(10)) return ioErr;
+
+		// DirCreate returns DirID, and therefore we must put it in the database
+		int32_t cnid = qid2cnid(qid);
+		setDB(cnid, parentCNID, uniname);
+		pb->ioDirID = cnid;
 	}
 
 	return noErr;
