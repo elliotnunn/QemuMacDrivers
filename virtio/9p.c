@@ -191,6 +191,14 @@ int Remove9(uint32_t fid) {
 		fid);
 }
 
+int Renameat9(uint32_t olddirfid, const char *oldname, uint32_t newdirfid, const char *newname) {
+	enum {Trenameat = 74}; // size[4] Trenameat tag[2] olddirfid[4] oldname[s] newdirfid[4] newname[s]
+	enum {Rrenameat = 75}; // size[4] Rrenameat tag[2]
+
+	return transact(Trenameat, "dsds", "",
+		olddirfid, oldname, newdirfid, newname);
+}
+
 int Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid) {
 	enum {Tmkdir = 72}; // size[4] Tmkdir tag[2] dfid[4] name[s] mode[4] gid[4]
 	enum {Rmkdir = 73}; // size[4] Rmkdir tag[2] qid[13]

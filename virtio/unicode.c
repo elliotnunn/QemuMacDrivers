@@ -69,6 +69,24 @@ void mr27name(unsigned char *roman, const char *utf8) {
 	}
 }
 
+void utf8name(char *utf8, const unsigned char *roman) {
+	for (int i=0; i<roman[0]; i++) {
+		long bytes = utf8char(roman[i+1]);
+		if (bytes == '/') {
+			bytes = ':';
+		} else if (bytes == ':') {
+			bytes = '/';
+		}
+
+		do {
+			*utf8++ = bytes;
+			bytes >>= 8;
+		} while (bytes);
+	}
+
+	*utf8++ = 0;
+}
+
 long utf8char(unsigned char roman) {
 	const long table[] = {
 		0x0088cc41, // LATIN CAPITAL LETTER A + COMBINING DIAERESIS

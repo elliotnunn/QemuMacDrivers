@@ -213,6 +213,7 @@ int Walk9(uint32_t fid, uint32_t newfid, uint16_t nwname, const char *const *nam
 int Lopen9(uint32_t fid, uint32_t flags, struct Qid9 *retqid, uint32_t *retiounit);
 int Lcreate9(uint32_t fid, uint32_t flags, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid, uint32_t *retiounit);
 int Remove9(uint32_t fid);
+int Renameat9(uint32_t olddirfid, const char *oldname, uint32_t newdirfid, const char *newname);
 int Mkdir9(uint32_t dfid, uint32_t mode, uint32_t gid, const char *name, struct Qid9 *retqid);
 void InitReaddir9(uint32_t fid, void *buf, size_t bufsize);
 int Readdir9(void *buf, struct Qid9 *retqid, char *rettype, char retname[512]);

@@ -1196,6 +1196,62 @@ static OSErr fsDelete(struct IOParam *pb) {
 	return noErr;
 }
 
+// Unlike Unix rename, this is not permitted to overwrite an existing file
+static OSErr fsRename(struct IOParam *pb) {
+	enum {CHILDFID = 10, PARENTFID = 11, JUNKFID = 12};
+	int32_t parentCNID, childCNID;
+
+	// The original file exists
+	childCNID = browse(CHILDFID, pbDirID(pb), pb->ioNamePtr);
+	if (childCNID < 0) return childCNID;
+	parentCNID = getDBParent(childCNID);
+
+	char oldNameU[512], newNameU[512];
+	unsigned char newNameR[256];
+
+	// The old name is already in Unicode, and correct thanks to browse()
+	strcpy(oldNameU, getDBName(childCNID));
+
+	// The new name requires conversion
+	pathSplit(pb->ioMisc, NULL, newNameR); // remove extraneous colons
+	if (newNameR[0] > 31 || newNameR[0] < 1) return bdNamErr;
+	utf8name(newNameU, newNameR);
+
+	// Special case: rename the disk
+	if (childCNID == 2) {
+		if (newNameR[0] > 27) return bdNamErr;
+		pstrcpy(vcb.vcbVN, newNameR);
+		setDB(2, 1, newNameU);
+		return noErr;
+	}
+
+	// Disallow a duplicate-looking filename
+	if (browse(JUNKFID, parentCNID, newNameR) > 0) return dupFNErr;
+
+	// Need a PARENTFID for the Trenameat call
+	Walk9(CHILDFID, PARENTFID, 1, (const char *[]){".."}, NULL, NULL);
+
+	if (Renameat9(PARENTFID, oldNameU, PARENTFID, newNameU)) return ioErr;
+
+	// Commit to the rename, so correct the database
+	setDB(childCNID, parentCNID, newNameU);
+
+	// Then rename the sidecar files, not checking for errors
+	const char *sidecars[] = {"%s.rsrc", "%s.idump", "._%s"};
+	for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
+		char oldSidecar[512], newSidecar[512];
+		sprintf(oldSidecar, sidecars[i], oldNameU);
+		sprintf(newSidecar, sidecars[i], newNameU);
+
+		int err = Renameat9(PARENTFID, oldSidecar, PARENTFID, newSidecar);
+		if (err != 0 && err != ENOENT) {
+			panic("surprising error while renaming sidecar file");
+		}
+	}
+
+	return noErr;
+}
+
 // "Working directories" are a compatibility shim for apps expecting flat disks:
 // a table of fake volume reference numbers that actually refer to directories.
 static OSErr fsOpenWD(struct WDParam *pb) {
@@ -1616,10 +1672,15 @@ static void pathSplit(const unsigned char *path, unsigned char *dir, unsigned ch
 		namelen++;
 	}
 
-	dir[0] = dirlen;
-	memcpy(dir+1, path+1, dirlen);
-	name[0] = namelen;
-	memcpy(name+1, path+1+dirlen, namelen);
+	if (dir) {
+		dir[0] = dirlen;
+		memcpy(dir+1, path+1, dirlen);
+	}
+
+	if (name) {
+		name[0] = namelen;
+		memcpy(name+1, path+1+dirlen, namelen);
+	}
 }
 
 // The "standard way":
@@ -1784,7 +1845,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMCreate: return (struct handler){fsCreate};
 	case kFSMDelete: return (struct handler){fsDelete};
 	case kFSMOpenRF: return (struct handler){fsOpen};
-	case kFSMRename: return (struct handler){NULL, wPrErr};
+	case kFSMRename: return (struct handler){fsRename};
 	case kFSMGetFileInfo: return (struct handler){fsGetFileInfo};
 	case kFSMSetFileInfo: return (struct handler){noErr};
 	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
