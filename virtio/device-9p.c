@@ -1178,7 +1178,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 }
 
 static OSErr fsDelete(struct IOParam *pb) {
-	int cnid = browse(10, pbDirID(pb), pb->ioNamePtr);
+	int32_t cnid = browse(10, pbDirID(pb), pb->ioNamePtr);
 
 	if (cnid < 0) return cnid;
 
