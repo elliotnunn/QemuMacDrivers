@@ -1378,10 +1378,9 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 			Walk9(tip, fid, curDepth-keepDepth, dotDot, NULL, NULL);
 			tip = fid;
 			curDepth = keepDepth;
-		} else if (curDepth > keepDepth) {
-			Walk9(tip, fid, keepDepth-curDepth, (const char **)pathComps+progress, NULL, NULL);
-			// again an unfortunate cast
-			// assume it succeeded...
+		} else if (curDepth < keepDepth) {
+			if (Walk9(tip, fid, keepDepth-curDepth, (const char **)pathComps+progress, NULL, NULL))
+				return fnfErr; // these components worked before... must be a race
 			tip = fid;
 			curDepth = keepDepth;
 		}
