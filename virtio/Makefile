@@ -20,7 +20,7 @@ COMMON_PPC = \
 	panic.o \
 	scc.o \
 
-all: ../builds/qemu_vga.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
+all: ../builds/qemu_vga.ndrv ../builds/virtio-input.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
 
 ../builds/bootstrap.img: ../builds/9p.ndrv ../mk-9p-bootstrapper.py
 	../mk-9p-bootstrapper.py ~/Documents/mac/MacROMan/TestImages/New\ World\ ROM/2003-04-03\ -\ Mac\ OS\ ROM\ 10.2.1.rom $< $@
@@ -29,10 +29,17 @@ all: ../builds/qemu_vga.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
 	cp $@ ../os9test/System\ Folder/Extensions/9p.ndrv || :
 
+../builds/virtio-input.ndrv: device-input.so
+	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
+	cp $@* ../os9test/System\ Folder/Extensions/ || :
+
 ../builds/qemu_vga.ndrv: device-gpu.so
 	${HOME}/Documents/mac/Retro68/PEFTools/MakePEF -o $@ $^
 
 device-gpu.so: device-gpu.o blit.o virgl.o dirtyrectpatch.o gammatables.o ${COMMON_PPC}
+	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
+
+device-input.so: device-input.o ${COMMON_PPC}
 	${CC} ${CFLAGS} -shared -Wl,-bE:ndrv.exp -o $@ $^ ${SYSLIBS}
 
 device-9p.so: device-9p.o 9p.o hashtab.o paramblkprint.o unicode.o universalfcb.o ${COMMON_PPC}
