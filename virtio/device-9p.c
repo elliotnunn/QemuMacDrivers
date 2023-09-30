@@ -1873,7 +1873,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMSetFileInfo: return (struct handler){fsSetFileInfo};
 	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
 	case kFSMMountVol: return (struct handler){fsMountVol};
-	case kFSMAllocate: return (struct handler){NULL, wPrErr};
+	case kFSMAllocate: return (struct handler){NULL, noErr};
 	case kFSMGetEOF: return (struct handler){fsGetEOF};
 	case kFSMSetEOF: return (struct handler){fsSetEOF};
 	case kFSMFlushVol: return (struct handler){NULL, noErr};
@@ -1889,7 +1889,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMFlushFile: return (struct handler){NULL, noErr};
 	case kFSMOpenWD: return (struct handler){fsOpenWD};
 	case kFSMCloseWD: return (struct handler){fsCloseWD};
-	case kFSMCatMove: return (struct handler){NULL, wPrErr};
+	case kFSMCatMove: return (struct handler){NULL, extFSErr};
 	case kFSMDirCreate: return (struct handler){fsCreate};
 	case kFSMGetWDInfo: return (struct handler){NULL, noErr};
 	case kFSMGetFCBInfo: return (struct handler){NULL, noErr};
