@@ -20,6 +20,7 @@ struct event {
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void handleEvent(struct event e);
+void reQueue(int bufnum);
 
 struct event *lpage;
 uint32_t ppage;
@@ -90,44 +91,34 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-	lprintf_enable = 1;
-	lprintf("INPUT DRIVER INIT\n");
-
 	if (!RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		lprintf_enable = 1;
 	}
 
-	lpage = AllocPages(1, &ppage);
-	if (lpage == NULL) panic("no memory dere\n");
+	lprintf("Virtio-input driver starting\n");
 
-	// No need to signal FAILED if cannot communicate with device
-	if (!VInit(&info->deviceEntry)) return paramErr;
+	lpage = AllocPages(1, &ppage);
+	if (lpage == NULL) return openErr;
+
+	if (!VInit(&info->deviceEntry)) return openErr;
 
 	VDriverOK();
 
-	int n = QInit(0, 4096 / sizeof (struct event));
-	lprintf("QInit 0 = %d\n", n);
-//
-// 	if (QInit(1, 4) != 4) panic("QInit 1 fail");
+	int nbuf = QInit(0, 4096 / sizeof (struct event));
+	if (nbuf == 0) {
+		VFail();
+		return openErr;
+	}
 
-	QInterest(0, 1);
-
-	lprintf("sending\n");
-
-	for (int i=0; i<n; i++) {
-		lprintf("adding buf for recv\n");
-		uint32_t physicals[] = {ppage+8*i};
-		uint32_t sizes[] = {8};
-		QSend(0, 0/*send bufs*/, 1/*recv bufs*/, physicals, sizes, (void *)i);
+	QInterest(0, 1); // enable interrupts
+	for (int i=0; i<nbuf; i++) {
+		reQueue(i);
 	}
 	QNotify(0);
 
-	lprintf("survived the send, polling\n");
-
-// 	for (;;) QPoll(0);
+	lprintf("Virtio-input driver started\n");
 
 	return noErr;
-	// VFail();
 }
 
 static void handleEvent(struct event e) {
@@ -205,16 +196,21 @@ static void handleEvent(struct event e) {
 	}
 }
 
+void reQueue(int bufnum) {
+	QSend(0, 0/*n-send*/, 1/*n-recv*/,
+		(uint32_t []){ppage + sizeof (struct event) * bufnum},
+		(uint32_t []){sizeof (struct event)},
+		(void *)bufnum);
+}
+
 void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 	struct event *e = &lpage[(int)tag];
-	lprintf("event type=%d code=%d value=%d\n", e->type, e->code, e->value);
+	lprintf("Virtio-input event type=%d code=%d value=%d\n", e->type, e->code, e->value);
 
 	handleEvent(*e);
 
-	uint32_t physicals[] = {ppage+8*(int)tag};
-	uint32_t sizes[] = {8};
 	QFree(q, buf);
-	QSend(0, 0/*send bufs*/, 1/*recv bufs*/, physicals, sizes, tag);
+	reQueue((int)tag);
 	QNotify(0);
 }
 
