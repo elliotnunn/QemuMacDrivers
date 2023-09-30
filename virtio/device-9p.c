@@ -85,7 +85,6 @@ static OSErr boot(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static bool setPath(int32_t cnid);
 static bool appendRelativePath(const unsigned char *path);
-static bool isAbs(const unsigned char *path);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
 static int32_t qid2cnid(struct Qid9 qid);
@@ -95,6 +94,7 @@ static bool isdir(int32_t cnid);
 static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
+static bool isAbs(const unsigned char *path);
 static void pathRmvFirstComp(const unsigned char *path, unsigned char *shorter);
 static void pathSplit(const unsigned char *path, unsigned char *dir, unsigned char *name);
 static char determineNumStr(void *_pb);
@@ -1558,11 +1558,6 @@ static bool appendRelativePath(const unsigned char *path) {
 	return false;
 }
 
-static bool isAbs(const unsigned char *path) {
-	unsigned char *firstColon = memchr(path+1, ':', path[0]);
-	return (firstColon != NULL && firstColon != path+1);
-}
-
 static int32_t pbDirID(void *_pb) {
 	struct HFileParam *pb = _pb;
 
@@ -1672,6 +1667,11 @@ static struct VCB *findVol(short num) {
 		if (i->vcbVRefNum == num) return i;
 	}
 	return NULL;
+}
+
+static bool isAbs(const unsigned char *path) {
+	unsigned char *firstColon = memchr(path+1, ':', path[0]);
+	return (firstColon != NULL && firstColon != path+1);
 }
 
 static void pathRmvFirstComp(const unsigned char *path, unsigned char *shorter) {
