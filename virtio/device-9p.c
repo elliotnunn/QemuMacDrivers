@@ -84,7 +84,7 @@ static char *mkbb(OSErr (*booter)(void), struct bbnames names);
 static OSErr boot(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static bool setPath(int32_t cnid);
-static bool appendPath(const unsigned char *path);
+static bool appendRelativePath(const unsigned char *path);
 static bool isAbs(const unsigned char *path);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
@@ -95,6 +95,7 @@ static bool isdir(int32_t cnid);
 static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
+static void pathRmvFirstComp(const unsigned char *path, unsigned char *shorter);
 static void pathSplit(const unsigned char *path, unsigned char *dir, unsigned char *name);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
@@ -1291,14 +1292,20 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 
 	if (paspath == NULL) paspath = "";
 
-	if (isAbs(paspath)) {
-		pathCompCnt = 0;
-		pathBlobSize = 0;
+	if (isAbs(paspath) || cnid == 1 /*"parent of root"*/) {
+		// Path is "Macintosh HD:something"
+		// Or a special case: "Macintosh HD" or even ":Macintosh HD:something",
+		// only if cnid == 1, despite this looking like a relative path.
+		// Get this wrong and the Finder can't rename disks.
+		setPath(2); // go to root (zero components)
+		unsigned char relative[256];
+		pathRmvFirstComp(paspath, relative);
+		if (appendRelativePath(relative)) return bdNamErr;
 	} else {
 		if (setPath(cnid)) return dirNFErr;
+		if (appendRelativePath(paspath)) return bdNamErr;
 	}
 
-	if (appendPath(paspath)) return bdNamErr;
 
 	lprintf("Browsing for /");
 	const char *suffix = "/";
@@ -1483,7 +1490,8 @@ static bool setPath(int32_t cnid) {
 // Make a host-friendly array of path components (which can be dot-dot)
 // Returns data in own static storage, invalidated by next call
 // It is okay to append things to the final path component
-static bool appendPath(const unsigned char *path) {
+// We are already guaranteed that the path is relative.
+static bool appendRelativePath(const unsigned char *path) {
 	// Divide path components so each is either:
 	// [^:]*:
 	// [^:]*$
@@ -1491,17 +1499,6 @@ static bool appendPath(const unsigned char *path) {
 
 	const unsigned char *component = path + 1;
 	const unsigned char *limit = path + 1 + path[0];
-
-	// Preprocess path: remove disk name (we know it implicitly)
-	if (isAbs(path)) {
-		while (component[0] != ':') {
-			component++;
-		}
-
-		// Also erase setPath (because this is not relative to a know CNID)
-		pathCompCnt = 0;
-		pathBlobSize = 0;
-	}
 
 	// Preprocess path: remove leading colon (means "relative path" not dot-dot)
 	if (component != limit && component[0] == ':') {
@@ -1655,6 +1652,17 @@ static struct VCB *findVol(short num) {
 		if (i->vcbVRefNum == num) return i;
 	}
 	return NULL;
+}
+
+static void pathRmvFirstComp(const unsigned char *path, unsigned char *shorter) {
+	int strip = 0;
+
+	if (path[0] > 0 && path[1] == ':') strip++; // remove a leading colon if any
+
+	while (path[0] > strip && path[1+strip] != ':') strip++; // remove non-colons
+
+	shorter[0] = path[0] - strip;
+	memcpy(shorter + 1, path + 1 + strip, path[0] - strip);
 }
 
 static void pathSplit(const unsigned char *path, unsigned char *dir, unsigned char *name) {
