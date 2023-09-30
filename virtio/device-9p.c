@@ -90,6 +90,8 @@ static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
 static int32_t qid2cnid(struct Qid9 qid);
 static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType);
+static bool iserr(int32_t cnid);
+static bool isdir(int32_t cnid);
 static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
@@ -616,7 +618,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		if (cnid != lastCNID || idx <= lastIdx) {
 			lastCNID = 0;
 			lastIdx = 0;
-			if (browse(LISTFID, cnid, "") < 0) return fnfErr;
+			if (iserr(browse(LISTFID, cnid, ""))) return fnfErr;
 			if (Lopen9(LISTFID, O_RDONLY|O_DIRECTORY, NULL, NULL)) return permErr;
 			InitReaddir9(LISTFID, scratch, sizeof scratch);
 			lastCNID = cnid;
@@ -655,11 +657,11 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	} else if (idx == 0) {
 		lprintf("GCI name mode\n");
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
-		if (cnid < 0) return cnid;
+		if (iserr(cnid)) return cnid;
 	} else {
 		lprintf("GCI ID mode\n");
 		cnid = browse(MYFID, cnid, "\p");
-		if (cnid < 0) return cnid;
+		if (iserr(cnid)) return cnid;
 	}
 
 	// MYFID and cnid now both valid
@@ -771,10 +773,8 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 		// HSetVol: any directory is fair game,
 		// so check that the path exists and is really a directory
 		int32_t cnid = browse(11, pbDirID(pb), pb->ioNamePtr);
-		if (cnid < 0) return cnid;
-		struct Stat9 stat;
-		if (Getattr9(11, 0, &stat)) return permErr;
-		if ((stat.qid.type & 0x80) == 0) return dirNFErr;
+		if (iserr(cnid)) return cnid;
+		if (!isdir(cnid)) return dirNFErr;
 		Clunk9(11);
 
 		setDefVCBPtr = &vcb;
@@ -816,7 +816,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 
 	int32_t cnid = pbDirID(pb);
 	cnid = browse(10, cnid, pb->ioNamePtr);
-	if (cnid > 0) {
+	if (!iserr(cnid)) {
 		// The target exists
 		if (cnid == 2) {
 			spec->vRefNum = vcb.vcbVRefNum;
@@ -839,7 +839,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 
 	cnid = pbDirID(pb);
 	cnid = browse(10, cnid, path);
-	if (cnid < 0) return dirNFErr; // return cnid;
+	if (iserr(cnid)) return dirNFErr; // return cnid;
 
 	spec->vRefNum = vcb.vcbVRefNum;
 	spec->parID = cnid;
@@ -867,11 +867,11 @@ static OSErr fsOpen(struct HIOParam *pb) {
 
 	int32_t cnid = pbDirID(pb);
 	cnid = browse(fid, cnid, pb->ioNamePtr);
-	if (cnid < 0) return cnid;
+	if (iserr(cnid)) return cnid;
+	if (isdir(cnid)) return fnfErr;
 
 	struct Stat9 stat;
 	if (Getattr9(fid, 0, &stat)) return permErr;
-	if (stat.qid.type & 0x80) return fnfErr; // better not be a folder!
 
 	if (rfork) {
 		char rname[512];
@@ -1120,7 +1120,7 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 static OSErr fsCreate(struct HFileParam *pb) {
 	int err = browse(10, pbDirID(pb), pb->ioNamePtr);
 
-	if (err > 0) { // actually found a file
+	if (!iserr(err)) { // actually found a file
 		return dupFNErr;
 	} else if (err != fnfErr) {
 		return err;
@@ -1133,7 +1133,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 
 	int32_t parentCNID = browse(10, pbDirID(pb), dir);
 
-	if (parentCNID < 0) return dirNFErr;
+	if (iserr(parentCNID)) return dirNFErr;
 
 	char uniname[1024];
 	int n=0;
@@ -1164,8 +1164,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 
 static OSErr fsDelete(struct IOParam *pb) {
 	int32_t cnid = browse(10, pbDirID(pb), pb->ioNamePtr);
-
-	if (cnid < 0) return cnid;
+	if (iserr(cnid)) return cnid;
 
 	// Do not allow removal of open files
 	short openFork = 0;
@@ -1188,7 +1187,7 @@ static OSErr fsRename(struct IOParam *pb) {
 
 	// The original file exists
 	childCNID = browse(CHILDFID, pbDirID(pb), pb->ioNamePtr);
-	if (childCNID < 0) return childCNID;
+	if (iserr(childCNID)) return childCNID;
 	parentCNID = getDBParent(childCNID);
 
 	char oldNameU[512], newNameU[512];
@@ -1211,7 +1210,7 @@ static OSErr fsRename(struct IOParam *pb) {
 	}
 
 	// Disallow a duplicate-looking filename
-	if (browse(JUNKFID, parentCNID, newNameR) > 0) return dupFNErr;
+	if (!iserr(browse(JUNKFID, parentCNID, newNameR))) return dupFNErr;
 
 	// Need a PARENTFID for the Trenameat call
 	Walk9(CHILDFID, PARENTFID, 1, (const char *[]){".."}, NULL, NULL);
@@ -1242,18 +1241,14 @@ static OSErr fsRename(struct IOParam *pb) {
 static OSErr fsOpenWD(struct WDParam *pb) {
 	int32_t cnid = pbDirID(pb);
 	cnid = browse(12, cnid, pb->ioNamePtr);
-	if (cnid < 0) return cnid;
+	if (iserr(cnid)) return cnid;
+	if (!isdir(cnid)) return fnfErr;
 
 	// The root: no need to create a WD, just return the volume's refnum
 	if (cnid == 2) {
 		pb->ioVRefNum = vcb.vcbVRefNum;
 		return noErr;
 	}
-
-	// Ensure it's actually a directory
-	struct Stat9 stat;
-	if (Getattr9(12, STAT_ALL, &stat)) return permErr;
-	if ((stat.qid.type & 0x80) == 0) return dirNFErr;
 
 	// A copy of the desired WDCB (a straight comparison is okay)
 	struct WDCBRec wdcb = {
@@ -1611,6 +1606,14 @@ static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
 		qid.type = 0;
 	}
 	return qid;
+}
+
+static bool iserr(int32_t cnid) {
+	return cnid < 0;
+}
+
+static bool isdir(int32_t cnid) {
+	return (cnid & 0x40000000) == 0;
 }
 
 static void cnidPrint(int32_t cnid) {
