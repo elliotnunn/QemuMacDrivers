@@ -555,7 +555,7 @@ static OSErr fsGetVolParms(struct HIOParam *pb) {
 			| (1<<bTrshOffLine)
 			| (1<<bNoBootBlks)
 			| (1<<bHasExtFSVol)
-			| (1<<bHasFileIDs)
+// 			| (1<<bHasFileIDs) // TODO implement the SwapFiles etc call -- ResEdit uses them anyway
 			| (1<<bLocalWList)
 			,
 		.vMLocalHand = finderwin,
