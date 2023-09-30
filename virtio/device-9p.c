@@ -89,6 +89,7 @@ static bool isAbs(const unsigned char *path);
 static int32_t pbDirID(void *_pb);
 static struct WDCBRec *findWD(short refnum);
 static int32_t qid2cnid(struct Qid9 qid);
+static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType);
 static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
@@ -628,6 +629,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		while (lastIdx < idx) {
 			char type;
 			int err = Readdir9(scratch, &qid, &type, name);
+			qid = qidTypeFix(qid, type);
 
 			if (err) {
 				lastCNID = 0;
@@ -1397,6 +1399,8 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 			char type;
 			char filename[512];
 			while ((err=Readdir9(scratch, &qid, &type, filename)) == 0) {
+				qid = qidTypeFix(qid, type);
+
 				if (wantCNID) {
 					// Check for a number match
 					if (qid2cnid(qid) == wantCNID) {
@@ -1583,17 +1587,30 @@ static struct WDCBRec *findWD(short refnum) {
 	}
 }
 
-// Remember that Qemu lets the qid path change between boots
-// TODO: make folder and file CNIDs different
-// (problem is, the qid type field from Readdir9 is nonsense)
+// Negative CNIDs are reserved for errors, and the 2nd MSB means "not a dir"
+// Warning: the "type" field of a Rreaddir QID is nonsense, causing this
+// function to give a garbage result, so qidTypeFix() it before calling me.
 static int32_t qid2cnid(struct Qid9 qid) {
 	if (qid.path == root.path) return 2;
-	int32_t cnid = 0; // needs to be positive (I reserve negative for error codes)
-	cnid ^= (0x7fffffffULL & qid.path);
-	cnid ^= ((0x3fffffff80000000ULL & qid.path) >> 31);
-	cnid ^= ((0xc000000000000000ULL & qid.path) >> 40); // don't forget the upper two bits
+
+	int32_t cnid = 0;
+	cnid ^= (0x3fffffffULL & qid.path);
+	cnid ^= ((0x0fffffffc0000000ULL & qid.path) >> 30);
+	cnid ^= ((0xf000000000000000ULL & qid.path) >> 40); // don't forget the upper 4 bits
 	if (cnid < 16) cnid += 0x12342454; // low numbers reserved for system
+
+	if ((qid.type & 0x80) == 0) cnid |= 0x40000000;
+
 	return cnid;
+}
+
+static struct Qid9 qidTypeFix(struct Qid9 qid, char linuxType) {
+	if (linuxType == 4) {
+		qid.type = 0x80;
+	} else {
+		qid.type = 0;
+	}
+	return qid;
 }
 
 static void cnidPrint(int32_t cnid) {
