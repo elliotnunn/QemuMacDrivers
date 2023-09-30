@@ -765,6 +765,26 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	return noErr;
 }
 
+// Set creator and type on files only
+// TODO set timestamps, the attributes byte (comes with AppleDouble etc)
+static OSErr fsSetFileInfo(struct HFileInfo *pb) {
+	enum {MYFID=3};
+
+	int32_t cnid = pbDirID(pb);
+	cnid = browse(MYFID, cnid, pb->ioNamePtr);
+	if (cnid < 0) return cnid;
+
+	Walk9(MYFID, MYFID, 1, (const char *[]){".."}, NULL, NULL);
+
+	char iname[512];
+	sprintf(iname, "%s.idump", getDBName(cnid));
+
+	if (!Lcreate9(MYFID, O_WRONLY|O_TRUNC|O_CREAT, 0666, 0, iname, NULL, NULL)) {
+		Write9(MYFID, &pb->ioFlFndrInfo, 0, 8, NULL); // don't care about actual count
+		Clunk9(MYFID);
+	}
+}
+
 static OSErr fsSetVol(struct HFileParam *pb) {
 	struct VCB *setDefVCBPtr;
 	short setDefVRefNum;
@@ -1850,7 +1870,7 @@ static struct handler fsHandler(unsigned short selector) {
 	case kFSMOpenRF: return (struct handler){fsOpen};
 	case kFSMRename: return (struct handler){fsRename};
 	case kFSMGetFileInfo: return (struct handler){fsGetFileInfo};
-	case kFSMSetFileInfo: return (struct handler){noErr};
+	case kFSMSetFileInfo: return (struct handler){fsSetFileInfo};
 	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
 	case kFSMMountVol: return (struct handler){fsMountVol};
 	case kFSMAllocate: return (struct handler){NULL, wPrErr};
