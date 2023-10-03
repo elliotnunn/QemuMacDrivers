@@ -27,7 +27,7 @@ struct event {
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void handleEvent(struct event e);
-static void myFilter(EventRecord *event, Boolean *result);
+static void myGNEFilter(EventRecord *event, Boolean *result);
 static void lateBootHook(void);
 static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, void *actionProc);
 static void reQueue(int bufnum);
@@ -35,11 +35,10 @@ static void reQueue(int bufnum);
 static struct event *lpage;
 static uint32_t ppage;
 static bool patchReady;
-static void *oldFilter;
+static void *oldGNEFilter, *oldTrackControl;
+static ControlRecord **curScroller;
 static long pendingScroll;
 // uint32_t eventPostedTime;
-static void *oldTrackControl;
-static ControlRecord **curScroller;
 
 // Work around a ROM bug:
 // If kDriverIsLoadedUponDiscovery is set, the ROM calls GetDriverDescription
@@ -173,8 +172,13 @@ static void lateBootHook(void) {
 
 	lprintf("Late boot: installing GNEFilter patch\n");
 
-	oldFilter = LMGetGNEFilter();
-	LMSetGNEFilter(NewGetNextEventFilterProc(myFilter));
+	oldGNEFilter = LMGetGNEFilter();
+
+	static RoutineDescriptor descGNEFilter = BUILD_ROUTINE_DESCRIPTOR(
+		uppGetNextEventFilterProcInfo,
+		myGNEFilter);
+
+	LMSetGNEFilter(&descGNEFilter);
 
 	patchReady = true;
 }
@@ -273,7 +277,7 @@ static void handleEvent(struct event e) {
 	}
 }
 
-static void myFilter(EventRecord *event, Boolean *result) {
+static void myGNEFilter(EventRecord *event, Boolean *result) {
 	if (event->what == mouseDown && event->message == 'scrl') {
 		struct WindowRecord *wind = (void *)FrontWindow();
 		unsigned char *name = *wind->titleHandle;
@@ -317,7 +321,7 @@ static void myFilter(EventRecord *event, Boolean *result) {
 		}
 	}
 
-	if (oldFilter) CallGetNextEventFilterProc(oldFilter, event, result);
+	if (oldGNEFilter) CallGetNextEventFilterProc(oldGNEFilter, event, result);
 }
 
 static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, void *actionProc) {
