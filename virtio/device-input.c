@@ -34,6 +34,7 @@ static void reQueue(int bufnum);
 
 static struct event *lpage;
 static uint32_t ppage;
+static bool patchReady;
 static void *oldFilter;
 static long pendingScroll;
 // uint32_t eventPostedTime;
@@ -133,11 +134,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	lprintf("Virtio-input driver started\n");
 
-	lprintf("Installing GNEFilter\n");
-
-	oldFilter = LMGetGNEFilter();
-	LMSetGNEFilter(NewGetNextEventFilterProc(myFilter));
-
 	lprintf("Installing late-boot hook\n");
 
 	Patch68k(
@@ -158,6 +154,29 @@ static OSStatus initialize(DriverInitInfo *info) {
 	);
 
 	return noErr;
+}
+
+static void lateBootHook(void) {
+	lprintf("Late boot: installing TrackControl patch\n");
+
+	oldTrackControl = GetToolTrapAddress(_TrackControl);
+
+	static RoutineDescriptor descTrackControl = BUILD_ROUTINE_DESCRIPTOR(
+		kPascalStackBased
+			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+			| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
+			| STACK_ROUTINE_PARAMETER(3, kFourByteCode)
+			| RESULT_SIZE(kTwoByteCode),
+		myTrackControl);
+
+	SetToolTrapAddress(&descTrackControl, _TrackControl);
+
+	lprintf("Late boot: installing GNEFilter patch\n");
+
+	oldFilter = LMGetGNEFilter();
+	LMSetGNEFilter(NewGetNextEventFilterProc(myFilter));
+
+	patchReady = true;
 }
 
 static void handleEvent(struct event e) {
@@ -203,7 +222,7 @@ static void handleEvent(struct event e) {
 	} else if (e.type == 1 && e.code == BTN_RIGHT) {
 		knowmask |= 2;
 		if (e.value) newbtn |= 2;
-	} else if (e.type == EV_REL && e.code == REL_WHEEL) {
+	} else if (e.type == EV_REL && e.code == REL_WHEEL && patchReady) {
 		pendingScroll += e.value;
 
 		uint32_t t = LMGetTicks();
@@ -299,22 +318,6 @@ static void myFilter(EventRecord *event, Boolean *result) {
 	}
 
 	if (oldFilter) CallGetNextEventFilterProc(oldFilter, event, result);
-}
-
-static void lateBootHook(void) {
-	lprintf("At late boot, now patching TrackControl\n");
-
-	oldTrackControl = GetToolTrapAddress(_TrackControl);
-
-	static RoutineDescriptor descTrackControl = BUILD_ROUTINE_DESCRIPTOR(
-		kPascalStackBased
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-			| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-			| STACK_ROUTINE_PARAMETER(3, kFourByteCode)
-			| RESULT_SIZE(kTwoByteCode),
-		myTrackControl);
-
-	SetToolTrapAddress(&descTrackControl, _TrackControl);
 }
 
 static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, void *actionProc) {
