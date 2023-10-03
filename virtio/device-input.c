@@ -28,7 +28,6 @@ static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void handleEvent(struct event e);
 static void myFilter(EventRecord *event, Boolean *result);
-static long myDefProc(short varCode, ControlHandle theControl, short message, long param);
 static void lateBootHook(void);
 static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, void *actionProc);
 static void reQueue(int bufnum);
@@ -38,12 +37,8 @@ static uint32_t ppage;
 static void *oldFilter;
 static long pendingScroll;
 // uint32_t eventPostedTime;
-static Handle myCDEF, oldCDEF;
 static void *oldTrackControl;
-static char oldCDEFState;
 static ControlRecord **curScroller;
-static Point fakeClickPoint;
-
 
 // Work around a ROM bug:
 // If kDriverIsLoadedUponDiscovery is set, the ROM calls GetDriverDescription
@@ -116,18 +111,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 // 	}
 
 	lprintf("Virtio-input driver starting\n");
-
-	myCDEF = NewHandleSysClear(12 + sizeof (RoutineDescriptor));
-	memcpy(*myCDEF, "\x60\x0a", 2);
-	*(RoutineDescriptor *)(*myCDEF + 12) = (RoutineDescriptor)BUILD_ROUTINE_DESCRIPTOR(
-		kPascalStackBased
-			| STACK_ROUTINE_PARAMETER(1, kTwoByteCode)
-			| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-			| STACK_ROUTINE_PARAMETER(3, kTwoByteCode)
-			| STACK_ROUTINE_PARAMETER(4, kFourByteCode)
-			| RESULT_SIZE(kFourByteCode),
-		myDefProc);
-	BlockMove(*myCDEF, *myCDEF, 12); // remove from emulator code cache
 
 	lpage = AllocPages(1, &ppage);
 	if (lpage == NULL) return openErr;
@@ -221,10 +204,6 @@ static void handleEvent(struct event e) {
 		knowmask |= 2;
 		if (e.value) newbtn |= 2;
 	} else if (e.type == EV_REL && e.code == REL_WHEEL) {
-// 		lprintf_enable++;
-// 		lprintf(e.value > 0 ? "^" : "v");
-// 		lprintf_enable--;
-
 		pendingScroll += e.value;
 
 		uint32_t t = LMGetTicks();
@@ -275,24 +254,10 @@ static void handleEvent(struct event e) {
 	}
 }
 
-// struct EventRecord {
-//   EventKind           what;
-//   UInt32              message;
-//   UInt32              when;
-//   Point               where;
-//   EventModifiers      modifiers;
-// };
-
 static void myFilter(EventRecord *event, Boolean *result) {
-	if (curScroller && (*curScroller)->contrlDefProc == myCDEF)
-		(*curScroller)->contrlDefProc = oldCDEF;
-
 	if (event->what == mouseDown && event->message == 'scrl') {
-		lprintf("scroll event %d\n", pendingScroll);
-
 		struct WindowRecord *wind = (void *)FrontWindow();
 		unsigned char *name = *wind->titleHandle;
-		lprintf("window title %.*s\n", *name, name+1);
 
 		// Find the scroller to move
 		// Currently it's the first vertical in the front window
@@ -300,14 +265,11 @@ static void myFilter(EventRecord *event, Boolean *result) {
 		for (curScroller = (void *)wind->controlList; curScroller; curScroller = (**curScroller).nextControl) {
 			struct ControlRecord *ptr = *curScroller;
 
-			int16_t w = ptr->contrlRect.right - ptr->contrlRect.left;
-			int16_t h = ptr->contrlRect.bottom - ptr->contrlRect.top;
-
 			void *defproc = *ptr->contrlDefProc;
 			short cdefnum = *(int16_t *)(defproc + 8);
 
-			lprintf("    control %p %.*s w=%d h=%d hilite=%d cdef=%d\n", ptr, ptr->contrlTitle[0], ptr->contrlTitle+1,
-				w, h, ptr->contrlHilite, cdefnum);
+			int16_t w = ptr->contrlRect.right - ptr->contrlRect.left;
+			int16_t h = ptr->contrlRect.bottom - ptr->contrlRect.top;
 
 			if (h > w && ptr->contrlHilite != 255 && cdefnum == 24) break;
 		}
@@ -315,26 +277,19 @@ static void myFilter(EventRecord *event, Boolean *result) {
 		if (curScroller) {
 			// Yes, it's the right event
 			// Click in the upper-left of the scroller
-			fakeClickPoint = (Point){(*curScroller)->contrlRect.top, (*curScroller)->contrlRect.left};
+			Point pt = {(*curScroller)->contrlRect.top, (*curScroller)->contrlRect.left};
 
 			// Convert to window coordinates
 			GrafPtr oldport;
 			GetPort(&oldport);
 			SetPort((*curScroller)->contrlOwner);
-			LocalToGlobal(&fakeClickPoint);
+			LocalToGlobal(&pt);
 			SetPort(oldport);
 
 			event->what = mouseDown;
 			event->message = 0;
-			event->where = fakeClickPoint;
+			event->where = pt;
 			*result = true;
-
-			lprintf("fakeClickPoint %d,%d\n", fakeClickPoint.v, fakeClickPoint.h);
-
-// 			// Copy some header guff from the old CDEF
-// 			oldCDEF = (*curScroller)->contrlDefProc;
-// 			memcpy(((char *)(*myCDEF) + 2), ((char *)(*oldCDEF) + 2), 10);
-// 			(*curScroller)->contrlDefProc = myCDEF;
 		} else {
 			// Not the right event
 			event->what = nullEvent;
@@ -344,109 +299,6 @@ static void myFilter(EventRecord *event, Boolean *result) {
 	}
 
 	if (oldFilter) CallGetNextEventFilterProc(oldFilter, event, result);
-}
-
-// drawCntl                      = 0,
-// testCntl                      = 1,
-// calcCRgns                     = 2,
-// initCntl                      = 3,
-// dispCntl                      = 4,
-// posCntl                       = 5,
-// thumbCntl                     = 6,
-// dragCntl                      = 7,
-// autoTrack                     = 8,
-// calcCntlRgn                   = 10,
-// calcThumbRgn                  = 11,
-// drawThumbOutline              = 12,
-// kControlMsgDrawGhost          = 13,
-// kControlMsgCalcBestRect       = 14,   /* Calculate best fitting rectangle for control*/
-// kControlMsgHandleTracking     = 15,
-// kControlMsgFocus              = 16,   /* param indicates action.*/
-// kControlMsgKeyDown            = 17,
-// kControlMsgIdle               = 18,
-// kControlMsgGetFeatures        = 19,
-// kControlMsgSetData            = 20,
-// kControlMsgGetData            = 21,
-// kControlMsgActivate           = 22,
-// kControlMsgSetUpBackground    = 23,
-// kControlMsgCalcValueFromPos   = 26,
-// kControlMsgTestNewMsgSupport  = 27,   /* See if this control supports new messaging*/
-// kControlMsgSubValueChanged    = 25,   /* Available in Appearance 1.0.1 or later*/
-// kControlMsgSubControlAdded    = 28,   /* Available in Appearance 1.0.1 or later*/
-// kControlMsgSubControlRemoved  = 29,   /* Available in Appearance 1.0.1 or later*/
-// kControlMsgApplyTextColor     = 30,   /* Available in Appearance 1.1 or later*/
-// kControlMsgGetRegion          = 31,   /* Available in Appearance 1.1 or later*/
-// kControlMsgFlatten            = 32,   /* Available in Carbon. Param is Collection.*/
-// kControlMsgSetCursor          = 33,   /* Available in Carbon. Param is ControlSetCursorRec*/
-// kControlMsgDragEnter          = 38,   /* Available in Carbon. Param is DragRef, result is boolean indicating acceptibility of drag.*/
-// kControlMsgDragLeave          = 39,   /* Available in Carbon. As above.*/
-// kControlMsgDragWithin         = 40,   /* Available in Carbon. As above.*/
-// kControlMsgDragReceive        = 41,   /* Available in Carbon. Param is DragRef, result is OSStatus indicating success/failure.*/
-// kControlMsgDisplayDebugInfo   = 46,   /* Available in Carbon on X.*/
-// kControlMsgContextualMenuClick = 47,  /* Available in Carbon. Param is ControlContextualMenuClickRec*/
-// kControlMsgGetClickActivation = 48    /* Available in Carbon. Param is ControlClickActivationRec*/
-
-// WHEN SCROLLER AT TOP-LEFT
-// myDefProc called with message 1 param 00140185
-//     returns 129
-// myDefProc called with message 1 param 00140185
-//     returns 129
-// myDefProc called with message 1 param 00140185
-//     returns 129
-// myDefProc called with message 6 param 06fcc068
-//     returns 0
-// myDefProc called with message 7 param 0000ffff
-//     returns 0
-// myDefProc called with message 6 param 06fcbfac
-//     returns 0
-// myDefProc called with message 11 param 06f2f55c
-//     returns 0
-// myDefProc called with message 0 param 00000081
-//     returns 0
-// myDefProc called with message 0 param 00000081
-//     returns 0
-
-// WHEN SCROLLER ELSEWHERE
-// myDefProc called with message 1 param 00140185
-//     returns 22
-// myDefProc called with message 1 param 00140185
-//     returns 22
-// myDefProc called with message 34 param 06fcc0f0
-//     returns 0
-// myDefProc called with message 0 param 00000016
-//     returns 0
-// myDefProc called with message 0 param 00000081
-//     returns 0
-
-static long myDefProc(short varCode, ControlHandle theControl, short message, long param) {
-	lprintf("myDefProc called with message %d param %08x\n", message, param);
-
-// 	(*curScroller)->contrlDefProc = oldCDEF;
-
-	long ret = CallUniversalProc((void *)*oldCDEF,
-		kPascalStackBased
-			| STACK_ROUTINE_PARAMETER(1, kTwoByteCode)
-			| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-			| STACK_ROUTINE_PARAMETER(3, kTwoByteCode)
-			| STACK_ROUTINE_PARAMETER(4, kFourByteCode)
-			| RESULT_SIZE(kFourByteCode),
-		varCode, theControl, message, param);
-
-	lprintf("    returns %d\n", ret);
-	return ret;
-
-	int32_t min = GetControl32BitMinimum(curScroller);
-	int32_t max = GetControl32BitMaximum(curScroller);
-	int32_t val = GetControl32BitValue(curScroller);
-
-	val -= pendingScroll;
-	pendingScroll = 0;
-	if (val < min) val = min;
-	if (val > max) val = max;
-	SetControl32BitValue(curScroller, val);
-	lprintf("manipulated it\n");
-
-	return 129; // ???
 }
 
 static void lateBootHook(void) {
@@ -466,18 +318,14 @@ static void lateBootHook(void) {
 }
 
 static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, void *actionProc) {
-	lprintf("myTrackControl! point %p\n", startPoint);
-
-	if (theControl != curScroller /*|| startPoint.v != fakeClickPoint.v || startPoint.h != fakeClickPoint.h*/) {
-		int ret = CallUniversalProc((void *)oldTrackControl,
+	if (theControl != curScroller) {
+		return CallUniversalProc((void *)oldTrackControl,
 			kPascalStackBased
 				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
 				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
 				| STACK_ROUTINE_PARAMETER(3, kFourByteCode)
 				| RESULT_SIZE(kTwoByteCode),
 			theControl, startPoint, actionProc);
-		lprintf("aborting with return value %d\n", ret);
-		return ret;
 	}
 
 	int32_t min = GetControl32BitMinimum(curScroller);
@@ -489,11 +337,9 @@ static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, v
 	if (val < min) val = min;
 	if (val > max) val = max;
 	SetControlValue(curScroller, val);
-	lprintf("manipulated it, actionProc is %p\n", actionProc);
 
 	if ((int)actionProc & 1) {
 		actionProc = (*curScroller)->contrlAction;
-		lprintf("actually changed to %p\n", actionProc);
 	}
 
 	if (actionProc) {
