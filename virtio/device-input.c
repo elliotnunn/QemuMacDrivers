@@ -106,9 +106,10 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-// 	if (!RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
+	strcpy(lprintf_prefix, ".virtioinput ");
+	if (!RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		lprintf_enable = 1;
-// 	}
+	}
 
 	lprintf("Virtio-input driver starting\n");
 
