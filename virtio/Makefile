@@ -9,6 +9,7 @@ SYSLIBS = \
 	-lPCILib \
 	-lVideoServicesLib \
 	-lInterfaceLib \
+	-lControlsLib \
 
 COMMON_PPC = \
 	transport-ppc.o \
