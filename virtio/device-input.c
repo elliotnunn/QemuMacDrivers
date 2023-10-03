@@ -134,7 +134,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	lprintf("Virtio-input driver started\n");
 
-	lprintf("Installing late-boot hook\n");
+	lprintf("Installing late-boot hook: ");
 
 	Patch68k(
 		_Gestalt,
