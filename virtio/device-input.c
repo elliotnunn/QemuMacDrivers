@@ -278,6 +278,9 @@ static void handleEvent(struct event e) {
 	}
 }
 
+// Second stage of scroll event
+// (Now, at non-interrupt time, we can safely inspect Toolbox structures.)
+// Synthesise a click event in an appropriate scrollbar.
 static void myGNEFilter(EventRecord *event, Boolean *result) {
 	if (event->what == mouseDown && event->message == 'scrl') {
 		struct WindowRecord *wind = (void *)FrontWindow();
@@ -325,6 +328,10 @@ static void myGNEFilter(EventRecord *event, Boolean *result) {
 	if (oldGNEFilter) CallGetNextEventFilterProc(oldGNEFilter, event, result);
 }
 
+// Third stage of scroll event
+// The app associated the (fake) click with our scrollbar
+// Tell the app that the scrollbar was dragged,
+// but tell the scrollbar to move to a specific point.
 static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, void *actionProc) {
 	if (theControl != curScroller) {
 		return CallUniversalProc((void *)oldTrackControl,
