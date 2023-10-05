@@ -95,8 +95,8 @@ static void cnidPrint(int32_t cnid);
 static struct DrvQEl *findDrive(short num);
 static struct VCB *findVol(short num);
 static bool isAbs(const unsigned char *path);
-static void pathRmvFirstComp(const unsigned char *path, unsigned char *shorter);
-static void pathSplit(const unsigned char *path, unsigned char *dir, unsigned char *name);
+static void pathSplitRoot(const unsigned char *path, unsigned char *root, unsigned char *shorter);
+static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name);
 static char determineNumStr(void *_pb);
 static char determineNum(void *_pb);
 static bool visName(const char *name);
@@ -855,7 +855,7 @@ static OSErr fsMakeFSSpec(struct HIOParam *pb) {
 	// The target doesn't (yet) exist
 	unsigned char path[256], leaf[256];
 	if (pb->ioNamePtr == NULL) return dirNFErr;
-	pathSplit(pb->ioNamePtr, path, leaf);
+	pathSplitLeaf(pb->ioNamePtr, path, leaf);
 	if (leaf[0] == 0) return dirNFErr;
 
 	cnid = pbDirID(pb);
@@ -1148,7 +1148,7 @@ static OSErr fsCreate(struct HFileParam *pb) {
 	}
 
 	unsigned char dir[256], name[256];
-	pathSplit(pb->ioNamePtr, dir, name);
+	pathSplitLeaf(pb->ioNamePtr, dir, name);
 
 	if (name[0] == 0) return bdNamErr;
 
@@ -1218,7 +1218,7 @@ static OSErr fsRename(struct IOParam *pb) {
 	strcpy(oldNameU, getDBName(childCNID));
 
 	// The new name requires conversion
-	pathSplit(pb->ioMisc, NULL, newNameR); // remove extraneous colons
+	pathSplitLeaf(pb->ioMisc, NULL, newNameR); // remove extraneous colons
 	if (newNameR[0] > 31 || newNameR[0] < 1) return bdNamErr;
 	utf8name(newNameU, newNameR);
 
@@ -1318,8 +1318,9 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 		// only if cnid == 1, despite this looking like a relative path.
 		// Get this wrong and the Finder can't rename disks.
 		setPath(2); // go to root (zero components)
-		unsigned char relative[256];
-		pathRmvFirstComp(paspath, relative);
+		unsigned char root[256], relative[256];
+		pathSplitRoot(paspath, root, relative);
+		if (root[0] == 0) return fnfErr;
 		if (appendRelativePath(relative)) return bdNamErr;
 	} else {
 		if (setPath(cnid)) return dirNFErr;
@@ -1674,18 +1675,27 @@ static bool isAbs(const unsigned char *path) {
 	return (firstColon != NULL && firstColon != path+1);
 }
 
-static void pathRmvFirstComp(const unsigned char *path, unsigned char *shorter) {
-	int strip = 0;
+static void pathSplitRoot(const unsigned char *path, unsigned char *root, unsigned char *shorter) {
+	int strip = 0, rootlen = 0;
 
 	if (path[0] > 0 && path[1] == ':') strip++; // remove a leading colon if any
 
-	while (path[0] > strip && path[1+strip] != ':') strip++; // remove non-colons
+	while (path[0] > strip+rootlen && path[1+strip+rootlen] != ':') rootlen++; // remove non-colons
 
-	shorter[0] = path[0] - strip;
-	memcpy(shorter + 1, path + 1 + strip, path[0] - strip);
+	if (root) {
+		root[0] = rootlen;
+		memcpy(root+1, path+1+strip, rootlen);
+	}
+
+	if (shorter) {
+		int start = strip + rootlen;
+		int len = path[0] - start;
+		shorter[0] = len;
+		memcpy(shorter+1, path+1+start, len);
+	}
 }
 
-static void pathSplit(const unsigned char *path, unsigned char *dir, unsigned char *name) {
+static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name) {
 	int dirlen = path[0], namelen = 0;
 
 	if (path[dirlen] == ':') dirlen--;
