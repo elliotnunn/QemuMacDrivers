@@ -123,7 +123,6 @@ static int pathBlobSize;
 
 static unsigned long hfsTimer, browseTimer, relistTimer;
 static short drvrRefNum;
-static unsigned long callcnt;
 static struct Qid9 root;
 static Handle finderwin;
 static bool mounted;
@@ -1788,8 +1787,6 @@ static long fsCall(void *pb, long selector) {
 		lprintf("FS_%s", PBPrint(pb, selector, 1));
 		strcat(lprintf_prefix, "     ");
 	}
-
-	callcnt++;
 
 	OSErr result = fsDispatch(pb, selector);
 
