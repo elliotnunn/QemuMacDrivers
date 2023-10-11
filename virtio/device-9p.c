@@ -124,7 +124,6 @@ static int pathBlobSize;
 static unsigned long hfsTimer, browseTimer, relistTimer;
 static short drvrRefNum;
 static struct Qid9 root;
-static Handle finderwin;
 static bool mounted;
 static char *bootBlock;
 static struct longdqe dqe = {
@@ -147,6 +146,19 @@ static struct VCB vcb = {
 	.vcbDirCnt = 1,
 	.vcbCtlBuf = (void *)&fsCallDesc, // overload field with proc pointer
 };
+static struct GetVolParmsInfoBuffer vparms = {
+	.vMVersion = 1, // goes up to version 4
+	.vMAttrib = 0
+		| (1<<bNoMiniFndr)
+		| (1<<bNoLclSync)
+		| (1<<bTrshOffLine)
+		| (1<<bNoBootBlks)
+		| (1<<bHasExtFSVol)
+		| (1<<bLocalWList)
+		,
+	.vMServerAdr = 0, // might be used for uniqueness checking -- ?set uniq
+};
+
 
 // Work around a ROM bug:
 // If kDriverIsLoadedUponDiscovery is set, the ROM calls GetDriverDescription
@@ -482,7 +494,7 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	setDB(2, 1, name);
 
-	finderwin = NewHandleSysClear(2);
+	vparms.vMLocalHand = NewHandleSysClear(2);
 
 	vcb.vcbDrvNum = dqe.dqe.dQDrive;
 	vcb.vcbDRefNum = drvrRefNum;
@@ -543,33 +555,10 @@ static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
 	return noErr;
 }
 
-// -->    12    ioCompletion  long    optional completion routine ptr
-// <--    16    ioResult      word    error result code
-// -->    18    ioFileName    long    volume name specifier
-// -->    22    ioVRefNum     word    volume refNum
-// <--    32    ioBuffer      long    ptr to vol parms data
-// -->    36    ioReqCount    long    size of buffer area
-// <--    40    ioActCount    long    length of vol parms data
-
 static OSErr fsGetVolParms(struct HIOParam *pb) {
-	struct GetVolParmsInfoBuffer buf = {
-		.vMVersion = 1, // goes up to version 4
-		.vMAttrib = 0
-			| (1<<bNoMiniFndr)
-			| (1<<bNoLclSync)
-			| (1<<bTrshOffLine)
-			| (1<<bNoBootBlks)
-			| (1<<bHasExtFSVol)
-// 			| (1<<bHasFileIDs) // TODO implement the SwapFiles etc call -- ResEdit uses them anyway
-			| (1<<bLocalWList)
-			,
-		.vMLocalHand = finderwin,
-		.vMServerAdr = 0, // might be used for uniqueness checking -- ?set uniq
-	};
-
 	short s = pb->ioReqCount;
 	if (s > 14) s = 14; // not the whole struct, just the v1 part
-	memcpy(pb->ioBuffer, &buf, s);
+	memcpy(pb->ioBuffer, &vparms, s);
 	pb->ioActCount = s;
 	return noErr;
 }
