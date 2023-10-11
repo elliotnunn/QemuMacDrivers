@@ -1,9 +1,14 @@
 /*
-Treat 9P filesystem as accessible by path only
-(unfortunately wasting the find-by-CNID ability of HFS+/APFS)
+Driver for virtio-9p under the Macintosh File Manager
 
-Therefore we need this mapping:
-(CNID) <-> (parent's CNID, name)
+The biggest challenge is that 9P (and Unix in general) only allows file access
+via a known path: supplying the inode number isn't enough.
+
+To allow MacOS clients to access a file by number (called a CNID in HFS), we
+maintain a giant hash table of (CNID) -> (parent's CNID, name) mappings.
+
+The "File System Manager" (a convenience layer on top of the File Manager) is
+not used because it is unavailable at the start of the boot process.
 */
 
 #include <Disks.h>
@@ -91,8 +96,6 @@ static struct VCB *findVol(short num);
 static bool isAbs(const unsigned char *path);
 static void pathSplitRoot(const unsigned char *path, unsigned char *root, unsigned char *shorter);
 static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigned char *name);
-static char determineNumStr(void *_pb);
-static char determineNum(void *_pb);
 static bool visName(const char *name);
 static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 static const char *getDBName(int32_t cnid);
@@ -128,7 +131,7 @@ static char *bootBlock;
 static struct longdqe dqe = {
 	.flags = 0x00080000, // fixed disk
 	.dqe = {.dQFSID = FSID},
-	.dispatcher = &fsCallDesc,
+	.dispatcher = &fsCallDesc, // procedure for our ToExtFS patch
 };
 static struct VCB vcb = {
 	.vcbAtrb = 0x0000, // no locks
@@ -143,7 +146,7 @@ static struct VCB vcb = {
 	.vcbFSID = FSID,
 	.vcbFilCnt = 1,
 	.vcbDirCnt = 1,
-	.vcbCtlBuf = (void *)&fsCallDesc, // cheeky overload
+	.vcbCtlBuf = (void *)&fsCallDesc, // overload field with proc pointer
 };
 
 // Work around a ROM bug:
@@ -223,6 +226,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
+	// Debug output
 	drvrRefNum = info->refNum;
 	sprintf(lprintf_prefix, ".virtio9p(%d) ", drvrRefNum);
 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
@@ -231,7 +235,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	lprintf("Primary init\n");
 
-	// No need to signal FAILED if cannot communicate with device
+	// Start the Virtio layer
 	if (!VInit(&info->deviceEntry)) {
 		lprintf("...failed VInit()\n");
 		return paramErr;
@@ -247,9 +251,10 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
+	// Now is safe to allocate memory for the hash table
 	HTallocate();
 
-	// More buffers allow us to tolerate more physical mem fragmentation
+	// Request enough buffers to transfer a megabyte in page sized chunks
 	uint16_t viobufs = QInit(0, 256);
 	if (viobufs < 2) {
 		lprintf("...failed QInit()\n");
@@ -257,6 +262,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 	QInterest(0, 1);
 
+	// Start the 9P layer
 	int err9;
 	if ((err9 = Init9(viobufs)) != 0) {
 		return paramErr;
@@ -266,11 +272,12 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return paramErr;
 	}
 
+	// Hook into the Device Manager as a block device
 	dqe.dqe.dQDrive=4; // lower numbers reserved
 	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
 	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
 
-	// Is the File Manager actually up yet?
+	// Trick: hook into the File Manager, or arrange for this to be done later
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
 		lprintf("FM up: mounting now\n");
 		installAndMountAndNotify();
@@ -307,6 +314,8 @@ static void installAndMountAndNotify(void) {
 	if (alreadyUp) return;
 	alreadyUp = true;
 
+	// A single ToExtFS patch can be shared between multiple 9P device drivers
+	// Use a Gestalt selector to declare its presence
 	long selector = FSID<<16 | 'h'<<8 | 'k';
 	long patched = 0;
 	Gestalt(selector, &patched);
@@ -387,6 +396,7 @@ static void installAndMountAndNotify(void) {
 }
 
 // Make (in the heap) a single 512-byte block that the ROM will boot from
+// (A mere trampoline for one of our routines)
 static char *mkbb(OSErr (*booter)(void), struct bbnames names) {
 	char *bb = NewPtrSysClear(512);
 	if (!bb) return NULL;
@@ -397,6 +407,7 @@ static char *mkbb(OSErr (*booter)(void), struct bbnames names) {
 	// List of 16-byte names: "System", "Finder" etc
 	memcpy(bb + 0x0a, &names, sizeof names);
 
+	// Jump to booter()
 	RoutineDescriptor booter68 = BUILD_ROUTINE_DESCRIPTOR(
 		kCStackBased
 			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
@@ -407,8 +418,9 @@ static char *mkbb(OSErr (*booter)(void), struct bbnames names) {
 	return bb;
 }
 
-// Emulate a System 7-style boot block ('boot' 1 resource):
-// Load and run a 'boot' 2 resource in the System file
+// C function that our stub boot block will jump to.
+// Do the job of a System 7 boot block, which is to
+// load and run 'boot' resource ID 2 in the System file.
 // Not worth checking return values: if boot fails then the reason is clear enough
 static OSErr boot(void) {
 	lprintf("Emulating boot block\n");
@@ -422,8 +434,8 @@ static OSErr boot(void) {
 
 	CallOSTrapUniversalProc(GetOSTrapAddress(_InitEvents), 0x33802, _InitEvents, 20);
 
+	// When we are the boot disk, we control when the File Manager comes up: now!
 	CallOSTrapUniversalProc(GetOSTrapAddress(_InitFS), 0x33802, _InitFS, 10);
-
 	installAndMountAndNotify();
 
 	// Is the System Folder not the root of the disk? (It usually isn't.)
@@ -444,7 +456,7 @@ static OSErr boot(void) {
 
 	// boot 2 resource requires a3=handle and a4=startup app dirID
 	// movem.l (sp),a0/a3/a4; move.l (a3),-(sp); rts
-	static short thunk[6] = {0x4CD7, 0x1900, 0x2F13, 0x4E75};
+	static short thunk[6] = {0x4cd7, 0x1900, 0x2f13, 0x4e75};
 	BlockMove(thunk, thunk, sizeof thunk);
 
 	// Call boot 2, never to return
@@ -799,9 +811,9 @@ static OSErr fsSetVol(struct HFileParam *pb) {
 			.wdDirID=cnid
 		};
 	} else {
-		// SetVol: only the root or a Working Directory is allowed,
+		// SetVol: only the root or a Working Directory is possible,
 		// and in either case the directory is known already to exist
-		if (determineNumStr(pb) == 'w') { // Working Directory
+		if (pb->ioVRefNum <= WDHI) { // Working Directory
 			setDefVCBPtr = &vcb;
 			setDefVRefNum = pb->ioVRefNum;
 			setDefWDCB = (struct WDCBRec){
@@ -1476,7 +1488,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	return qid2cnid(qids[pathCompCnt-1]);
 }
 
-// Panics if the CNID is invalid... bad interface
+// Erase the global path variables and set them to the known path of a CNID
 static bool setPath(int32_t cnid) {
 	int nbytes = 0;
 	int npath = 0;
@@ -1502,10 +1514,9 @@ static bool setPath(int32_t cnid) {
 	return false;
 }
 
-// Make a host-friendly array of path components (which can be dot-dot)
-// Returns data in own static storage, invalidated by next call
+// Append to the global path variables a MacOS-style path
+// (consecutive colons will become dot-dot)
 // It is okay to append things to the final path component
-// We are already guaranteed that the path is relative.
 static bool appendRelativePath(const unsigned char *path) {
 	// Divide path components so each is either:
 	// [^:]*:
@@ -1553,6 +1564,7 @@ static bool appendRelativePath(const unsigned char *path) {
 	return false;
 }
 
+// Divine the meaning of ioVRefNum and ioDirID
 static int32_t pbDirID(void *_pb) {
 	struct HFileParam *pb = _pb;
 
@@ -1589,6 +1601,7 @@ static struct WDCBRec *findWD(short refnum) {
 	}
 }
 
+// Create a CNID from a 9P QID (which is a slightly adorned inode number)
 // Negative CNIDs are reserved for errors, and the 2nd MSB means "not a dir"
 // Warning: the "type" field of a Rreaddir QID is nonsense, causing this
 // function to give a garbage result, so qidTypeFix() it before calling me.
@@ -1623,6 +1636,7 @@ static bool isdir(int32_t cnid) {
 	return (cnid & 0x40000000) == 0;
 }
 
+// Print a CNID to the log as a /unix/path
 static void cnidPrint(int32_t cnid) {
 	if (!lprintf_enable) return;
 
@@ -1710,71 +1724,6 @@ static void pathSplitLeaf(const unsigned char *path, unsigned char *dir, unsigne
 	}
 }
 
-// The "standard way":
-// 1. ioNamePtr: absolute path with correct volume name? Return 'p'.
-// 2. ioVRefNum: correct volume/drive/WD? See determineNum for return values.
-// 3. Else return 0.
-// Note that MPW does relative paths from CNID 1 but these have the right vRefNum
-static char determineNumStr(void *_pb) {
-	struct VolumeParam *pb = _pb;
-
-	// First element of absolute path
-	if (pb->ioNamePtr) {
-		char name[256];
-		p2cstr(name, pb->ioNamePtr);
-
-		// Is absolute path?
-		if (name[0]!=0 && name[0]!=':' && strstr(name, ":")!=NULL) {
-			strstr(name, ":")[0] = 0; // terminate at the colon
-			unsigned char pas[256];
-			c2pstr(pas, name);
-			if (RelString(pas, vcb.vcbVN, 0, 1) == 0) {
-				return 'p';
-			} else {
-				return 0;
-			}
-		}
-	}
-
-	return determineNum(pb);
-}
-
-// 0 for shrug, 'w' for wdcbRefNum, 'v' for vRefNum, 'd' for drvNum
-static char determineNum(void *_pb) {
-	struct VolumeParam *pb = _pb;
-
-	if (pb->ioVRefNum <= WDHI) {
-		// Working directory refnum
-		struct WDCBRec *wdcb = findWD(pb->ioVRefNum);
-		if (wdcb && wdcb->wdVCBPtr == &vcb) {
-			return 'w';
-		} else {
-			return 0;
-		}
-	} else if (pb->ioVRefNum < 0) {
-		// Volume refnum
-		if (pb->ioVRefNum == vcb.vcbVRefNum) {
-			return 'v';
-		} else {
-			return 0;
-		}
-	} else if (pb->ioVRefNum == 0) {
-		// Default volume (arguably also a WD)
-		if ((struct VCB *)LMGetDefVCBPtr() == &vcb) {
-			return 'v';
-		} else {
-			return 0;
-		}
-	} else {
-		// Drive number
-		if (pb->ioVRefNum == dqe.dqe.dQDrive) {
-			return 'd';
-		} else {
-			return 0;
-		}
-	}
-}
-
 static bool visName(const char *name) {
 	if (name[0] == '.') return false;
 
@@ -1793,7 +1742,6 @@ struct rec {
 	char name[512];
 };
 
-// NULL on failure (bad CNID)
 static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 	struct rec rec;
 	rec.parent = pcnid;
@@ -1803,6 +1751,7 @@ static void setDB(int32_t cnid, int32_t pcnid, const char *name) {
 	HTinstall('$', &cnid, sizeof cnid, &rec, 4+strlen(name)+1); // dodgy size calc
 }
 
+// NULL on failure (bad CNID)
 static const char *getDBName(int32_t cnid) {
 	struct rec *rec = HTlookup('$', &cnid, sizeof cnid);
 	if (!rec) return NULL;
