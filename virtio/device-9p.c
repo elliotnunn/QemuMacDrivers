@@ -55,12 +55,6 @@ enum {
 	STACKSIZE = 64 * 1024, // large stack bc memory is so hard to allocate
 };
 
-// of a File Manager call
-struct handler {
-	void *func; // Unsafe magic allows different pb types
-	short err; // If func==NULL then return ret
-};
-
 struct longdqe {
 	uint32_t flags; // 4 bytes of flags at neg offset
 	DrvQEl dqe; // AddDrive points here
@@ -104,9 +98,9 @@ static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 static const char *getDBName(int32_t cnid);
 static int32_t getDBParent(int32_t cnid);
 static long fsCall(void *pb, long selector);
-static struct handler fsHandler(unsigned short selector);
+static OSErr fsDispatch(void *pb, unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
-static struct handler controlStatusHandler(long selector);
+static OSErr controlStatusDispatch(long selector, void *pb);
 
 static struct RoutineDescriptor fsCallDesc = BUILD_ROUTINE_DESCRIPTOR(
 	kCStackBased
@@ -1848,16 +1842,7 @@ static long fsCall(void *pb, long selector) {
 
 	callcnt++;
 
-	OSErr result;
-	struct handler h = fsHandler(selector);
-
-	if (h.func == NULL) {
-		result = h.err;
-	} else {
-		// Unsafe calling convention magic
-		typedef OSErr (*handlerFunc)(void *pb);
-		result = ((handlerFunc)h.func)(pb);
-	}
+	OSErr result = fsDispatch(pb, selector);
 
 	if (lprintf_enable) {
 		lprintf_prefix[strlen(lprintf_prefix) - 5] = 0;
@@ -1868,162 +1853,146 @@ static long fsCall(void *pb, long selector) {
 }
 
 // This makes it easy to have a selector return noErr without a function
-static struct handler fsHandler(unsigned short selector) {
+static OSErr fsDispatch(void *pb, unsigned short selector) {
 	switch (selector & 0xf0ff) {
-	case kFSMOpen: return (struct handler){fsOpen};
-	case kFSMClose: return (struct handler){fsClose};
-	case kFSMRead: return (struct handler){fsReadWrite};
-	case kFSMWrite: return (struct handler){fsReadWrite};
-	case kFSMGetVolInfo: return (struct handler){fsGetVolInfo};
-	case kFSMCreate: return (struct handler){fsCreate};
-	case kFSMDelete: return (struct handler){fsDelete};
-	case kFSMOpenRF: return (struct handler){fsOpen};
-	case kFSMRename: return (struct handler){fsRename};
-	case kFSMGetFileInfo: return (struct handler){fsGetFileInfo};
-	case kFSMSetFileInfo: return (struct handler){fsSetFileInfo};
-	case kFSMUnmountVol: return (struct handler){NULL, extFSErr};
-	case kFSMMountVol: return (struct handler){fsMountVol};
-	case kFSMAllocate: return (struct handler){NULL, noErr};
-	case kFSMGetEOF: return (struct handler){fsGetEOF};
-	case kFSMSetEOF: return (struct handler){fsSetEOF};
-	case kFSMFlushVol: return (struct handler){NULL, noErr};
-	case kFSMGetVol: return (struct handler){NULL, extFSErr};
-	case kFSMSetVol: return (struct handler){fsSetVol};
-	case kFSMEject: return (struct handler){NULL, extFSErr};
-	case kFSMGetFPos: return (struct handler){fsReadWrite};
-	case kFSMOffline: return (struct handler){NULL, extFSErr};
-	case kFSMSetFilLock: return (struct handler){NULL, extFSErr};
-	case kFSMRstFilLock: return (struct handler){NULL, extFSErr};
-	case kFSMSetFilType: return (struct handler){NULL, extFSErr};
-	case kFSMSetFPos: return (struct handler){fsReadWrite};
-	case kFSMFlushFile: return (struct handler){NULL, noErr};
-	case kFSMOpenWD: return (struct handler){fsOpenWD};
-	case kFSMCloseWD: return (struct handler){fsCloseWD};
-	case kFSMCatMove: return (struct handler){NULL, extFSErr};
-	case kFSMDirCreate: return (struct handler){fsCreate};
-	case kFSMGetWDInfo: return (struct handler){NULL, noErr};
-	case kFSMGetFCBInfo: return (struct handler){NULL, noErr};
-	case kFSMGetCatInfo: return (struct handler){fsGetFileInfo};
-	case kFSMSetCatInfo: return (struct handler){NULL, noErr};
-	case kFSMSetVolInfo: return (struct handler){NULL, noErr};
-	case kFSMLockRng: return (struct handler){NULL, extFSErr};
-	case kFSMUnlockRng: return (struct handler){NULL, extFSErr};
-	case kFSMXGetVolInfo: return (struct handler){NULL, extFSErr};
-	case kFSMCreateFileIDRef: return (struct handler){NULL, extFSErr};
-	case kFSMDeleteFileIDRef: return (struct handler){NULL, extFSErr};
-	case kFSMResolveFileIDRef: return (struct handler){NULL, extFSErr};
-	case kFSMExchangeFiles: return (struct handler){NULL, extFSErr};
-	case kFSMCatSearch: return (struct handler){NULL, extFSErr};
-	case kFSMOpenDF: return (struct handler){fsOpen};
-	case kFSMMakeFSSpec: return (struct handler){fsMakeFSSpec};
-	case kFSMDTGetPath: return (struct handler){NULL, extFSErr};
-	case kFSMDTCloseDown: return (struct handler){NULL, extFSErr};
-	case kFSMDTAddIcon: return (struct handler){NULL, extFSErr};
-	case kFSMDTGetIcon: return (struct handler){NULL, extFSErr};
-	case kFSMDTGetIconInfo: return (struct handler){NULL, extFSErr};
-	case kFSMDTAddAPPL: return (struct handler){NULL, extFSErr};
-	case kFSMDTRemoveAPPL: return (struct handler){NULL, extFSErr};
-	case kFSMDTGetAPPL: return (struct handler){NULL, extFSErr};
-	case kFSMDTSetComment: return (struct handler){NULL, extFSErr};
-	case kFSMDTRemoveComment: return (struct handler){NULL, extFSErr};
-	case kFSMDTGetComment: return (struct handler){NULL, extFSErr};
-	case kFSMDTFlush: return (struct handler){NULL, extFSErr};
-	case kFSMDTReset: return (struct handler){NULL, extFSErr};
-	case kFSMDTGetInfo: return (struct handler){NULL, extFSErr};
-	case kFSMDTOpenInform: return (struct handler){NULL, extFSErr};
-	case kFSMDTDelete: return (struct handler){NULL, extFSErr};
-	case kFSMGetVolParms: return (struct handler){fsGetVolParms};
-	case kFSMGetLogInInfo: return (struct handler){NULL, extFSErr};
-	case kFSMGetDirAccess: return (struct handler){NULL, extFSErr};
-	case kFSMSetDirAccess: return (struct handler){NULL, extFSErr};
-	case kFSMMapID: return (struct handler){NULL, extFSErr};
-	case kFSMMapName: return (struct handler){NULL, extFSErr};
-	case kFSMCopyFile: return (struct handler){NULL, extFSErr};
-	case kFSMMoveRename: return (struct handler){NULL, extFSErr};
-	case kFSMOpenDeny: return (struct handler){NULL, extFSErr};
-	case kFSMOpenRFDeny: return (struct handler){NULL, extFSErr};
-	case kFSMGetXCatInfo: return (struct handler){NULL, extFSErr};
-	case kFSMGetVolMountInfoSize: return (struct handler){NULL, extFSErr};
-	case kFSMGetVolMountInfo: return (struct handler){NULL, extFSErr};
-	case kFSMVolumeMount: return (struct handler){NULL, extFSErr};
-	case kFSMShare: return (struct handler){NULL, extFSErr};
-	case kFSMUnShare: return (struct handler){NULL, extFSErr};
-	case kFSMGetUGEntry: return (struct handler){NULL, extFSErr};
-	case kFSMGetForeignPrivs: return (struct handler){NULL, extFSErr};
-	case kFSMSetForeignPrivs: return (struct handler){NULL, extFSErr};
-	case kFSMGetVolumeInfo: return (struct handler){NULL, extFSErr};
-	case kFSMSetVolumeInfo: return (struct handler){NULL, extFSErr};
-	case kFSMReadFork: return (struct handler){NULL, extFSErr};
-	case kFSMWriteFork: return (struct handler){NULL, extFSErr};
-	case kFSMGetForkPosition: return (struct handler){NULL, extFSErr};
-	case kFSMSetForkPosition: return (struct handler){NULL, extFSErr};
-	case kFSMGetForkSize: return (struct handler){NULL, extFSErr};
-	case kFSMSetForkSize: return (struct handler){NULL, extFSErr};
-	case kFSMAllocateFork: return (struct handler){NULL, extFSErr};
-	case kFSMFlushFork: return (struct handler){NULL, noErr};
-	case kFSMCloseFork: return (struct handler){NULL, extFSErr};
-	case kFSMGetForkCBInfo: return (struct handler){NULL, extFSErr};
-	case kFSMCloseIterator: return (struct handler){NULL, extFSErr};
-	case kFSMGetCatalogInfoBulk: return (struct handler){NULL, extFSErr};
-	case kFSMCatalogSearch: return (struct handler){NULL, extFSErr};
-	case kFSMMakeFSRef: return (struct handler){NULL, extFSErr};
-	case kFSMCreateFileUnicode: return (struct handler){NULL, extFSErr};
-	case kFSMCreateDirUnicode: return (struct handler){NULL, extFSErr};
-	case kFSMDeleteObject: return (struct handler){NULL, extFSErr};
-	case kFSMMoveObject: return (struct handler){NULL, extFSErr};
-	case kFSMRenameUnicode: return (struct handler){NULL, extFSErr};
-	case kFSMExchangeObjects: return (struct handler){NULL, extFSErr};
-	case kFSMGetCatalogInfo: return (struct handler){NULL, extFSErr};
-	case kFSMSetCatalogInfo: return (struct handler){NULL, extFSErr};
-	case kFSMOpenIterator: return (struct handler){NULL, extFSErr};
-	case kFSMOpenFork: return (struct handler){NULL, extFSErr};
-	case kFSMMakeFSRefUnicode: return (struct handler){NULL, extFSErr};
-	case kFSMCompareFSRefs: return (struct handler){NULL, extFSErr};
-	case kFSMCreateFork: return (struct handler){NULL, extFSErr};
-	case kFSMDeleteFork: return (struct handler){NULL, extFSErr};
-	case kFSMIterateForks: return (struct handler){NULL, extFSErr};
-	default: return (struct handler){NULL, extFSErr};
+	case kFSMOpen: return fsOpen(pb);
+	case kFSMClose: return fsClose(pb);
+	case kFSMRead: return fsReadWrite(pb);
+	case kFSMWrite: return fsReadWrite(pb);
+	case kFSMGetVolInfo: return fsGetVolInfo(pb);
+	case kFSMCreate: return fsCreate(pb);
+	case kFSMDelete: return fsDelete(pb);
+	case kFSMOpenRF: return fsOpen(pb);
+	case kFSMRename: return fsRename(pb);
+	case kFSMGetFileInfo: return fsGetFileInfo(pb);
+	case kFSMSetFileInfo: return fsSetFileInfo(pb);
+	case kFSMUnmountVol: return extFSErr;
+	case kFSMMountVol: return fsMountVol(pb);
+	case kFSMAllocate: return noErr;
+	case kFSMGetEOF: return fsGetEOF(pb);
+	case kFSMSetEOF: return fsSetEOF(pb);
+	case kFSMFlushVol: return noErr;
+	case kFSMGetVol: return extFSErr; // FM handles
+	case kFSMSetVol: return fsSetVol(pb);
+	case kFSMEject: return extFSErr;
+	case kFSMGetFPos: return fsReadWrite(pb);
+	case kFSMOffline: return extFSErr;
+	case kFSMSetFilLock: return extFSErr;
+	case kFSMRstFilLock: return extFSErr;
+	case kFSMSetFilType: return extFSErr;
+	case kFSMSetFPos: return fsReadWrite(pb);
+	case kFSMFlushFile: return noErr;
+	case kFSMOpenWD: return fsOpenWD(pb);
+	case kFSMCloseWD: return fsCloseWD(pb);
+	case kFSMCatMove: return extFSErr;
+	case kFSMDirCreate: return fsCreate(pb);
+	case kFSMGetWDInfo: return noErr;
+	case kFSMGetFCBInfo: return noErr;
+	case kFSMGetCatInfo: return fsGetFileInfo(pb);
+	case kFSMSetCatInfo: return noErr;
+	case kFSMSetVolInfo: return noErr;
+	case kFSMLockRng: return extFSErr;
+	case kFSMUnlockRng: return extFSErr;
+	case kFSMXGetVolInfo: return extFSErr;
+	case kFSMCreateFileIDRef: return extFSErr;
+	case kFSMDeleteFileIDRef: return extFSErr;
+	case kFSMResolveFileIDRef: return extFSErr;
+	case kFSMExchangeFiles: return extFSErr;
+	case kFSMCatSearch: return extFSErr;
+	case kFSMOpenDF: return fsOpen(pb);
+	case kFSMMakeFSSpec: return fsMakeFSSpec(pb);
+	case kFSMDTGetPath: return extFSErr;
+	case kFSMDTCloseDown: return extFSErr;
+	case kFSMDTAddIcon: return extFSErr;
+	case kFSMDTGetIcon: return extFSErr;
+	case kFSMDTGetIconInfo: return extFSErr;
+	case kFSMDTAddAPPL: return extFSErr;
+	case kFSMDTRemoveAPPL: return extFSErr;
+	case kFSMDTGetAPPL: return extFSErr;
+	case kFSMDTSetComment: return extFSErr;
+	case kFSMDTRemoveComment: return extFSErr;
+	case kFSMDTGetComment: return extFSErr;
+	case kFSMDTFlush: return extFSErr;
+	case kFSMDTReset: return extFSErr;
+	case kFSMDTGetInfo: return extFSErr;
+	case kFSMDTOpenInform: return extFSErr;
+	case kFSMDTDelete: return extFSErr;
+	case kFSMGetVolParms: return fsGetVolParms(pb);
+	case kFSMGetLogInInfo: return extFSErr;
+	case kFSMGetDirAccess: return extFSErr;
+	case kFSMSetDirAccess: return extFSErr;
+	case kFSMMapID: return extFSErr;
+	case kFSMMapName: return extFSErr;
+	case kFSMCopyFile: return extFSErr;
+	case kFSMMoveRename: return extFSErr;
+	case kFSMOpenDeny: return extFSErr;
+	case kFSMOpenRFDeny: return extFSErr;
+	case kFSMGetXCatInfo: return extFSErr;
+	case kFSMGetVolMountInfoSize: return extFSErr;
+	case kFSMGetVolMountInfo: return extFSErr;
+	case kFSMVolumeMount: return extFSErr;
+	case kFSMShare: return extFSErr;
+	case kFSMUnShare: return extFSErr;
+	case kFSMGetUGEntry: return extFSErr;
+	case kFSMGetForeignPrivs: return extFSErr;
+	case kFSMSetForeignPrivs: return extFSErr;
+	case kFSMGetVolumeInfo: return extFSErr;
+	case kFSMSetVolumeInfo: return extFSErr;
+	case kFSMReadFork: return extFSErr;
+	case kFSMWriteFork: return extFSErr;
+	case kFSMGetForkPosition: return extFSErr;
+	case kFSMSetForkPosition: return extFSErr;
+	case kFSMGetForkSize: return extFSErr;
+	case kFSMSetForkSize: return extFSErr;
+	case kFSMAllocateFork: return extFSErr;
+	case kFSMFlushFork: return noErr;
+	case kFSMCloseFork: return extFSErr;
+	case kFSMGetForkCBInfo: return extFSErr;
+	case kFSMCloseIterator: return extFSErr;
+	case kFSMGetCatalogInfoBulk: return extFSErr;
+	case kFSMCatalogSearch: return extFSErr;
+	case kFSMMakeFSRef: return extFSErr;
+	case kFSMCreateFileUnicode: return extFSErr;
+	case kFSMCreateDirUnicode: return extFSErr;
+	case kFSMDeleteObject: return extFSErr;
+	case kFSMMoveObject: return extFSErr;
+	case kFSMRenameUnicode: return extFSErr;
+	case kFSMExchangeObjects: return extFSErr;
+	case kFSMGetCatalogInfo: return extFSErr;
+	case kFSMSetCatalogInfo: return extFSErr;
+	case kFSMOpenIterator: return extFSErr;
+	case kFSMOpenFork: return extFSErr;
+	case kFSMMakeFSRefUnicode: return extFSErr;
+	case kFSMCompareFSRefs: return extFSErr;
+	case kFSMCreateFork: return extFSErr;
+	case kFSMDeleteFork: return extFSErr;
+	case kFSMIterateForks: return extFSErr;
+	default: return extFSErr;
 	}
 }
 
 static OSErr controlStatusCall(struct CntrlParam *pb) {
-	OSErr err = 100;
-
 	// Coerce csCode or driverGestaltSelector into one long
 	// Negative is Status/DriverGestalt, positive is Control/DriverConfigure
+	// (Assume 4-byte Driver Gestalt code is ASCII, and therefore positive)
 	long selector = pb->csCode;
 
 	if (selector == kDriverGestaltCode)
 		selector = ((struct DriverGestaltParam *)pb)->driverGestaltSelector;
 
-	if (selector > 0) {
-		if ((pb->ioTrap & 0xa8ff) == _Status)
-			selector = -selector;
+	if ((pb->ioTrap & 0xa8ff) == _Status)
+		selector = -selector;
 
-		struct handler h = controlStatusHandler(selector);
-
-		if (h.func == NULL) {
-			err = h.err;
-		} else {
-			// Unsafe calling convention magic
-			typedef OSErr (*handlerFunc)(void *pb);
-			err = ((handlerFunc)h.func)(pb);
-		}
-	}
-
-	if (err == 100) {
-		if ((pb->ioTrap & 0xa8ff) == _Status)
-			err = statusErr;
-		else
-			err = controlErr;
-	}
-
-	return err;
+	return controlStatusDispatch(selector, pb);
 }
 
-static struct handler controlStatusHandler(long selector) {
-	switch (selector & 0xf0ff) {
-// 	case 'boot': return (struct handler){MyDCBoot};
-	default: return (struct handler){NULL, selector>0 ? statusErr : controlErr};
+static OSErr controlStatusDispatch(long selector, void *pb) {
+	switch (selector) {
+	default:
+		if (selector > 0) {
+			return controlErr;
+		} else {
+			return statusErr;
+		}
 	}
 }
