@@ -430,8 +430,7 @@ static char *mkbb(OSErr (*booter)(void), struct bbnames names) {
 }
 
 // C function that our stub boot block will jump to.
-// Do the job of a System 7 boot block, which is to
-// load and run 'boot' resource ID 2 in the System file.
+// Do the job of a System 7 boot block: load and run System resource 'boot' 2.
 // Not worth checking return values: if boot fails then the reason is clear enough
 static OSErr boot(void) {
 	lprintf("Emulating boot block\n");
