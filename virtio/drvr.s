@@ -7,29 +7,29 @@ C code does the actual work
 		.global drvrOpen, drvrClose, drvrControl, drvrStatus, drvrPrime
 
 drvrOpen:
-        movem.l %a0/%a1,-(%sp)          /* save registers */
+		movem.l %a0/%a1,-(%sp)          /* save registers */
 
-        movem.l %a0/%a1,-(%sp)          /* call C bottleneck */
-        move.l  #0,-(%sp)
-        bsr     funnel
-        add     #12,%sp
+		movem.l %a0/%a1,-(%sp)          /* call C bottleneck */
+		move.l  #0,-(%sp)
+		bsr     funnel
+		add     #12,%sp
 
 		movem.l (%sp)+,%a0/%a1          /* restore registers */
 
-        move.w  %d0,16(%a0)             /* peculiarly Open touches ioResult */
-        rts
+		move.w  %d0,16(%a0)             /* peculiarly Open touches ioResult */
+		rts
 
 drvrPrime:
 drvrControl:
 drvrStatus:
 drvrClose:
-        movem.l %a0/%a1,-(%sp)          /* save registers */
+		movem.l %a0/%a1,-(%sp)          /* save registers */
 
-        movem.l %a0/%a1,-(%sp)          /* call C bottleneck */
-        clr.l   -(%sp)
-        move.b  7(%a0),(%sp)            /* trap number as argument */
-        bsr     funnel
-        addq    #8,%sp
+		movem.l %a0/%a1,-(%sp)          /* call C bottleneck */
+		clr.l   -(%sp)
+		move.b  7(%a0),(%sp)            /* trap number as argument */
+		bsr     funnel
+		addq    #8,%sp
 
 		movem.l (%sp)+,%a0/%a1
 
