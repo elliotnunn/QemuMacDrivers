@@ -49,5 +49,6 @@ drvrClose:
 returnDirectly:
 		rts
 
+		.section .bss
 dce:
 		.long   0                       /* extern struct DCtlEntry *dce; */
