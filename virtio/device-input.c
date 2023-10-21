@@ -1,3 +1,59 @@
+#ifndef GENERATINGCFM
+
+int globular = 100;
+int globular2 = 100;
+
+const unsigned short drvrFlags = 0x4c00;
+
+// Pascal string followed by a 2-byte BCD version number
+const char drvrNameVers[] = "\x09.virtio9p\x01\x00";
+
+static void reg(char key, char val) {
+	volatile char *addr = *(char **)0x1dc + 2; // ACtl
+
+	*addr = key;
+	*addr = val;
+}
+
+void sccWrite(char c) {
+	static int didInit;
+
+	if (!didInit) {
+		didInit = 1;
+
+		reg(9, 0x80); // reset A/modem
+		reg(4, 0x48); // SB1 | X16CLK
+		reg(12, 0); // basic baud rate
+		reg(13, 0); // basic baud rate
+		reg(14, 3); // baud rate generator = BRSRC | BRENAB
+		// skip enabling receive via reg 3
+		reg(5, 0xca); // enable tx, 8 bits/char, set RTS & DTR
+	}
+
+	volatile char *addr = *(char **)0x1dc + 6; // AData
+	*addr = c;
+}
+
+void print(char *str) {
+	while (*str) sccWrite(*str++);
+}
+
+short funnel(long commandCode, void *pb, void *dce) {
+	print("got a command code in the funnel\n");
+
+	*(char *)8 = 0;
+	globular++;
+	return 0;
+}
+
+
+#else
+
+
+
+
+
+
 #include <Devices.h>
 #include <DriverServices.h>
 #include <Events.h>
@@ -386,3 +442,5 @@ void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 
 void DConfigChange(void) {
 }
+
+#endif

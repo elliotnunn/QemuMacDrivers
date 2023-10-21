@@ -179,7 +179,7 @@ DriverDescription TheDriverDescription = {
 	{"\x0cpci1af4,1050", {0x00, 0x10, 0x80, 0x00}}, // v0.1
 	{kDriverIsUnderExpertControl |
 		kDriverIsOpenedUponLoad,
-		"\x15.Display_Video_VirtIO"},
+		"\x1b.Display_Video_Apple_Virtio"}, // "Apple" = interface not vendor
 	{1, // nServices
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsVideo, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };

@@ -1,0 +1,36 @@
+# Important to remember that a DRVR is all statically linked: no system libs
+
+BUILD = build-drvr
+
+CC = m68k-apple-macos-gcc
+CFLAGS = -O3 -mpcrel -ffunction-sections -fdata-sections -c
+
+AS = m68k-apple-macos-as
+ASFLAGS =
+
+$(shell mkdir -p $(BUILD))
+
+$(BUILD)/declrom: $(BUILD)/declrom.elf
+	m68k-apple-macos-objcopy --only-section .text -O binary $^ $@
+	./calculate_crc.lua $@ $@
+
+$(BUILD)/declrom.elf: $(BUILD)/declrom.o
+	m68k-apple-macos-ld -o $@ $^
+
+$(BUILD)/declrom.o: declrom.s $(BUILD)/device-input.drvr
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/%.o: %.c
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(BUILD)/%.o: %.s
+	$(AS) $(ASFLAGS) -o $@ $^
+
+$(BUILD)/device-%.drvr: $(BUILD)/device-%.elf
+	m68k-apple-macos-objcopy --only-section .drvr -O binary $^ $@
+
+$(BUILD)/device-input.elf: drvr.lds $(BUILD)/drvr.o $(BUILD)/device-input.o
+	m68k-apple-macos-ld --gc-sections -o $@ --script $^
+
+clean:
+	rm -rf $(BUILD)
