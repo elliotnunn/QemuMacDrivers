@@ -24,7 +24,7 @@ not used because it is unavailable at the start of the boot process.
 #include <Traps.h>
 
 #include "hashtab.h"
-#include "lprintf.h"
+#include "printf.h"
 #include "panic.h"
 #include "paramblkprint.h"
 #include "patch68k.h"
@@ -183,8 +183,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
-	if (code <= 6 && lprintf_enable)
-		lprintf("Drvr_%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, 1));
+	if (code <= 6 && logenable)
+		printf("Drvr_%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, 1));
 
 	switch (code) {
 	case kInitializeCommand:
@@ -221,8 +221,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		break;
 	}
 
-	if (code <= 6 && lprintf_enable)
-		lprintf("%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, err));
+	if (code <= 6 && logenable)
+		printf("%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, err));
 
 	// Return directly from every call
 	if (kind & kImmediateIOCommandKind) {
@@ -239,23 +239,23 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static OSStatus initialize(DriverInitInfo *info) {
 	// Debug output
 	drvrRefNum = info->refNum;
-	sprintf(lprintf_prefix, ".virtio9p(%d) ", drvrRefNum);
+	sprintf(logprefix, ".virtio9p(%d) ", drvrRefNum);
 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-		lprintf_enable = 1;
+		logenable = 1;
 	}
 
-	lprintf("Primary init\n");
+	printf("Primary init\n");
 
 	// Start the Virtio layer
 	if (!VInit(&info->deviceEntry)) {
-		lprintf("...failed VInit()\n");
+		printf("...failed VInit()\n");
 		return paramErr;
 	};
 
 	// Request mount_tag in the config area
 	VSetFeature(0, 1);
 	if (!VFeaturesOK()) {
-		lprintf("...failed VFeaturesOK()\n");
+		printf("...failed VFeaturesOK()\n");
 		return paramErr;
 	}
 
@@ -268,7 +268,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Request enough buffers to transfer a megabyte in page sized chunks
 	uint16_t viobufs = QInit(0, 256);
 	if (viobufs < 2) {
-		lprintf("...failed QInit()\n");
+		printf("...failed QInit()\n");
 		return paramErr;
 	}
 	QInterest(0, 1);
@@ -290,14 +290,14 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// Trick: hook into the File Manager, or arrange for this to be done later
 	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
-		lprintf("FM up: mounting now\n");
+		printf("FM up: mounting now\n");
 		installAndMountAndNotify();
 	} else {
 		// Bootable filesystem?
 		// TODO: this needs to check for a ZSYS and FNDR file
 		int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
 		if (systemFolder > 0) {
-			lprintf("FM down, bootable System Folder: I am the boot drive\n");
+			printf("FM down, bootable System Folder: I am the boot drive\n");
 			vcb.vcbFndrInfo[0] = systemFolder;
 
 			struct bbnames bbn = {};
@@ -311,11 +311,11 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 			SetTimeout(1); // give up on the default disk quickly
 		} else {
-			lprintf("FM down, not bootable\n");
+			printf("FM down, not bootable\n");
 		}
 	}
 
-	lprintf("...primary init succeeded\n");
+	printf("...primary init succeeded\n");
 	return noErr;
 }
 
@@ -331,9 +331,9 @@ static void installAndMountAndNotify(void) {
 	long patched = 0;
 	Gestalt(selector, &patched);
 
-	lprintf("ToExtFS hook (Gestalt %.4s): ", &selector);
+	printf("ToExtFS hook (Gestalt %.4s): ", &selector);
 	if (patched) {
-		lprintf("already installed\n");
+		printf("already installed\n");
 	} else {
 		// External filesystems need a big stack, and they can't
 		// share the FileMgr stack because of reentrancy problems
@@ -433,7 +433,7 @@ static char *mkbb(OSErr (*booter)(void), struct bbnames names) {
 // Do the job of a System 7 boot block: load and run System resource 'boot' 2.
 // Not worth checking return values: if boot fails then the reason is clear enough
 static OSErr boot(void) {
-	lprintf("Emulating boot block\n");
+	printf("Emulating boot block\n");
 
 	// Populate low memory from the declarative part of the boot block.
 	// (We use the copy from our own globals. There is a copy A5+0x270.)
@@ -470,7 +470,7 @@ static OSErr boot(void) {
 	BlockMove(thunk, thunk, sizeof thunk);
 
 	// Call boot 2, never to return
-	lprintf("...starting System file\n");
+	printf("...starting System file\n");
 	CallUniversalProc(
 		(void *)thunk,
 		kCStackBased
@@ -501,7 +501,7 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	while (findVol(vcb.vcbVRefNum) != NULL) vcb.vcbVRefNum--;
 
-	lprintf("refnums are driver=%d drive=%d volume=%d\n",
+	printf("refnums are driver=%d drive=%d volume=%d\n",
 		drvrRefNum, dqe.dqe.dQDrive, vcb.vcbVRefNum);
 
 	if (GetVCBQHdr()->qHead == NULL) {
@@ -517,7 +517,7 @@ static OSErr fsMountVol(struct IOParam *pb) {
 
 	mounted = true;
 // 	if (vcb.vcbVRefNum & 1)
-// 		strcpy(lprintf_prefix, "                              ");
+// 		strcpy(logprefix, "                              ");
 	return noErr;
 }
 
@@ -532,7 +532,7 @@ static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
 		if (wdcb) cnid = wdcb->wdDirID;
 	}
 
-	if (cnid != 2) lprintf("GetVolInfo on subdir\n");
+	if (cnid != 2) printf("GetVolInfo on subdir\n");
 
 	// Count contained files
 	pb->ioVNmFls = 0;
@@ -598,7 +598,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	int32_t cnid = pbDirID(pb);
 
 	if (idx > 0) {
-		lprintf("GCI index mode\n");
+		printf("GCI index mode\n");
 
 		// Software commonly calls with index 1, 2, 3 etc
 		// Cache Readdir9 to avoid quadratically relisting the directory per-call
@@ -649,11 +649,11 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 
 		browse(MYFID, cnid, "");
 	} else if (idx == 0) {
-		lprintf("GCI name mode\n");
+		printf("GCI name mode\n");
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
 		if (iserr(cnid)) return cnid;
 	} else {
-		lprintf("GCI ID mode\n");
+		printf("GCI ID mode\n");
 		cnid = browse(MYFID, cnid, "\p");
 		if (iserr(cnid)) return cnid;
 	}
@@ -661,8 +661,8 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	// MYFID and cnid now both valid
 
 	// Here's some tricky debugging
-	if (lprintf_enable) {
-		lprintf("GCI found "); cnidPrint(cnid); lprintf("\n");
+	if (logenable) {
+		printf("GCI found "); cnidPrint(cnid); printf("\n");
 	}
 
 	// Return the filename
@@ -720,7 +720,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		FCBRec *openFCB;
 		while (UnivIndexFCB(&vcb, &openFork, &openFCB) == noErr) {
 			if (openFCB->fcbFlNm == cnid) {
-				lprintf("yes! a doubly open file!\n");
+				printf("yes! a doubly open file!\n");
 				pb->ioFRefNum = openFork;
 				break;
 			}
@@ -891,11 +891,11 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		char rname[512];
 		sprintf(rname, "%s.rsrc", getDBName(cnid));
 
-		lprintf("CREATING RSRC %s\n", rname);
+		printf("CREATING RSRC %s\n", rname);
 
 		// Make sure the sidecar file exists
 		Walk9(fid, 10, 1, (const char *[]){".."}, NULL, NULL); // parent dir
-		if (Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, rname, NULL, NULL) == 0) lprintf("created otherwise missing sidecar file!");
+		if (Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, rname, NULL, NULL) == 0) printf("created otherwise missing sidecar file!");
 		Clunk9(10);
 
 		if (Walk9(fid, fid, 2, (const char *[]){"..", rname}, NULL, NULL)) return ioErr;
@@ -910,7 +910,7 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		}
 	} else {
 		if (Lopen9(fid, O_RDWR, NULL, NULL)) {
-			lprintf("did sadly fail to get write permission\n");
+			printf("did sadly fail to get write permission\n");
 			pb->ioPermssn = fsRdPerm;
 			if (Lopen9(fid, O_RDONLY, NULL, NULL)) {
 				return permErr;
@@ -1103,11 +1103,11 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 		} else {
 			// Yes, a read/write succeeded beyond EOF, so the file is longer
 			// Tell all the other FCBs about this
-			lprintf("Lengthening fork to %d:", pb->ioPosOffset);
+			printf("Lengthening fork to %d:", pb->ioPosOffset);
 			short fellowFile = pb->ioRefNum;
 			FCBRec *fellowFCB;
 			for (;;) {
-				lprintf(" refnum-%d", fellowFile);
+				printf(" refnum-%d", fellowFile);
 
 				if (UnivResolveFCB(fellowFile, &fellowFCB)) panic("FCB linked list broken (RW)");
 
@@ -1116,7 +1116,7 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 				fellowFile = fellowFCB->fcb9Link;
 				if (fellowFile == pb->ioRefNum) break;
 			}
-			lprintf("\n");
+			printf("\n");
 		}
 	}
 
@@ -1321,12 +1321,12 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	}
 
 
-	lprintf("Browsing for /");
+	printf("Browsing for /");
 	const char *suffix = "/";
 	for (int i=0; i<pathCompCnt; i++) {
-		lprintf(i<pathCompCnt-1 ? "%s/" : "%s", pathComps[i]);
+		printf(i<pathCompCnt-1 ? "%s/" : "%s", pathComps[i]);
 	}
-	lprintf("\n");
+	printf("\n");
 
 	// Fast case: root only
 	if (pathCompCnt == 0) {
@@ -1625,7 +1625,7 @@ static bool isdir(int32_t cnid) {
 
 // Print a CNID to the log as a /unix/path
 static void cnidPrint(int32_t cnid) {
-	if (!lprintf_enable) return;
+	if (!logenable) return;
 
 	char big[512];
 	int remain = sizeof big;
@@ -1642,7 +1642,7 @@ static void cnidPrint(int32_t cnid) {
 		cnid = getDBParent(cnid);
 	}
 
-	lprintf("%.*s", sizeof big - remain, big + remain);
+	printf("%.*s", sizeof big - remain, big + remain);
 }
 
 static struct DrvQEl *findDrive(short num) {
@@ -1755,7 +1755,7 @@ static int32_t getDBParent(int32_t cnid) {
 static long fsCall(void *pb, long selector) {
 	static unsigned char hdr;
 	if (hdr++ == 0) {
-		lprintf("%lu%% (browse/total) %d%% (relist/total)\n", browseTimer*100/hfsTimer, relistTimer*100/hfsTimer);
+		printf("%lu%% (browse/total) %d%% (relist/total)\n", browseTimer*100/hfsTimer, relistTimer*100/hfsTimer);
 	}
 
 	TIMEFUNC(hfsTimer);
@@ -1771,16 +1771,16 @@ static long fsCall(void *pb, long selector) {
 		selector = trap;
 	}
 
-	if (lprintf_enable) {
-		lprintf("FS_%s", PBPrint(pb, selector, 1));
-		strcat(lprintf_prefix, "     ");
+	if (logenable) {
+		printf("FS_%s", PBPrint(pb, selector, 1));
+		strcat(logprefix, "     ");
 	}
 
 	OSErr result = fsDispatch(pb, selector);
 
-	if (lprintf_enable) {
-		lprintf_prefix[strlen(lprintf_prefix) - 5] = 0;
-		lprintf("%s", PBPrint(pb, selector, result));
+	if (logenable) {
+		logprefix[strlen(logprefix) - 5] = 0;
+		printf("%s", PBPrint(pb, selector, result));
 	}
 
 	return result;

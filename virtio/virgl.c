@@ -1,7 +1,7 @@
-#include "lprintf.h"
+#include "printf.h"
 
 #include "virgl.h"
 
 void VirglTest(void) {
-	lprintf("Here is virgl\n");
+	printf("Here is virgl\n");
 }

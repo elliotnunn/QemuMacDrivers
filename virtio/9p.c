@@ -16,7 +16,7 @@ TODO:
 #include <string.h>
 
 #include "allocator.h"
-#include "lprintf.h"
+#include "printf.h"
 #include "panic.h"
 #include "virtqueue.h"
 
@@ -410,15 +410,15 @@ static int transact(uint8_t cmd, const char *tfmt, const char *rfmt, ...) {
 	*(t+4) = cmd; // T-command number
 	WRITE16LE(t+5, 0); // zero is our only tag number (for now...)
 
-// 	lprintf("> ");
+// 	printf("> ");
 // 	for (int i=0; i<ts; i++) {
-// 		lprintf("%02x", 255 & t[i]);
+// 		printf("%02x", 255 & t[i]);
 // 	}
-// 	lprintf(" ");
+// 	printf(" ");
 // 	for (int i=0; i<tbigsize; i++) {
-// 		lprintf("%02x", 255 & ((char *)tbig)[i]);
+// 		printf("%02x", 255 & ((char *)tbig)[i]);
 // 	}
-// 	lprintf("\n");
+// 	printf("\n");
 
 	// add up rx buffer size
 	// (unfortunately need to iterate the VA list just to get the "big" buffer)
@@ -520,15 +520,15 @@ static int transact(uint8_t cmd, const char *tfmt, const char *rfmt, ...) {
 
 	CheckpointIO(prep.preparationID, 0);
 
-// 	lprintf("< ");
+// 	printf("< ");
 // 	for (int i=0; i<rs; i++) {
-// 		lprintf("%02x", 255 & r[i]);
+// 		printf("%02x", 255 & r[i]);
 // 	}
-// 	lprintf(" ");
+// 	printf(" ");
 // 	for (int i=0; i<rbigsize; i++) {
-// 		lprintf("%02x", 255 & ((char *)rbig)[i]);
+// 		printf("%02x", 255 & ((char *)rbig)[i]);
 // 	}
-// 	lprintf("\n");
+// 	printf("\n");
 
 	if (r[4] == 7 /*Rlerror*/) {
 		// The errno field might be split between a header ("bwd" etc in

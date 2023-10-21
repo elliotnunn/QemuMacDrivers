@@ -1,21 +1,14 @@
-#include "scc.h"
+#include "printf.h"
 
 #include <Debugging.h>
 
 #include "panic.h"
 
 void panic(const char *panicstr) {
-	const char *prefix = "\npanic: ";
+	logenable = 1;
+	logprefix[0] = 0;
 
-	for (const char *p=prefix; *p!=0; p++) {
-		sccWrite(*p);
-	}
-
-	for (const char *p=panicstr; *p!=0; p++) {
-		sccWrite(*p);
-	}
-
-	sccWrite('\n');
+	printf("\npanic: %s\n", panicstr);
 
 	unsigned char pstring[256] = {0};
 	for (int i=0; i<255; i++) {

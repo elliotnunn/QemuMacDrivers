@@ -16,10 +16,10 @@ COMMON_PPC = \
 	virtqueue.o \
 	allocator-ppc.o \
 	atomic-ppc.o \
-	lprintf.o \
+	printf.o \
 	patch68k.o \
 	panic.o \
-	scc.o \
+	printf.o \
 
 all: ../builds/qemu_vga.ndrv ../builds/virtio-input.ndrv ../builds/9p.ndrv ../builds/bootstrap.img
 

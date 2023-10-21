@@ -1,7 +1,5 @@
 #include <stddef.h>
 
-#include "lprintf.h"
-
 #include "blit.h"
 
 const char BlitterAlign[6] = {

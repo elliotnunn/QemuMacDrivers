@@ -3,7 +3,7 @@
 BUILD = build-drvr
 
 CC = m68k-apple-macos-gcc
-CFLAGS = -O3 -mpcrel -ffunction-sections -fdata-sections -c
+CFLAGS = -c -O3 -mpcrel -mcpu=68020 -nostartfiles -ffreestanding -ffunction-sections -fdata-sections
 
 AS = m68k-apple-macos-as
 ASFLAGS =
@@ -29,8 +29,10 @@ $(BUILD)/%.o: %.s
 $(BUILD)/device-%.drvr: $(BUILD)/device-%.elf
 	m68k-apple-macos-objcopy --only-section .drvr -O binary $^ $@
 
-$(BUILD)/device-input.elf: drvr.lds $(BUILD)/drvr.o $(BUILD)/device-input.o
-	m68k-apple-macos-ld --gc-sections -o $@ --script $^
+$(BUILD)/device-input.elf: drvr.lds $(BUILD)/drvr.o \
+                           $(BUILD)/printf.o \
+                           $(BUILD)/device-input.o
+	m68k-apple-macos-ld --gc-sections -o $@ --script $^ `m68k-apple-macos-gcc -print-file-name=libgcc.a`
 
 clean:
 	rm -rf $(BUILD)

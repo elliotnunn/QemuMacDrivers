@@ -18,7 +18,7 @@ Reclaim stale data in the array (e.g. free list inside the heap block)
 
 #include "hashtab.h"
 
-#include "lprintf.h"
+#include "printf.h"
 #include "panic.h"
 
 // Keep to 16 bytes
@@ -77,7 +77,7 @@ void HTallocate(void) {
 			if (table) DisposePtr((void *)table);
 			table = newtable;
 			tablesize = newtablesize;
-			lprintf("Hash table slots = %d\n", tablesize);
+			printf("Hash table slots = %d\n", tablesize);
 		}
 	}
 
@@ -94,7 +94,7 @@ void HTallocate(void) {
 			blobsize = GetHandleSize(blob);
 			HLock(blob);
 		}
-		lprintf("Hash table storage bytes = %d\n", blobsize);
+		printf("Hash table storage bytes = %d\n", blobsize);
 	}
 
 	LMSetMemErr(saveMemErr);
@@ -119,7 +119,7 @@ void HTallocatelater(void) {
 	if (notificationPending) return;
 	if (chooseTableSize() <= tablesize || chooseBlobSize() <= blobsize) return;
 
-	lprintf("Hash table needs memory: posting notification task\n");
+	printf("Hash table needs memory: posting notification task\n");
 
 	static RoutineDescriptor descriptor = BUILD_ROUTINE_DESCRIPTOR(
 		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
@@ -245,23 +245,23 @@ static void *entryval(struct entry *e) {
 }
 
 static void dump(void) {
-	lprintf("hashtable dump\n");
+	printf("hashtable dump\n");
 	for (int i=0; i<tablesize; i++) {
 		if (table[i].klen == 0) continue;
 
-		lprintf("   [% 5d] '%c' ", i, table[i].tag);
+		printf("   [% 5d] '%c' ", i, table[i].tag);
 
 		unsigned char *x;
 		x = entrykey(&table[i]);
 		for (int j=0; j<table[i].klen; j++) {
-			lprintf("%02x", x[j]);
+			printf("%02x", x[j]);
 		}
-		lprintf(": ");
+		printf(": ");
 		x = entryval(&table[i]);
 		for (int j=0; j<table[i].vlen; j++) {
-			lprintf("%02x", x[j]);
+			printf("%02x", x[j]);
 		}
-		lprintf("\n");
+		printf("\n");
 	}
 }
 

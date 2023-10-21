@@ -1,48 +1,18 @@
 #ifndef GENERATINGCFM
 
-int globular = 100;
-int globular2 = 100;
+#include "printf.h"
 
 const unsigned short drvrFlags = 0x4c00;
 
 // Pascal string followed by a 2-byte BCD version number
 const char drvrNameVers[] = "\x09.virtio9p\x01\x00";
 
-static void reg(char key, char val) {
-	volatile char *addr = *(char **)0x1dc + 2; // ACtl
 
-	*addr = key;
-	*addr = val;
-}
-
-void sccWrite(char c) {
-	static int didInit;
-
-	if (!didInit) {
-		didInit = 1;
-
-		reg(9, 0x80); // reset A/modem
-		reg(4, 0x48); // SB1 | X16CLK
-		reg(12, 0); // basic baud rate
-		reg(13, 0); // basic baud rate
-		reg(14, 3); // baud rate generator = BRSRC | BRENAB
-		// skip enabling receive via reg 3
-		reg(5, 0xca); // enable tx, 8 bits/char, set RTS & DTR
-	}
-
-	volatile char *addr = *(char **)0x1dc + 6; // AData
-	*addr = c;
-}
-
-void print(char *str) {
-	while (*str) sccWrite(*str++);
-}
+void _putchar(char character);
 
 short funnel(long commandCode, void *pb, void *dce) {
-	print("got a command code in the funnel\n");
-
-	*(char *)8 = 0;
-	globular++;
+	logenable = 1;
+	printf("got a command code in the funnel\n");
 	return 0;
 }
 
@@ -64,7 +34,7 @@ short funnel(long commandCode, void *pb, void *dce) {
 #include <Traps.h>
 
 #include "allocator.h"
-#include "lprintf.h"
+#include "printf.h"
 #include "panic.h"
 #include "transport.h"
 #include "virtqueue.h"
@@ -162,12 +132,12 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
-	strcpy(lprintf_prefix, ".virtioinput ");
+	strcpy(logprefix, ".virtioinput ");
 	if (!RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-		lprintf_enable = 1;
+		logenable = 1;
 	}
 
-	lprintf("Virtio-input driver starting\n");
+	printf("Virtio-input driver starting\n");
 
 	lpage = AllocPages(1, &ppage);
 	if (lpage == NULL) return openErr;
@@ -188,9 +158,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 	QNotify(0);
 
-	lprintf("Virtio-input driver started\n");
+	printf("Virtio-input driver started\n");
 
-	lprintf("Installing late-boot hook: ");
+	printf("Installing late-boot hook: ");
 
 	Patch68k(
 		_Gestalt,
@@ -213,7 +183,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 }
 
 static void lateBootHook(void) {
-	lprintf("Late boot: installing TrackControl patch\n");
+	printf("Late boot: installing TrackControl patch\n");
 
 	oldTrackControl = GetToolTrapAddress(_TrackControl);
 
@@ -227,7 +197,7 @@ static void lateBootHook(void) {
 
 	SetToolTrapAddress(&descTrackControl, _TrackControl);
 
-	lprintf("Late boot: installing GNEFilter patch\n");
+	printf("Late boot: installing GNEFilter patch\n");
 
 	oldGNEFilter = LMGetGNEFilter();
 
@@ -431,7 +401,7 @@ static void reQueue(int bufnum) {
 
 void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 	struct event *e = &lpage[(int)tag];
-	//lprintf("Virtio-input event type=%d code=%d value=%d\n", e->type, e->code, e->value);
+	//printf("Virtio-input event type=%d code=%d value=%d\n", e->type, e->code, e->value);
 
 	handleEvent(*e);
 

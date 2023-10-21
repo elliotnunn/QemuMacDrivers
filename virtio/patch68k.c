@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "lprintf.h"
+#include "printf.h"
 
 #include "patch68k.h"
 
@@ -168,13 +168,13 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	SetPtrSize((Ptr)block, (char *)code - (char *)block); // shrink
 	setvec(vector, &block->code); // install
 
-	if (lprintf_enable) {
-		lprintf("Patched %#x. Old code at %p. New code in sys heap at %p:\n   ",
+	if (logenable) {
+		printf("Patched %#x. Old code at %p. New code in sys heap at %p:\n   ",
 			vector, block->original, &block->code);
 		for (char *i=block->code; i<code; i+=2) {
-			lprintf(" %02x%02x", i[0], i[1]);
+			printf(" %02x%02x", i[0], i[1]);
 		}
-		lprintf("\n");
+		printf("\n");
 	}
 
 	return &block->code;
@@ -185,7 +185,7 @@ void Unpatch68k(void *patch) {
 
 	if (getvec(block->vector) == &block->code) {
 		// yay, we never got over-patched
-		lprintf("Unpatched %#x back to %p\n", block->vector, block->original);
+		printf("Unpatched %#x back to %p\n", block->vector, block->original);
 
 		setvec(block->vector, block->original);
 		DisposePtr((Ptr)block);
@@ -202,10 +202,10 @@ void Unpatch68k(void *patch) {
 		}
 		BlockMove(block, block, 14); // clear 68k emulator cache
 
-		lprintf("Unpatched %#x using a thunk:\n   ", block->vector);
+		printf("Unpatched %#x using a thunk:\n   ", block->vector);
 		for (char *i=block->code; i<block->code+6; i+=2) {
-			lprintf(" %02x%02x", i[0], i[1]);
+			printf(" %02x%02x", i[0], i[1]);
 		}
-		lprintf("\n");
+		printf("\n");
 	}
 }

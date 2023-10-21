@@ -18,7 +18,7 @@
 #include "blit.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
-#include "lprintf.h"
+#include "printf.h"
 #include "patch68k.h"
 #include "transport.h"
 #include "structs-gpu.h"
@@ -272,34 +272,34 @@ extern OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		err = finalize(pb.finalInfo);
 		break;
 	case kControlCommand:
-		if (lprintf_enable && (*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
+		if (logenable && (*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
 			if ((*pb.pb).cntrlParam.csCode < sizeof(controlNames)/sizeof(*controlNames)) {
-				lprintf("Control(%s)\n", controlNames[(*pb.pb).cntrlParam.csCode]);
+				printf("Control(%s)\n", controlNames[(*pb.pb).cntrlParam.csCode]);
 			} else {
-				lprintf("Control(%d)\n", (*pb.pb).cntrlParam.csCode);
+				printf("Control(%d)\n", (*pb.pb).cntrlParam.csCode);
 			}
 		}
 
 		err = control((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
 
-		if (lprintf_enable && (*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
-			lprintf("    = %d\n", err);
+		if (logenable && (*pb.pb).cntrlParam.csCode != cscDrawHardwareCursor) {
+			printf("    = %d\n", err);
 		}
 
 		break;
 	case kStatusCommand:
-		if (lprintf_enable) {
+		if (logenable) {
 			if ((*pb.pb).cntrlParam.csCode < sizeof(statusNames)/sizeof(*statusNames)) {
-				lprintf("Status(%s)\n", statusNames[(*pb.pb).cntrlParam.csCode]);
+				printf("Status(%s)\n", statusNames[(*pb.pb).cntrlParam.csCode]);
 			} else {
-				lprintf("Status(%d)\n", (*pb.pb).cntrlParam.csCode);
+				printf("Status(%d)\n", (*pb.pb).cntrlParam.csCode);
 			}
 		}
 
 		err = status((*pb.pb).cntrlParam.csCode, *(void **)&(*pb.pb).cntrlParam.csParam);
 
-		if (lprintf_enable) {
-			lprintf("    = %d\n", err);
+		if (logenable) {
+			printf("    = %d\n", err);
 		}
 
 		break;
@@ -325,7 +325,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	short width, height;
 
 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-		lprintf_enable = 1;
+		logenable = 1;
 	}
 
 	// No need to signal FAILED if cannot communicate with device
@@ -770,7 +770,7 @@ static void lateBootHook(void) {
 	InstallDirtyRectPatch();
 	updateScreen(0, 0, H, W);
 	DConfigChange();
-	lprintf("INSTALLED QUICKDRAW PATCHES");
+	printf("INSTALLED QUICKDRAW PATCHES");
 }
 
 void DirtyRectCallback(short top, short left, short bottom, short right) {
@@ -934,10 +934,10 @@ static void perfTest(void) {
 	KeyMap keys;
 	GetKeys(keys);
 	if ((keys[1]&9) == 9) {
-		lprintf_enable = 1; // enable debug printing from now on
-		lprintf("Switching to %dx%dx%d. Speed test:\n", W, H, 1<<(depth-kDepthMode1));
+		logenable = 1; // enable debug printing from now on
+		printf("Switching to %dx%dx%d. Speed test:\n", W, H, 1<<(depth-kDepthMode1));
 	} else {
-		lprintf("Switching to %dx%dx%d. Ctrl-shift for speed test.\n", W, H, 1<<(depth-kDepthMode1));
+		printf("Switching to %dx%dx%d. Ctrl-shift for speed test.\n", W, H, 1<<(depth-kDepthMode1));
 		return;
 	}
 
@@ -974,7 +974,7 @@ static void perfTest(void) {
 		ctr2++;
 	}
 
-	lprintf("%ld Hz with gamma correction, %ld Hz without\n", ctr1*2, ctr2*2);
+	printf("%ld Hz with gamma correction, %ld Hz without\n", ctr1*2, ctr2*2);
 }
 
 static OSStatus VBL(void *p1, void *p2) {
@@ -1126,7 +1126,7 @@ static void setGammaTable(GammaTbl *tbl) {
 		// 	const char colors[] = "RGB";
 		// 	double middle = ((double)src[127] + (double)src[128]) / 2.0 / 255.0;
 		// 	double exponent = -log2(middle);
-		// 	lprintf("Approximate %c exponent = %.3f\n", colors[i], exponent);
+		// 	printf("Approximate %c exponent = %.3f\n", colors[i], exponent);
 		// }
 
 		for (j=0; j<256 && j<tbl->gDataCnt; j++) {
@@ -1296,7 +1296,7 @@ static OSStatus GetGammaInfoList(VDGetGammaListRec *rec) {
 		id = rec->csPreviousGammaTableID + 1;
 	} else if (rec->csPreviousGammaTableID == last) {
 		rec->csGammaTableID = kGammaTableIDNoMoreTables;
-		lprintf("GetGammaInfoList prevID=%d ... ID=%d size=%d name=%s\n",
+		printf("GetGammaInfoList prevID=%d ... ID=%d size=%d name=%s\n",
 			rec->csPreviousGammaTableID,
 			rec->csGammaTableID,
 			rec->csGammaTableSize,
@@ -1310,7 +1310,7 @@ static OSStatus GetGammaInfoList(VDGetGammaListRec *rec) {
 	rec->csGammaTableSize = sizeof(builtinGamma[0].table);
 	memcpy(rec->csGammaTableName, builtinGamma[id-first].name, 32);
 
-	lprintf("GetGammaInfoList prevID=%d ... ID=%d size=%d name=%s\n",
+	printf("GetGammaInfoList prevID=%d ... ID=%d size=%d name=%s\n",
 		rec->csPreviousGammaTableID,
 		rec->csGammaTableID,
 		rec->csGammaTableSize,
@@ -1332,7 +1332,7 @@ static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec) {
 		return paramErr;
 	}
 
-	lprintf("copying gamma table %d x %db\n", id, sizeof(builtinGamma[0].table));
+	printf("copying gamma table %d x %db\n", id, sizeof(builtinGamma[0].table));
 
 	memcpy(rec->csGammaTablePtr, &builtinGamma[id-first].table, sizeof(builtinGamma[0].table));
 
