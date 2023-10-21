@@ -4,15 +4,20 @@ The linker script implements the DRVR header
 C code does the actual work
 */
 
-		.global drvrOpen, drvrClose, drvrControl, drvrStatus, drvrPrime
+		.global drvrOpen, drvrClose, drvrControl, drvrStatus, drvrPrime, dce
 
+		.section .text
 drvrOpen:
 		movem.l %a0/%a1,-(%sp)          /* save registers */
 
-		movem.l %a0/%a1,-(%sp)          /* call C bottleneck */
-		move.l  #0,-(%sp)
+		move.l  %a0,-(%sp)              /* arg: PB */
+		clr.l   -(%sp)                  /* arg: trap number */
+
+		lea     dce(%pc),%a0            /* opportunistically set DCE global */
+		move.l  %a1,(%a0)
+
 		bsr     funnel
-		add     #12,%sp
+		addq    #8,%sp
 
 		movem.l (%sp)+,%a0/%a1          /* restore registers */
 
@@ -25,9 +30,13 @@ drvrStatus:
 drvrClose:
 		movem.l %a0/%a1,-(%sp)          /* save registers */
 
-		movem.l %a0/%a1,-(%sp)          /* call C bottleneck */
-		clr.l   -(%sp)
+		move.l  %a0,-(%sp)              /* arg: PB */
+		clr.l   -(%sp)                  /* arg: trap number */
 		move.b  7(%a0),(%sp)            /* trap number as argument */
+
+		lea     dce(%pc),%a0            /* opportunistically set DCE global */
+		move.l  %a1,(%a0)
+
 		bsr     funnel
 		addq    #8,%sp
 
@@ -39,3 +48,6 @@ drvrClose:
 		move.l  0x8fc,-(%sp)            /* jIODone */
 returnDirectly:
 		rts
+
+dce:
+		.long   0                       /* extern struct DCtlEntry *dce; */

@@ -1,5 +1,7 @@
 #ifndef GENERATINGCFM
 
+#include <Devices.h>
+
 #include "printf.h"
 
 const unsigned short drvrFlags = 0x4c00;
@@ -8,11 +10,15 @@ const unsigned short drvrFlags = 0x4c00;
 const char drvrNameVers[] = "\x09.virtio9p\x01\x00";
 
 
+extern struct DCtlEntry *dce;
+
 void _putchar(char character);
 
-short funnel(long commandCode, void *pb, void *dce) {
+short funnel(long commandCode, void *pb) {
 	logenable = 1;
-	printf("got a command code in the funnel\n");
+	printf("got a command code in the funnel: code=%d pb=%p trap=%04x dce=%p flags=%04x\n",
+		commandCode, pb, 0xffff&((IOParam *)pb)->ioTrap, dce, 0xffff & dce->dCtlFlags);
+
 	return 0;
 }
 
