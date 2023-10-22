@@ -56,6 +56,7 @@ struct event {
 	int32_t value;
 } __attribute((scalar_storage_order("little-endian")));
 
+short funnel(long commandCode, void *pb);
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void handleEvent(struct event e);
@@ -133,15 +134,24 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	}
 }
 
+short funnel(long code, void *pb) {
+	switch (code) {
+	case _Open & 0xff:
+	return initialize
+	}
+}
+
 static OSStatus finalize(DriverFinalInfo *info) {
 	return noErr;
 }
 
 static OSStatus initialize(DriverInitInfo *info) {
 	strcpy(logprefix, ".virtioinput ");
-	if (!RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
+
+	// How to check these settings otherwise???
+	//if (!RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		logenable = 1;
-	}
+	//}
 
 	printf("Virtio-input driver starting\n");
 
