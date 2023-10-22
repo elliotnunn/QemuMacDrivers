@@ -1,10 +1,3 @@
-        .macro MacsbugSymbol Name
-        .byte 0x7F + _macsbugSymbol\@ - .
-        .ascii "\Name"
-_macsbugSymbol\@:
-        .align 2
-        .word 0 /* length of constants */
-        .endm
         /* random defines and macros that we would normally get from MPW */
         .macro OSLstEntry Id,Offset
         .long (\Id<<24)+((\Offset-.)&0xFFFFFF)
@@ -105,13 +98,7 @@ SEBlock.size:
 
 
 
-        .global _DeclHeader,qfb_interrupt_service_routine
-        .global _GammaTableMac, _GammaTableMac_Name
-        .global _GammaTableSrgb, _GammaTableSrgb_Name
-        .global _GammaTableLinear, _GammaTableLinear_Name
-        .global _GammaTableNTSC, _GammaTableNTSC_Name
-        .global _GammaTableSGI, _GammaTableSGI_Name
-        .global _GammaTablePAL, _GammaTablePAL_Name
+        .global _DeclHeader
 
         /* defines that have to do with our ROM */
         .set ourBoardID, 0x9545 /* hope no real board used this! */
@@ -219,50 +206,6 @@ _VideoDriverDirectory:
         OSLstEntry sCPU_68020, _DRVRBlock
         DatLstEntry endOfList, 0
 
-_GammaDirectory:
-        DatLstEntry endOfList, 0
-
-        .macro ModeResource name, paramLink, type
-\name\():
-        OSLstEntry mVidParams, \paramLink
-        DatLstEntry mPageCnt, 0x4545 /* will be patched by QEMU */
-        DatLstEntry mDevType, \type /* 0 = clut, 1 = fixed CLUT, 2 = direct */
-        DatLstEntry endOfList, 0
-        .endm
-        .macro ModeParams type, bpp, cpp, bpc, name
-\name\():
-        .long \name\()End-\name\() /* size of block */
-        .long 0x10000 /* offset within device memory */
-        .short 0x4545 /* bytes per row, will be patched by QEMU */
-        /* bounds (top, left, bottom, right) */
-        .short 0
-        .short 0
-        .short 0x4545 /* height, will be patched by QEMU */
-        .short 0x4545 /* width, will be patched by QEMU */
-        .short 1 /* version (always 1) */
-        .short 0 /* packType (not used) */
-        .long 0 /* packSize (not used) */
-        .long 72 << 16 /* 72 dots per inch horizontally */
-        .long 72 << 16 /* again vertically */
-        .short \type /* 0 = chunky indexed, 16 = chunky direct */
-        .short \bpp /* bits per pixel */
-        .short \cpp /* components per pixel */
-        .short \bpc /* bits per component */
-        .long 0 /* "plane bytes" (reserved) */
-\name\()End:
-        .endm
-        ModeResource _OneBitRec, _OneBitParams, 0
-        ModeResource _TwoBitRec, _TwoBitParams, 0
-        ModeResource _FourBitRec, _FourBitParams, 0
-        ModeResource _EightBitRec, _EightBitParams, 0
-        ModeResource _SixteenBitRec, _SixteenBitParams, 2
-        ModeResource _ThirtyTwoBitRec, _ThirtyTwoBitParams, 2
-        ModeParams 0, 1, 1, 1, _OneBitParams
-        ModeParams 0, 2, 1, 2, _TwoBitParams
-        ModeParams 0, 4, 1, 4, _FourBitParams
-        ModeParams 0, 8, 1, 8, _EightBitParams
-        ModeParams 16, 16, 3, 5, _SixteenBitParams
-        ModeParams 16, 32, 3, 8, _ThirtyTwoBitParams
 
         /* The icon! */
 _Icon:  .long 0x000FF000,0x007FFE00,0x01FFFF80,0x03E3FFC0,0x07C01FE0,0x0FC00FF0
