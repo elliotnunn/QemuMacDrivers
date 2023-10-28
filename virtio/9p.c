@@ -348,8 +348,7 @@ int Write9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *a
 }
 
 // This will be called (possibly by an interrupt) while transact() spins
-void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
-	QFree(q, buf);
+void DNotified(uint16_t q, size_t len, void *tag) {
 	flag = true;
 }
 

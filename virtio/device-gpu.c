@@ -749,9 +749,8 @@ static void notificationAtomic(NMRecPtr nmReqPtr) {
 		idForRes(width, height, true), &newdepth, 0, NULL);
 }
 
-void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
+void DNotified(uint16_t q, size_t len, void *tag) {
 	last_tag = tag;
-	QFree(q, buf);
 	if ((unsigned long)tag < 256) {
 		freebufs |= 1 << (char)(uint32_t)tag;
 		sendPixels(0x7fff7fff, 0x00000000);

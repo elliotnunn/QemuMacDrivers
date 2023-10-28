@@ -21,16 +21,17 @@ enum {
 struct virtq {
 	uint16_t size;
 	uint16_t used_ctr;
+	uint16_t nsent, nrecvd;
 	int32_t interest;
 	struct virtq_desc *desc;
 	struct virtq_avail *avail;
 	struct virtq_used *used;
-	uint8_t bitmap[MAX_RING/8];
 	void *tag[MAX_RING];
 };
 
 static struct virtq queues[MAX_VQ];
-static void QSendAtomicPart(uint16_t q, uint16_t buf);
+static void QSendAtomicPart(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag, bool *ret);
+static void QInterestAtomicPart(uint16_t q, int32_t delta);
 
 uint16_t QInit(uint16_t q, uint16_t max_size) {
 	if (q > MAX_VQ) return 0;
@@ -60,53 +61,43 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 }
 
 bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag) {
-	uint16_t buffers[MAX_RING];
+	bool ret;
+	QSendAtomicPart(q, n_out, n_in, addrs, sizes, tag, &ret);
+	return ret;
+}
 
-	// Find enough free buffer descriptors
-	uint16_t count = 0;
-	for (uint16_t try=0; try<queues[q].size; try++) {
-		if (!TestAndSet(try%8, queues[q].bitmap + try/8)) {
-			buffers[count++] = try;
-			if (count == n_out+n_in) break;
-		}
-	}
+static void QSendAtomicPart(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag, bool *ret) {
+	*ret = false;
 
-	// Not enough
-	if (count < n_out+n_in) {
-		for (uint16_t i=0; i<count; i++) {
-			TestAndClear(i%8, queues[q].bitmap + i/8);
-		}
-		return false;
-	}
+	uint16_t mask = queues[q].size - 1;
+	uint16_t first = queues[q].nsent & mask;
+	uint16_t pending = queues[q].nsent - queues[q].nrecvd;
+	if (pending + n_in + n_out > queues[q].size) return;
 
-	queues[q].tag[buffers[0]] = tag;
+	queues[q].tag[first] = tag;
 
 	// Populate the descriptors
 	for (uint16_t i=0; i<n_out+n_in; i++) {
-		uint16_t buf = buffers[i];
-		uint16_t next = (i<n_out+n_in-1) ? buffers[i+1] : 0;
-		uint16_t flags =
-			((i<n_out+n_in-1) ? VIRTQ_DESC_F_NEXT : 0) |
-			((i>=n_out) ? VIRTQ_DESC_F_WRITE : 0);
-
+		uint16_t buf = (first + i) & mask;
 		queues[q].desc[buf].addr = addrs[i];
 		queues[q].desc[buf].len = sizes[i];
-		queues[q].desc[buf].flags = flags;
-		queues[q].desc[buf].next = next;
+		queues[q].desc[buf].flags =
+			((i<n_out+n_in-1) ? VIRTQ_DESC_F_NEXT : 0) |
+			((i>=n_out) ? VIRTQ_DESC_F_WRITE : 0);
+		queues[q].desc[buf].next = (buf + 1) & mask;
 	}
 
+	queues[q].nsent += n_out + n_in;
+
 	// Put a pointer to the "head" descriptor in the avail queue
-	ATOMIC2(QSendAtomicPart, q, buffers[0]);
-
-	return true;
-}
-
-static void QSendAtomicPart(uint16_t q, uint16_t buf) {
 	uint16_t idx = queues[q].avail->idx;
-	queues[q].avail->ring[idx & (queues[q].size - 1)] = buf;
+	queues[q].avail->ring[idx & mask] = first & mask;
 	SynchronizeIO();
 	queues[q].avail->idx = idx + 1;
 	SynchronizeIO();
+
+	*ret = true;
+	return;
 }
 
 void QNotify(uint16_t q) {
@@ -114,7 +105,11 @@ void QNotify(uint16_t q) {
 }
 
 void QInterest(uint16_t q, int32_t delta) {
-	AddAtomic(delta, &queues[q].interest);
+	ATOMIC2(QInterestAtomicPart, q, delta);
+}
+
+static void QInterestAtomicPart(uint16_t q, int32_t delta) {
+	queues[q].interest += delta;
 	queues[q].avail->flags = (queues[q].interest == 0);
 }
 
@@ -151,19 +146,16 @@ void QPoll(uint16_t q) {
 	queues[q].used_ctr = end;
 
 	for (; i != end; i++) {
-		uint16_t desc = queues[q].used->ring[i&mask].id;
+		uint16_t first = queues[q].used->ring[i&mask].id;
 		size_t len = queues[q].used->ring[i&mask].len;
 
-		DNotified(q, desc, len, queues[q].tag[desc]);
-	}
-}
+		uint16_t buf = first;
+		for (;;) {
+			queues[q].nrecvd++;
+			if ((queues[q].desc[buf].flags & VIRTQ_DESC_F_NEXT) == 0) break;
+			buf = queues[q].desc[buf].next;
+		}
 
-// Called by DNotified to return descriptors to the pool usable by QSend
-void QFree(uint16_t q, uint16_t buf) {
-	for (;;) {
-		TestAndClear(buf%8, queues[q].bitmap + buf/8);
-		if (((queues[q].desc[buf].flags) & VIRTQ_DESC_F_NEXT) == 0)
-			break;
-		buf = queues[q].desc[buf].next;
+		DNotified(q, len, queues[q].tag[first]);
 	}
 }

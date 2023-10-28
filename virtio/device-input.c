@@ -415,13 +415,12 @@ static void reQueue(int bufnum) {
 		(void *)bufnum);
 }
 
-void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
+void DNotified(uint16_t q, size_t len, void *tag) {
 	struct event *e = &lpage[(int)tag];
 	//printf("Virtio-input event type=%d code=%d value=%d\n", e->type, e->code, e->value);
 
 	handleEvent(*e);
 
-	QFree(q, buf);
 	reQueue((int)tag);
 	QNotify(0);
 }
