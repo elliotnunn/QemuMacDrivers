@@ -12,7 +12,7 @@ SYSLIBS = \
 	-lControlsLib \
 
 COMMON_PPC = \
-	transport-ppc.o \
+	transport-pci.o \
 	virtqueue.o \
 	allocator-ppc.o \
 	printf.o \
