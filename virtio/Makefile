@@ -15,7 +15,6 @@ COMMON_PPC = \
 	transport-ppc.o \
 	virtqueue.o \
 	allocator-ppc.o \
-	atomic-ppc.o \
 	printf.o \
 	patch68k.o \
 	panic.o \

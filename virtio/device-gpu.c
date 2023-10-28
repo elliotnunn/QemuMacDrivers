@@ -67,11 +67,11 @@ static uint32_t resCount(void);
 static bool mode(int new_depth, uint32_t new_rez);
 static uint32_t setVirtioScanout(int idx, short rowbytes, short w, short h, uint32_t *page_list);
 static void notificationProc(NMRecPtr nmReqPtr);
-static void notificationAtomic(void *nmReqPtr);
+static void notificationAtomic(NMRecPtr nmReqPtr);
 static void debugPoll(void);
 static void lateBootHook(void);
 static void updateScreen(short t, short l, short b, short r);
-static void sendPixels(void *topleft_voidptr, void *botright_voidptr);
+static void sendPixels(uint32_t topleft, uint32_t botright);
 static void perfTest(void);
 static OSStatus VBL(void *p1, void *p2);
 static long rowbytesForBack(int relativeDepth, long width);
@@ -724,11 +724,11 @@ void DConfigChange(void) {
 // Got some system task time to access the Toolbox safely
 // TN1033 suggests using the Notification Manager
 static void notificationProc(NMRecPtr nmReqPtr) {
-	Atomic1(notificationAtomic, nmReqPtr);
+	ATOMIC1(notificationAtomic, nmReqPtr);
 }
 
 // Now, in addition to the Toolbox being safe, interrupts are (mostly) disabled
-static void notificationAtomic(void *nmReqPtr) {
+static void notificationAtomic(NMRecPtr nmReqPtr) {
 	struct virtio_gpu_config *config = VConfig;
 	short width, height;
 	unsigned long newdepth = depth;
@@ -754,7 +754,7 @@ void DNotified(uint16_t q, uint16_t buf, size_t len, void *tag) {
 	QFree(q, buf);
 	if ((unsigned long)tag < 256) {
 		freebufs |= 1 << (char)(uint32_t)tag;
-		sendPixels((void *)0x7fff7fff, (void *)0x00000000);
+		sendPixels(0x7fff7fff, 0x00000000);
 	}
 }
 
@@ -812,15 +812,15 @@ static void updateScreen(short t, short l, short b, short r) {
 		blitCursor();
 	}
 
-	Atomic2(sendPixels,
-		(void *)(((unsigned long)t << 16) | l),
-		(void *)(((unsigned long)b << 16) | r));
+	ATOMIC2(sendPixels,
+		(((unsigned long)t << 16) | l),
+		(((unsigned long)b << 16) | r));
 }
 
 // Non-reentrant, must be called atomically
 // MacsBug time might be an exception
-// Kick at interrupt time: sendPixels((void *)0x7fff7fff, (void *)0x00000000);
-static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
+// Kick at interrupt time: sendPixels(0x7fff7fff, 0x00000000);
+static void sendPixels(uint32_t topleft, uint32_t botright) {
 	static bool reentered;
 	static bool interest;
 
@@ -830,10 +830,10 @@ static void sendPixels(void *topleft_voidptr, void *botright_voidptr) {
 	static short pbottom = 0;
 	static short pright = 0;
 
-	short top = (uint32_t)topleft_voidptr >> 16;
-	short left = (uint32_t)topleft_voidptr;
-	short bottom = (uint32_t)botright_voidptr >> 16;
-	short right = (uint32_t)botright_voidptr;
+	short top = topleft >> 16;
+	short left = topleft;
+	short bottom = botright >> 16;
+	short right = botright;
 
 	int i;
 
@@ -963,14 +963,14 @@ static void perfTest(void) {
 	t += 2;
 	while (t > LMGetTicks()) {
 		while (freebufs == 0) QPoll(0);
-		Atomic2(sendPixels, (void *)0x00000000, (void *)0x7fff7fff);
+		ATOMIC2(sendPixels, 0x00000000, 0x7fff7fff);
 	}
 
 	// Measure without our blitter
 	t += 30;
 	while (t > LMGetTicks()) {
 		while (freebufs == 0) QPoll(0);
-		Atomic2(sendPixels, (void *)0x00000000, (void *)0x7fff7fff);
+		ATOMIC2(sendPixels, 0x00000000, 0x7fff7fff);
 		ctr2++;
 	}
 

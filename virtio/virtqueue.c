@@ -30,7 +30,7 @@ struct virtq {
 };
 
 static struct virtq queues[MAX_VQ];
-static void QSendAtomicPart(void *q, void *buf);
+static void QSendAtomicPart(uint16_t q, uint16_t buf);
 
 uint16_t QInit(uint16_t q, uint16_t max_size) {
 	if (q > MAX_VQ) return 0;
@@ -96,15 +96,12 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 	}
 
 	// Put a pointer to the "head" descriptor in the avail queue
-	Atomic2(QSendAtomicPart, (void *)(uint32_t)q, (void *)(uint32_t)buffers[0]);
+	ATOMIC2(QSendAtomicPart, q, buffers[0]);
 
 	return true;
 }
 
-static void QSendAtomicPart(void *q_voidptr, void *buf_voidptr) {
-	uint16_t q = (uint16_t)(uint32_t)q_voidptr;
-	uint16_t buf = (uint16_t)(uint32_t)buf_voidptr;
-
+static void QSendAtomicPart(uint16_t q, uint16_t buf) {
 	uint16_t idx = queues[q].avail->idx;
 	queues[q].avail->ring[idx & (queues[q].size - 1)] = buf;
 	SynchronizeIO();
