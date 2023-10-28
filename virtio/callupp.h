@@ -8,8 +8,7 @@
 #define CALL0(ret, proc) \
 	(ret)CallUniversalProc((void *)proc, \
 		kCStackBased \
-		| RESULT_SIZE(SIZE_CODE(sizeof(ret))), \
-		)
+		| RESULT_SIZE(SIZE_CODE(sizeof(ret))))
 
 #define CALL1(ret, proc, t1, v1) \
 	(ret)CallUniversalProc((void *)proc, \
@@ -71,8 +70,7 @@
 #define CALLPASCAL0(ret, proc) \
 	(ret)CallUniversalProc((void *)proc, \
 		kPascalStackBased \
-		| RESULT_SIZE(SIZE_CODE(sizeof(ret))), \
-		)
+		| RESULT_SIZE(SIZE_CODE(sizeof(ret))))
 
 #define CALLPASCAL1(ret, proc, t1, v1) \
 	(ret)CallUniversalProc((void *)proc, \
