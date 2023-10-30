@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "callupp.h"
 #include "printf.h"
 
 #include "patch68k.h"
@@ -15,10 +16,6 @@ struct block {
 	long vector;
 	char code[128];
 };
-
-static struct RoutineDescriptor unpatcher = BUILD_ROUTINE_DESCRIPTOR(
-	kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
-	Unpatch68k);
 
 static int hex(char c) {
 	if ('0'<=c && c<='9') return c - '0';
@@ -149,12 +146,15 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	*code++ = delta >> 8;
 	*code++ = delta;
 
-	*code++ = 0x4e; // JSR unpatcher
+	void *unpatcher = STATICDESCRIPTOR(Unpatch68k,
+		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode));
+
+	*code++ = 0x4e; // JSR Unpatch68k
 	*code++ = 0xb9;
-	*code++ = (unsigned long)&unpatcher >> 24;
-	*code++ = (unsigned long)&unpatcher >> 16;
-	*code++ = (unsigned long)&unpatcher >> 8;
-	*code++ = (unsigned long)&unpatcher;
+	*code++ = (unsigned long)unpatcher >> 24;
+	*code++ = (unsigned long)unpatcher >> 16;
+	*code++ = (unsigned long)unpatcher >> 8;
+	*code++ = (unsigned long)unpatcher;
 
 	*code++ = 0x4c; // MOVEM.L (sp)+,d0-d2/a0-a2
 	*code++ = 0xdf;
@@ -180,7 +180,7 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	return &block->code;
 }
 
-void Unpatch68k(void *patch) {
+pascal void Unpatch68k(void *patch) {
 	struct block *block = patch - offsetof(struct block, code);
 
 	if (getvec(block->vector) == &block->code) {

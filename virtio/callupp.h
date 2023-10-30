@@ -129,6 +129,8 @@
 		| STACK_ROUTINE_PARAMETER(6, SIZE_CODE(sizeof(t6))), \
 		v1, v2, v3, v4, v5, v6)
 
+#define STATICDESCRIPTOR(func, info) ({static RoutineDescriptor rd = BUILD_ROUTINE_DESCRIPTOR(info, func); (void *)&rd;})
+
 #else // classic 68k
 
 #define CALL0(ret, proc) \
@@ -172,5 +174,7 @@
 
 #define CALLPASCAL6(ret, proc, t1, v1, t2, v2, t3, v3, t4, v4, t5, v5, t6, v6) \
 	((typeof(pascal ret (*)(t1, t2, t3, t4, t5, t6)))proc)(v1, v2, v3, v4, v5, v6)
+
+#define STATICDESCRIPTOR(func, info) ((void *)func)
 
 #endif
