@@ -172,7 +172,7 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 		printf("Patched %#x. Old code at %p. New code in sys heap at %p:\n   ",
 			vector, block->original, &block->code);
 		for (char *i=block->code; i<code; i+=2) {
-			printf(" %02x%02x", i[0], i[1]);
+			printf(" %02x%02x", 255&i[0], 255&i[1]);
 		}
 		printf("\n");
 	}
