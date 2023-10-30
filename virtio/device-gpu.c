@@ -16,6 +16,7 @@
 #include "allocator.h"
 #include "atomic.h"
 #include "blit.h"
+#include "callupp.h"
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
 #include "printf.h"
@@ -391,7 +392,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		"4eb9 %l"       //      jsr     debugPoll
 		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
 		"4ef9 %o",      // old: jmp     originalDebugUtil
-		NewRoutineDescriptor((ProcPtr)debugPoll, kCStackBased, GetCurrentISA())
+		STATICDESCRIPTOR(debugPoll, kCStackBased)
 	);
 
 	// We can only patch drawing code *after* QuickDraw is fully installed,
@@ -410,7 +411,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		"6106"          //      bsr.s   uninstall
 		"4ef9 %o",      // old: jmp     originalGestalt
 		                // uninstall: (fallthrough code)
-		NewRoutineDescriptor((ProcPtr)lateBootHook, kCStackBased, GetCurrentISA())
+		STATICDESCRIPTOR(lateBootHook, kCStackBased)
 	);
 
 	if (virgl_enable) VirglTest();
