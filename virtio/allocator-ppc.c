@@ -1,5 +1,6 @@
 /*
 Bugs:
+- 4k pages assumed
 - Memory not cache-inhibited. We assume it is coherent.
 */
 
