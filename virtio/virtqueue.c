@@ -8,6 +8,7 @@
 #include "atomic.h"
 #include "allocator.h"
 #include "device.h"
+#include "printf.h"
 #include "transport.h"
 #include "structs-virtqueue.h"
 
@@ -85,6 +86,14 @@ static void QSendAtomicPart(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t 
 			((i<n_out+n_in-1) ? VIRTQ_DESC_F_NEXT : 0) |
 			((i>=n_out) ? VIRTQ_DESC_F_WRITE : 0);
 		queues[q].desc[buf].next = (buf + 1) & mask;
+
+		char *base = (char *)&queues[q].desc[buf];
+		printf("%04x = ", buf);
+		for (int i=0; i<16; i++) {
+			printf("%02x", 255&base[i]);
+			if ((i%4)==3) printf(" ");
+		}
+		printf("\n");
 	}
 
 	queues[q].nsent += n_out + n_in;
