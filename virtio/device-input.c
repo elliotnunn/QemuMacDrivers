@@ -1,35 +1,3 @@
-#ifndef GENERATINGCFM
-
-#include <Devices.h>
-
-#include "printf.h"
-
-const unsigned short drvrFlags = 0x4c00;
-
-// Pascal string followed by a 2-byte BCD version number
-const char drvrNameVers[] = "\x09.virtio9p\x01\x00";
-
-
-extern struct DCtlEntry *dce;
-
-void _putchar(char character);
-
-short funnel(long commandCode, void *pb) {
-	logenable = 1;
-	printf("got a command code in the funnel: code=%d pb=%p trap=%04x dce=%p flags=%04x\n",
-		commandCode, pb, 0xffff&((IOParam *)pb)->ioTrap, dce, 0xffff & dce->dCtlFlags);
-
-	return 0;
-}
-
-
-#else
-
-
-
-
-
-
 #include <Devices.h>
 #include <DriverServices.h>
 #include <Events.h>
@@ -40,6 +8,7 @@ short funnel(long commandCode, void *pb) {
 #include <Traps.h>
 
 #include "allocator.h"
+#include "callupp.h"
 #include "printf.h"
 #include "panic.h"
 #include "transport.h"
@@ -56,13 +25,15 @@ struct event {
 	int32_t value;
 } __attribute((scalar_storage_order("little-endian")));
 
+typedef void (*GNEFilterType)(EventRecord *event, Boolean *result);
+
 short funnel(long commandCode, void *pb);
 static OSStatus finalize(DriverFinalInfo *info);
-static OSStatus initialize(DriverInitInfo *info);
+static OSStatus initialize(void *device);
 static void handleEvent(struct event e);
 static void myGNEFilter(EventRecord *event, Boolean *result);
 static void lateBootHook(void);
-static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, void *actionProc);
+static pascal ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, ControlActionUPP actionProc);
 static void reQueue(int bufnum);
 
 static struct event *lpage;
@@ -92,6 +63,10 @@ DriverDescription TheDriverDescription = {
 
 char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
 
+const unsigned short drvrFlags = 0x4c00;
+
+const char drvrNameVers[] = "\x09.virtioinput\0\x01\x00";
+
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
@@ -99,7 +74,7 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	switch (code) {
 	case kInitializeCommand:
 	case kReplaceCommand:
-		err = initialize(pb.initialInfo);
+		err = initialize(&pb.initialInfo->deviceEntry);
 		break;
 	case kFinalizeCommand:
 	case kSupersededCommand:
@@ -134,10 +109,29 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	}
 }
 
-short funnel(long code, void *pb) {
-	switch (code) {
-	case _Open & 0xff:
-	return initialize
+short funnel(long commandCode, void *pb) {
+	printf("got a command code in the funnel: code=%d pb=%p trap=%04x\n",
+		commandCode, pb, 0xffff&((IOParam *)pb)->ioTrap);
+
+	if (commandCode == (_Open & 0xff)) {
+		logenable = 1;
+// 		for (int i=0; i<33; i++) {
+// 			volatile void *addr = (void *)0xfc000000 + 0x200*i;
+// 			long a = *(long *)(addr);
+// 			__asm__ __volatile__ ("nop" : : : "memory");
+// 			long b = *(long *)(addr+4);
+// 			__asm__ __volatile__ ("nop" : : : "memory");
+// 			long c = *(long *)(addr+8);
+// 			__asm__ __volatile__ ("nop" : : : "memory");
+// 			long d = *(long *)(addr+12);
+// 			__asm__ __volatile__ ("nop" : : : "memory");
+//
+// 			printf("%p %08x %08x %08x %08x\n", addr, a, b, c, d);
+// 		}
+
+		return initialize((void *)0xfc004000);
+	} else {
+		return paramErr;
 	}
 }
 
@@ -145,20 +139,20 @@ static OSStatus finalize(DriverFinalInfo *info) {
 	return noErr;
 }
 
-static OSStatus initialize(DriverInitInfo *info) {
+static OSStatus initialize(void *device) {
 	strcpy(logprefix, ".virtioinput ");
-
-	// How to check these settings otherwise???
-	//if (!RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
-		logenable = 1;
-	//}
+	logenable = 1;
 
 	printf("Virtio-input driver starting\n");
 
 	lpage = AllocPages(1, &ppage);
 	if (lpage == NULL) return openErr;
 
-	if (!VInit(&info->deviceEntry)) return openErr;
+	printf("pages allocated phys %p log %p\n", ppage, lpage);
+
+	if (!VInit(device)) return openErr;
+
+	printf("VInit worked!\n");
 
 	VDriverOK();
 
@@ -192,8 +186,10 @@ static OSStatus initialize(DriverInitInfo *info) {
 		"6106"          //      bsr.s   uninstall
 		"4ef9 %o",      // old: jmp     originalGestalt
 		                // uninstall: (fallthrough code)
-		NewRoutineDescriptor((ProcPtr)lateBootHook, kCStackBased, GetCurrentISA())
+		STATICDESCRIPTOR(lateBootHook, kCStackBased)
 	);
+
+// 	for (;;) QPoll(0);
 
 	return noErr;
 }
@@ -201,27 +197,38 @@ static OSStatus initialize(DriverInitInfo *info) {
 static void lateBootHook(void) {
 	printf("Late boot: installing TrackControl patch\n");
 
-	oldTrackControl = GetToolTrapAddress(_TrackControl);
+	oldTrackControl = (ControlActionUPP)GetToolTrapAddress(_TrackControl);
 
-	static RoutineDescriptor descTrackControl = BUILD_ROUTINE_DESCRIPTOR(
-		kPascalStackBased
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-			| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-			| STACK_ROUTINE_PARAMETER(3, kFourByteCode)
-			| RESULT_SIZE(kTwoByteCode),
-		myTrackControl);
-
-	SetToolTrapAddress(&descTrackControl, _TrackControl);
+	SetToolTrapAddress(
+		STATICDESCRIPTOR(
+			myTrackControl,
+			kPascalStackBased
+				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
+				| STACK_ROUTINE_PARAMETER(3, kFourByteCode)
+				| RESULT_SIZE(kTwoByteCode)),
+		_TrackControl);
 
 	printf("Late boot: installing GNEFilter patch\n");
 
-	oldGNEFilter = LMGetGNEFilter();
+#if GENERATINGCFM
+	oldGNEFilter = LMGetGNEFilter(); // PowerPC version calls through the chain
 
-	static RoutineDescriptor descGNEFilter = BUILD_ROUTINE_DESCRIPTOR(
-		uppGetNextEventFilterProcInfo,
-		myGNEFilter);
-
-	LMSetGNEFilter(&descGNEFilter);
+	LMSetGNEFilter((void *)STATICDESCRIPTOR(myGNEFilter, uppGetNextEventFilterProcInfo));
+#else
+	Patch68k(
+		0x29a, // jGNEFilter:
+		"3f00"      // move.w d0,-(sp)      ; push pre-result for C
+		"2f09"      // move.l a1,-(sp)      ; push event record pointer for C
+		"4eb9 %l"   // jsr    myGNEFilter   ; do the real work (in C)
+		"225f"      // move.l (sp)+,a1      ; restore event record pointer
+		"548f"      // addq.l #2,sp         ; pop pre-result
+		"e140"      // asl.w  #8,d0         ; bump C boolean to (Lisa) Pascal format
+		"3f40 0004" // move.w d0,4(sp)      ; stash result where caller expects it
+		"4ef9 %o",  // jmp    original
+		myGNEFilter
+	);
+#endif
 
 	patchReady = true;
 }
@@ -295,7 +302,7 @@ static void handleEvent(struct event e) {
 			// Feels much more responsive than waiting for another interrupt.
 			// Could a race condition garble the cursor? Haven't seen it happen.
 			// if (*(char *)(0x174 + 7) & 1) // Uncomment to switch on shift key
-			CallUniversalProc(*(void **)0x8ee, kPascalStackBased);
+			CALL0(void, *(void **)0x8ee);
 		}
 
 		knowpos = false;
@@ -367,40 +374,54 @@ static void myGNEFilter(EventRecord *event, Boolean *result) {
 		}
 	}
 
-	if (oldGNEFilter) CallGetNextEventFilterProc(oldGNEFilter, event, result);
+	// On PowerPC, call the next filter in the chain
+	// On 68k, just return, and the wrapper code will jump to it
+#if GENERATINGCFM
+	CallGetNextEventFilterProc(oldGNEFilter, event, result);
+#endif
 }
 
 // Third stage of scroll event
 // The app associated the (fake) click with our scrollbar
 // Tell the app that the scrollbar was dragged,
 // but tell the scrollbar to move to a specific point.
-static ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, void *actionProc) {
+static pascal ControlPartCode myTrackControl(ControlRef theControl, Point startPoint, ControlActionUPP actionProc) {
 	if (theControl != curScroller) {
-		return CallUniversalProc((void *)oldTrackControl,
-			kPascalStackBased
-				| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-				| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
-				| STACK_ROUTINE_PARAMETER(3, kFourByteCode)
-				| RESULT_SIZE(kTwoByteCode),
-			theControl, startPoint, actionProc);
+		return CALLPASCAL3(ControlPartCode, oldTrackControl,
+			ControlRef, theControl,
+			Point, startPoint,
+			ControlActionUPP, actionProc);
 	}
 
-	int32_t min = GetControl32BitMinimum(curScroller);
-	int32_t max = GetControl32BitMaximum(curScroller);
-	int32_t val = GetControl32BitValue(curScroller);
+	int32_t min, max, val;
+#if GENERATINGCFM
+	if (GetControl32BitValue != NULL) {
+		min = GetControl32BitMinimum(curScroller);
+		max = GetControl32BitMaximum(curScroller);
+		val = GetControl32BitValue(curScroller);
+	} else
+#endif
+	{
+		min = GetControlMinimum(curScroller);
+		max = GetControlMaximum(curScroller);
+		val = GetControlValue(curScroller);
+	}
+
 
 	val -= pendingScroll * 3;
 	pendingScroll = 0;
 	if (val < min) val = min;
 	if (val > max) val = max;
-	SetControlValue(curScroller, val);
+	SetControlValue(curScroller, val); // ALSO DO 32-BIT!
 
 	if ((int)actionProc & 1) {
 		actionProc = (*curScroller)->contrlAction;
 	}
 
 	if (actionProc) {
-		CallControlActionProc(actionProc, curScroller, 129);
+		CALLPASCAL2(void, actionProc,
+			ControlRef, curScroller,
+			short, 129);
 	}
 
 	curScroller = NULL;
@@ -416,6 +437,8 @@ static void reQueue(int bufnum) {
 }
 
 void DNotified(uint16_t q, size_t len, void *tag) {
+	printf("Got a notification!\n");
+
 	struct event *e = &lpage[(int)tag];
 	//printf("Virtio-input event type=%d code=%d value=%d\n", e->type, e->code, e->value);
 
@@ -427,5 +450,3 @@ void DNotified(uint16_t q, size_t len, void *tag) {
 
 void DConfigChange(void) {
 }
-
-#endif
