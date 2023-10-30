@@ -16,6 +16,7 @@ volatile struct virtioMMIO *device;
 bool VInit(void *theDevice) {
 	device = theDevice;
 
+	SynchronizeIO();
 	if (device->magicValue != 0x74726976) return false;
 	SynchronizeIO();
 	if (device->version != 2) return false;
@@ -68,6 +69,7 @@ bool VInit(void *theDevice) {
 
 // Negotiate features
 bool VGetDevFeature(uint32_t number) {
+	SynchronizeIO();
 	device->deviceFeaturesSel = number / 32;
 	SynchronizeIO();
 	return (device->deviceFeatures >> (number % 32)) & 1;
@@ -77,6 +79,7 @@ void VSetFeature(uint32_t number, bool val) {
 	uint32_t mask = 1 << (number % 32);
 	uint32_t bits;
 
+	SynchronizeIO();
 	device->driverFeaturesSel = number / 32;
 	SynchronizeIO();
 
@@ -87,29 +90,34 @@ void VSetFeature(uint32_t number, bool val) {
 }
 
 bool VFeaturesOK(void) {
+	SynchronizeIO();
 	device->status = 1 | 2 | 8;
 	SynchronizeIO();
 	return (device->status & 8) != 0;
 }
 
 void VDriverOK(void) {
+	SynchronizeIO();
 	device->status = 1 | 2 | 4 | 8;
 	SynchronizeIO();
 }
 
 void VFail(void) {
+	SynchronizeIO();
 	device->status = 0x80;
 	SynchronizeIO();
 }
 
 // Tell the device where to find the three (split) virtqueue rings
 uint16_t VQueueMaxSize(uint16_t q) {
+	SynchronizeIO();
 	device->queueSel = q;
 	SynchronizeIO();
 	return device->queueNumMax;
 }
 
 void VQueueSet(uint16_t q, uint16_t size, uint32_t desc, uint32_t avail, uint32_t used) {
+	SynchronizeIO();
 	device->queueSel = q;
 	SynchronizeIO();
 	device->queueNum = size;
@@ -117,11 +125,14 @@ void VQueueSet(uint16_t q, uint16_t size, uint32_t desc, uint32_t avail, uint32_
 	device->queueDriver = avail;
 	device->queueDevice = used;
 	SynchronizeIO();
+	device->queueReady = 1;
+	SynchronizeIO();
 }
 
 // Tell the device about a change to the avail ring
 void VNotify(uint16_t queue) {
 	printf("VNotifying...\n");
+	SynchronizeIO();
 	device->queueNotify = queue;
 	SynchronizeIO();
 }

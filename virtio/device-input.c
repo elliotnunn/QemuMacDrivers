@@ -189,7 +189,7 @@ static OSStatus initialize(void *device) {
 		STATICDESCRIPTOR(lateBootHook, kCStackBased)
 	);
 
-// 	for (;;) QPoll(0);
+	for (;;) QPoll(0);
 
 	return noErr;
 }
