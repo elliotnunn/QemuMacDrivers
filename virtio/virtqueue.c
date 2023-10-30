@@ -8,6 +8,7 @@
 #include "atomic.h"
 #include "allocator.h"
 #include "device.h"
+#include "panic.h"
 #include "printf.h"
 #include "transport.h"
 #include "structs-virtqueue.h"
@@ -22,7 +23,6 @@ enum {
 struct virtq {
 	uint16_t size;
 	uint16_t used_ctr;
-	uint16_t nsent, nrecvd;
 	int32_t interest;
 	struct virtq_desc *desc;
 	struct virtq_avail *avail;
@@ -55,6 +55,9 @@ uint16_t QInit(uint16_t q, uint16_t max_size) {
 
 	queues[q].size = size;
 
+	// Mark all descriptors free
+	for (int i=0; i<queues[q].size; i++) queues[q].desc[i].next = 0xffff;
+
 	// Disable notifications until QInterest
 	queues[q].avail->flags = 1;
 
@@ -70,37 +73,33 @@ bool QSend(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t 
 static void QSendAtomicPart(uint16_t q, uint16_t n_out, uint16_t n_in, uint32_t *addrs, uint32_t *sizes, void *tag, bool *ret) {
 	*ret = false;
 
-	uint16_t mask = queues[q].size - 1;
-	uint16_t first = queues[q].nsent & mask;
-	uint16_t pending = queues[q].nsent - queues[q].nrecvd;
-	if (pending + n_in + n_out > queues[q].size) return;
+	// Reverse iterate through user's buffers, create a linked descriptor list
+	uint16_t remain = n_out + n_in;
+	uint16_t nextbuf = 0; // doesn't matter, there is no "next"
+	for (uint16_t buf=queues[q].size-1; buf!=0xffff && remain; buf--) {
+		if (queues[q].desc[buf].next != 0xffff) continue; // not a free desc
 
-	queues[q].tag[first] = tag;
+		remain--;
 
-	// Populate the descriptors
-	for (uint16_t i=0; i<n_out+n_in; i++) {
-		uint16_t buf = (first + i) & mask;
-		queues[q].desc[buf].addr = addrs[i];
-		queues[q].desc[buf].len = sizes[i];
-		queues[q].desc[buf].flags =
-			((i<n_out+n_in-1) ? VIRTQ_DESC_F_NEXT : 0) |
-			((i>=n_out) ? VIRTQ_DESC_F_WRITE : 0);
-		queues[q].desc[buf].next = (buf + 1) & mask;
+		queues[q].desc[buf] = (struct virtq_desc){
+			.addr = addrs[remain],
+			.len = sizes[remain],
+			.flags =
+				((remain<n_out+n_in-1) ? VIRTQ_DESC_F_NEXT : 0) |
+				((remain>=n_out) ? VIRTQ_DESC_F_WRITE : 0),
+			.next = nextbuf
+		};
 
-		char *base = (char *)&queues[q].desc[buf];
-		printf("%04x = ", buf);
-		for (int i=0; i<16; i++) {
-			printf("%02x", 255&base[i]);
-			if ((i%4)==3) printf(" ");
-		}
-		printf("\n");
+		nextbuf = buf;
 	}
 
-	queues[q].nsent += n_out + n_in;
+	if (remain) panic("attempted QSend when out of descriptors");
+
+	queues[q].tag[nextbuf] = tag;
 
 	// Put a pointer to the "head" descriptor in the avail queue
 	uint16_t idx = queues[q].avail->idx;
-	queues[q].avail->ring[idx & mask] = first & mask;
+	queues[q].avail->ring[idx & (queues[q].size - 1)] = nextbuf; // first in chain
 	SynchronizeIO();
 	queues[q].avail->idx = idx + 1;
 	SynchronizeIO();
@@ -160,9 +159,10 @@ void QPoll(uint16_t q) {
 
 		uint16_t buf = first;
 		for (;;) {
-			queues[q].nrecvd++;
+			uint16_t nextbuf = queues[q].desc[buf].next;
+			queues[q].desc[buf].next = 0xffff;
 			if ((queues[q].desc[buf].flags & VIRTQ_DESC_F_NEXT) == 0) break;
-			buf = queues[q].desc[buf].next;
+			buf = nextbuf;
 		}
 
 		DNotified(q, len, queues[q].tag[first]);
