@@ -18,7 +18,7 @@ drvrOpen: drvrClose: drvrControl: drvrStatus: drvrPrime:
 	moveq.l #0,%d0
 	move.b  7(%a0),%d0              /* ioTrap number */
 
-	pea     1                       /* IOCommandKind */
+	pea     4                       /* IOCommandKind = immed */
 	move.l  %d0,-(%sp)              /* IOCommandCode */
 	move.l  %a0,-(%sp)              /* IOCommandContents */
 	clr.l   -(%sp)                  /* IOCommandID */
