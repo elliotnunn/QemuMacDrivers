@@ -74,11 +74,16 @@ bool VInit(void *theDevice) {
 	dtq.dtAddr = (void *)QNotified;
 	dtc.dtAddr = (void *)configIntBottomHalf;
 
-	device = theDevice;
-	pic = (void *)((uintptr_t)theDevice & 0xffff0000);
+	int slotnum = *(uint32_t *)theDevice;
+	int devindex = 32;
 
-	int devindex = ((uintptr_t)theDevice & 0xffff) / 0x200 - 1;
 	picmask = 1 << devindex;
+
+	pic = (void *)(0xf0000000 + 0x1000000*slotnum);
+	device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*devindex); // TODO which device in which slot?
+
+	printf("slotnum %d pic %p device %p\n", slotnum, pic, device);
+
 
 	SynchronizeIO();
 	if (device->magicValue != 0x74726976) return false;
@@ -121,6 +126,7 @@ bool VInit(void *theDevice) {
 	if (SIntInstall(&siq2, 12)) return false;
 
 	pic->enable = 0xffffffff;
+	SynchronizeIO();
 
 	return true;
 }

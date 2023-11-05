@@ -64,16 +64,20 @@ DriverDescription TheDriverDescription = {
 char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
 
 const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask;
-
 const char drvrNameVers[] = "\x09.virtioinput\0\x01\x00";
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
+	logenable = 1;
+
+	printf("%p %p %p %p %p\n", spaceID, cmdID, pb, code, kind);
+
 	switch (code) {
 	case kInitializeCommand:
 	case kReplaceCommand:
+		printf("refnum %d\n", pb.initialInfo->refNum);
 		err = initialize(&pb.initialInfo->deviceEntry);
 		break;
 	case kFinalizeCommand:
@@ -106,16 +110,6 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		return err;
 	} else {
 		return IOCommandIsComplete(cmdID, err);
-	}
-}
-
-short funnel(long commandCode, void *pb) {
-	if (commandCode == (_Open & 0xff)) {
-		logenable = 1;
-
-		return initialize((void *)0xfc004000);
-	} else {
-		return paramErr;
 	}
 }
 
