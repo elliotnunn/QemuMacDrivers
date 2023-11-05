@@ -8,12 +8,7 @@ The DoDriverIO routine (in C) does the work
 	.global IOCommandIsComplete
 
 	.section .text.drvr
-drvrOpen:
-drvrPrime:
-drvrControl:
-drvrStatus:
-drvrClose:
-
+drvrOpen: drvrClose: drvrControl: drvrStatus: drvrPrime:
 
 	movem.l %d2/%a0/%a1,-(%sp)      /* save registers */
 
