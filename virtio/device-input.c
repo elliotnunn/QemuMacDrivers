@@ -64,7 +64,7 @@ DriverDescription TheDriverDescription = {
 char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
 
 const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask;
-const char drvrNameVers[] = "\x09.virtioinput\0\x01\x00";
+const char drvrNameVers[] = "\x0c.virtioinput\0\x01\x00";
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
