@@ -215,7 +215,7 @@ VirtioResource:
         .short drSwMacCPU
         .short 0
 2$:
-        .asciz "ElliotThing"
+        .asciz ".virtioinput"
 3$:
         OSLstEntry sCPU_68020, InputDRVR
         DatLstEntry endOfList, 0
