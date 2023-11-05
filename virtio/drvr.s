@@ -23,11 +23,11 @@ drvrClose:
 		moveq.l #0,%d0
 		move.b  7(%a0),%d0              /* ioTrap number */
 
-		pea    1                        /* IOCommandKind */
-		move.l %d0,-(%sp)               /* IOCommandCode */
-		move.l %a0,-(%sp)               /* IOCommandContents */
-		clr.l  -(%sp)                   /* IOCommandID */
-		move.l #-1,-(%sp)               /* AddressSpaceID */
+		pea     1                       /* IOCommandKind */
+		move.l  %d0,-(%sp)              /* IOCommandCode */
+		move.l  %a0,-(%sp)              /* IOCommandContents */
+		clr.l   -(%sp)                  /* IOCommandID */
+		move.l  #-1,-(%sp)              /* AddressSpaceID */
 
 /* Special case for Open and Close calls */
 		cmp.b   #1,%d0
