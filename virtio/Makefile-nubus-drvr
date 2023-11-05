@@ -8,6 +8,15 @@ CFLAGS = -c -O3 -mpcrel -mcpu=68020 -nostartfiles -ffreestanding -ffunction-sect
 AS = m68k-apple-macos-as
 ASFLAGS =
 
+COMMON = \
+	$(BUILD)/drvr.o \
+	$(BUILD)/allocator-drvr.o \
+	$(BUILD)/transport-mmio.o \
+	$(BUILD)/virtqueue.o \
+	$(BUILD)/patch68k.o \
+	$(BUILD)/panic.o \
+	$(BUILD)/printf.o \
+
 $(shell mkdir -p $(BUILD))
 
 $(BUILD)/declrom: $(BUILD)/declrom.elf
@@ -29,10 +38,8 @@ $(BUILD)/%.o: %.s
 $(BUILD)/device-%.drvr: $(BUILD)/device-%.elf
 	m68k-apple-macos-objcopy --only-section .drvr -O binary $^ $@
 
-$(BUILD)/device-input.elf: drvr.lds $(BUILD)/drvr.o \
-                           $(BUILD)/printf.o \
-                           $(BUILD)/device-input.o
-	m68k-apple-macos-ld --gc-sections -o $@ --script $^ `m68k-apple-macos-gcc -print-file-name=libgcc.a`
+$(BUILD)/device-input.elf: drvr.lds $(BUILD)/device-input.o $(COMMON)
+	m68k-apple-macos-ld --gc-sections -o $@ --script $^ `m68k-apple-macos-gcc -print-file-name=libgcc.a` `m68k-apple-macos-gcc -print-file-name=libc.a`
 
 clean:
 	rm -rf $(BUILD)
