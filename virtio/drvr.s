@@ -66,7 +66,8 @@ returnDirectly:
 
 	.section .text.IOCommandIsComplete
 IOCommandIsComplete:
-	move.l  8(%sp),%d0
+	moveq.l #0,%d0
+	move.w  8(%sp),%d0
 	rts
 
 
