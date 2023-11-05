@@ -125,6 +125,7 @@ BoardTypeRec:
 	.short 0 /* DrvrHw: 0, because... it's a board */
 BoardName:
 	.asciz "Virtio bus"
+	.align 2
 PrimaryInitRec:
 	.long 9$-.
 	.byte 2 /* code revision? */
@@ -142,10 +143,13 @@ VendorInfoRec:
 	DatLstEntry endOfList, 0
 VendorId:
 	.asciz "QEMU"
+	.align 2
 RevLevel:
 	.asciz "1.0"
+	.align 2
 PartNum:
 	.asciz "VirtioBus"
+	.align 2
 
 /* This is SolraBizna's icon, perhaps should change */
 Icon:  .long 0x000FF000,0x007FFE00,0x01FFFF80,0x03E3FFC0,0x07C01FE0,0x0FC00FF0
@@ -216,6 +220,7 @@ VirtioResource:
 	.short 0
 2$:
 	.asciz ".virtioinput"
+	.align 2
 3$:
 	OSLstEntry sCPU_68020, InputDRVR
 	DatLstEntry endOfList, 0
