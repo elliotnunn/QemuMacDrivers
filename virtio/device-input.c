@@ -110,24 +110,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 }
 
 short funnel(long commandCode, void *pb) {
-	printf("got a command code in the funnel: code=%d pb=%p trap=%04x\n",
-		commandCode, pb, 0xffff&((IOParam *)pb)->ioTrap);
-
 	if (commandCode == (_Open & 0xff)) {
 		logenable = 1;
-// 		for (int i=0; i<33; i++) {
-// 			volatile void *addr = (void *)0xfc000000 + 0x200*i;
-// 			long a = *(long *)(addr);
-// 			__asm__ __volatile__ ("nop" : : : "memory");
-// 			long b = *(long *)(addr+4);
-// 			__asm__ __volatile__ ("nop" : : : "memory");
-// 			long c = *(long *)(addr+8);
-// 			__asm__ __volatile__ ("nop" : : : "memory");
-// 			long d = *(long *)(addr+12);
-// 			__asm__ __volatile__ ("nop" : : : "memory");
-//
-// 			printf("%p %08x %08x %08x %08x\n", addr, a, b, c, d);
-// 		}
 
 		return initialize((void *)0xfc004000);
 	} else {
@@ -148,11 +132,7 @@ static OSStatus initialize(void *device) {
 	lpage = AllocPages(1, &ppage);
 	if (lpage == NULL) return openErr;
 
-	printf("pages allocated phys %p log %p\n", ppage, lpage);
-
 	if (!VInit(device)) return openErr;
-
-	printf("VInit worked!\n");
 
 	VDriverOK();
 
@@ -189,8 +169,6 @@ static OSStatus initialize(void *device) {
 		STATICDESCRIPTOR(lateBootHook, kCStackBased)
 	);
 
-	for (;;) QPoll(0);
-
 	return noErr;
 }
 
@@ -218,13 +196,12 @@ static void lateBootHook(void) {
 #else
 	Patch68k(
 		0x29a, // jGNEFilter:
-		"3f00"      // move.w d0,-(sp)      ; push pre-result for C
-		"2f09"      // move.l a1,-(sp)      ; push event record pointer for C
-		"4eb9 %l"   // jsr    myGNEFilter   ; do the real work (in C)
+		"486f 0004" // pea    4(sp)         ; push boolean pointer
+		"2f09"      // move.l a1,-(sp)      ; push event record pointer
+		"4eb9 %l"   // jsr    myGNEFilter   ; call into C
 		"225f"      // move.l (sp)+,a1      ; restore event record pointer
-		"548f"      // addq.l #2,sp         ; pop pre-result
-		"e140"      // asl.w  #8,d0         ; bump C boolean to (Lisa) Pascal format
-		"3f40 0004" // move.w d0,4(sp)      ; stash result where caller expects it
+		"588f"      // addq   #4,sp         ; pop boolean pointer
+		"302f 0004" // move.w 4(sp),d0      ; same value expected in these places
 		"4ef9 %o",  // jmp    original
 		myGNEFilter
 	);
@@ -437,13 +414,7 @@ static void reQueue(int bufnum) {
 }
 
 void DNotified(uint16_t q, size_t len, void *tag) {
-	printf("Got a notification!\n");
-
-	struct event *e = &lpage[(int)tag];
-	//printf("Virtio-input event type=%d code=%d value=%d\n", e->type, e->code, e->value);
-
-	handleEvent(*e);
-
+	handleEvent(lpage[(int)tag]);
 	reQueue((int)tag);
 	QNotify(0);
 }

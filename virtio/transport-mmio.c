@@ -1,20 +1,84 @@
 #include "printf.h"
 
+#include <Devices.h>
 #include <DriverSynchronization.h>
+#include <OSUtils.h>
+#include <Slots.h>
 
+#include "device.h"
+#include "panic.h"
 #include "structs-mmio.h"
+#include "virtqueue.h"
 
 #include "transport.h"
+
+struct goldfishPIC {
+	uint32_t status; // count of pending interrupts
+	uint32_t pending; // pending mask
+	uint32_t disableAll; // only way to clear a rupt? or device can?
+	uint32_t disable; // write bitmask
+	uint32_t enable; // write bitmask
+}; // platform native byte order
+
+static void interruptTopHalf(void);
+static void configIntBottomHalf(void);
 
 // Globals declared in transport.h, define here
 void *VConfig;
 uint16_t VMaxQueues;
 
-volatile struct virtioMMIO *device;
+extern struct AuxDCE dce;
+
+static volatile struct virtioMMIO *device;
+static volatile struct goldfishPIC *pic;
+static uint32_t picmask;
+
+static bool qnotifying, cnotifying;
+
+static struct SlotIntQElement siq = {
+	.sqType = sIQType,
+	.sqPrio = 100, // high priority, run first
+	.sqAddr = NULL, // no address relocation yet
+};
+static uint16_t interwrap[] = {
+	0x48e7, 0x6040,         // movem.l d1-d2/a1,-(sp)
+	0x4eb9, 0x0000, 0x0000, // jsr     c_handler
+	0x4cdf, 0x0206,         // movem.l (sp)+,d1-d2/a1
+	0x4280,                 // clr.l   d0   "did not handle the interrupt"
+	0x4e75                  // rts
+};
+
+static struct SlotIntQElement siq2 = {
+	.sqType = sIQType,
+	.sqPrio = 50, // low priority, run last
+	.sqAddr = NULL, // no address relocation yet
+};
+static uint16_t interstop[] = {
+	0x70ff,                 // moveq   #$ff,d0    "did handle the interrupt"
+	0x4e75                  // rts
+};
+
+static struct DeferredTask dtq = {
+	.qType = dtQType,
+	.dtAddr = NULL,
+};
+
+static struct DeferredTask dtc = {
+	.qType = dtQType,
+	.dtAddr = NULL,
+};
 
 // returns true for OK
 bool VInit(void *theDevice) {
+	// Work around a shortcoming in global initialisation
+	dtq.dtAddr = (void *)QNotified;
+	dtc.dtAddr = (void *)configIntBottomHalf;
+
 	device = theDevice;
+	pic = (void *)((uintptr_t)theDevice & 0xffff0000);
+
+	int devindex = ((uintptr_t)theDevice & 0xffff) / 0x200 - 1;
+	picmask = 1 << devindex;
 
 	SynchronizeIO();
 	if (device->magicValue != 0x74726976) return false;
@@ -22,16 +86,11 @@ bool VInit(void *theDevice) {
 	if (device->version != 2) return false;
 	SynchronizeIO();
 
-	// MUST read deviceID
-	printf("device id %04x\n", device->deviceID);
+	// MUST read deviceID and status in that order
+	if (device->deviceID == 0) return false;
 	SynchronizeIO();
-
-	printf("status is %04x\n", device->status);
+	if (device->status != 0) return false;
 	SynchronizeIO();
-
-	device->status = 0;
-	SynchronizeIO();
-	while (device->status) {}
 
 	// 1. Reset the device.
 	device->status = 0;
@@ -46,14 +105,6 @@ bool VInit(void *theDevice) {
 	device->status = 1 | 2;
 	SynchronizeIO();
 
-	for (int i=0; i<4; i++) {
-		device->deviceFeaturesSel = i;
-		SynchronizeIO();
-
-		printf("%08x ", device->deviceFeatures);
-	}
-	printf("\n");
-
 	// Absolutely require the version 1 "non-legacy" spec
 	if (!VGetDevFeature(32)) {
 		VFail();
@@ -61,8 +112,15 @@ bool VInit(void *theDevice) {
 	}
 	VSetFeature(32, true);
 
+	*(void **)(interwrap + 3) = &interruptTopHalf;
+	BlockMove(interwrap, interwrap, sizeof interwrap); // clear code cache
+	siq.sqAddr = (void *)interwrap;
+	siq2.sqAddr = (void *)interstop;
 
-	// install an interrupt handler here???
+	if (SIntInstall(&siq, 12)) return false;
+	if (SIntInstall(&siq2, 12)) return false;
+
+	pic->enable = 0xffffffff;
 
 	return true;
 }
@@ -131,13 +189,37 @@ void VQueueSet(uint16_t q, uint16_t size, uint32_t desc, uint32_t avail, uint32_
 
 // Tell the device about a change to the avail ring
 void VNotify(uint16_t queue) {
-	printf("VNotifying...\n");
 	SynchronizeIO();
 	device->queueNotify = queue;
 	SynchronizeIO();
 }
 
+static void interruptTopHalf(void) {
+	if (!(pic->pending & picmask)) return;
+
+	uint32_t flags = device->interruptStatus;
+
+	device->interruptACK = flags; // lower the interrupt
+	SynchronizeIO();
+
+	if ((flags & 1) && !qnotifying) {
+		QDisarm();
+		qnotifying = true;
+		DTInstall(&dtq);
+	}
+
+	if ((flags & 2) && !cnotifying) {
+		cnotifying = true;
+		DTInstall(&dtc);
+	}
+}
+
+static void configIntBottomHalf(void) {
+	cnotifying = false;
+	DConfigChange();
+}
+
 // Interrupts need to be explicitly reenabled after a notification
 void VRearm(void) {
-// not sure what to do here just yet...
+	qnotifying = false;
 }
