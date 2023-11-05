@@ -98,124 +98,64 @@ SEBlock.size:
 
 
 
-        .global _DeclHeader
-
-        /* defines that have to do with our ROM */
-        .set ourBoardID, 0x9545 /* hope no real board used this! */
-        /* ID of the board resource, must be in the range 0-127 */
-        .set sResource_Board_ID, 1
-        /* ID of the video resource, must be in the range 128-254 */
-        .set sResource_Video_ID, 128
 
         .section .text
-
 ROMSTART:
 
-        /* sResource directory, the list of all the sResources on the ROM */
-        /* Note: our ROM header assumes this is the first thing in the ROM! */
-_sResourceDirectory:
-        OSLstEntry sResource_Board_ID, _sRsrc_Board
-        OSLstEntry sResource_Video_ID, _sRsrc_Generique
-        DatLstEntry endOfList, 0
-_sRsrc_Board:
-        OSLstEntry sRsrcType, _BoardTypeRec
-        OSLstEntry sRsrcName, _BoardName
-        OSLstEntry sRsrcIcon, _Icon
-        OSLstEntry sRsrcCicn, _Cicn
-        DatLstEntry boardId, ourBoardID
-        OSLstEntry primaryInit, _PrimaryInitRec
-        OSLstEntry vendorInfo, _VendorInfoRec
+/* The list of all the sResources on the ROM */
+sResourceDirectory:
+        OSLstEntry 1, BoardResource
+        OSLstEntry 128, VirtioResource
         DatLstEntry endOfList, 0
 
-_BoardTypeRec:
+/* Information applying to the "physical" board */
+BoardResource:
+        OSLstEntry sRsrcType, BoardTypeRec
+        OSLstEntry sRsrcName, BoardName
+        OSLstEntry sRsrcIcon, Icon
+        OSLstEntry sRsrcCicn, Cicn
+        DatLstEntry boardId, 0x9545
+        OSLstEntry primaryInit, PrimaryInitRec
+        OSLstEntry vendorInfo, VendorInfoRec
+        DatLstEntry endOfList, 0
+BoardTypeRec:
         .short catBoard /* Category: Board! */
         .short typeBoard /* Type: Board! */
         .short 0 /* DrvrSw: 0, because it's a board */
         .short 0 /* DrvrHw: 0, because... it's a board */
-_BoardName:
-        .asciz "Elliot's dodgy driver"
-
-_PrimaryInitRec:
-        .long _PrimaryInitRecEnd-_PrimaryInitRec
+BoardName:
+        .asciz "Virtio bus"
+PrimaryInitRec:
+        .long 9$-.
         .byte 2 /* code revision? */
         .byte sCPU_68020 /* CPU type */
         .short 0 /* reserved */
         .long 4 /* offset to code */
+        move.w #0,seStatus(%a0)
+        rts
+9$:
 
-
-
-        MOVE.W #0, seStatus(%A0)
-        RTS
-
-
-
-
-_PrimaryInitRecEnd:
-
-_VendorInfoRec:
-        OSLstEntry vendorId, _VendorId
-        OSLstEntry revLevel, _RevLevel
-        OSLstEntry partNum, _PartNum
+VendorInfoRec:
+        OSLstEntry vendorId, VendorId
+        OSLstEntry revLevel, RevLevel
+        OSLstEntry partNum, PartNum
         DatLstEntry endOfList, 0
-
-_VendorId:
+VendorId:
         .asciz "QEMU"
-_RevLevel:
+RevLevel:
         .asciz "1.0"
-_PartNum:
-        .asciz "QFB0"
+PartNum:
+        .asciz "VirtioBus"
 
-_sRsrc_Generique:
-        OSLstEntry sRsrcType, _VideoTypeRec
-        OSLstEntry sRsrcName, _VideoName
-        OSLstEntry sRsrcDrvrDir, _VideoDriverDirectory
-        DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
-        DatLstEntry sRsrcHWDevId, 1
-
-
-
-        /* Now we need sResource records for every bit depth */
-        DatLstEntry endOfList, 0
-
-_VideoTypeRec:
-        .short catCPU/* Category: Display */
-        .short typeDesk /* Type: Video */
-        .short drSwMacCPU
-        .short 0
-
-_VideoName:
-        /* the video name is derived from the above, and must take this form */
-        /* special note, the third element is the driver software interface,
-           NOT the vendor of the board */
-        .asciz "ElliotThing"
-
-/* is this MinorBaseOS? */
-_MinorBaseRec:
-        .long 0 /* offset of video device within our slot space */
-_MinorLengthRec:
-        .long 0x10000000 /* size of our video device */
-        /* it's a slight fib, since the declaration ROM is at the end of that,
-           but the Slot Manager won't care :) */
-
-_MajorBaseRec:
-        .long 0 /* offset of video RAM within our super slot space */
-_MajorLengthRec:
-        .long 32 << 20 /* size of our video RAM, 32MiB */
-
-_VideoDriverDirectory:
-        OSLstEntry sCPU_68020, _DRVRBlock
-        DatLstEntry endOfList, 0
-
-
-        /* The icon! */
-_Icon:  .long 0x000FF000,0x007FFE00,0x01FFFF80,0x03E3FFC0,0x07C01FE0,0x0FC00FF0
+/* This is SolraBizna's icon, perhaps should change */
+Icon:  .long 0x000FF000,0x007FFE00,0x01FFFF80,0x03E3FFC0,0x07C01FE0,0x0FC00FF0
         .long 0x1FC1CFF8,0x3F81C7FC,0x3F0001FC,0x7F03C07E,0x7F003F3E,0x7E0000BE
         .long 0xFE003FFF,0xFE007FFF,0xFE01FFFF,0xFE01FFFF,0xFF81FFFF,0xFFC0FFFF
         .long 0xFFF0FFFF,0xFFF87FFF,0x7FFC7FFE,0x7FFE7FFE,0x7FFE3FFE,0x3FFF3FFC
         .long 0x3FFF3FFC,0x1FFFBFF8,0x0FFFBFF0,0x07FFFFF8,0x03FFFFF8,0x01FFFFFC
         .long 0x007FFE7C,0x000FF03E
         /* Now in color! */
-_Cicn:  .long _CicnEnd-_Cicn
+Cicn:  .long CicnEnd-Cicn
         .long 0x00000000,0x80100000,0x00000020,0x00200000,0x00000000,0x00000048
         .long 0x00000048,0x00000000,0x00040001,0x00040000,0x00000000,0x00000000
         .long 0x00000000,0x00000004,0x00000000,0x00200020,0x00000000,0x00040000
@@ -258,20 +198,36 @@ _Cicn:  .long _CicnEnd-_Cicn
         .long 0xFFFFFFFF,0xFFFFFFFF
         .byte 0xFF
         .align 2
-_CicnEnd:
+CicnEnd:
 
-        /* Now for the DRIVER! */
-        /* THIS MUST BE THE LAST THING IN THE `.text.begin` SECTION! */
-_DRVRBlock:
-        .long _DRVREnd-_DRVRBlock
+/* Functional resources, one per actual virtio device */
+
+VirtioResource:
+        OSLstEntry sRsrcType, 1$
+        OSLstEntry sRsrcName, 2$
+        OSLstEntry sRsrcDrvrDir, 3$
+        DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
+        DatLstEntry sRsrcHWDevId, 1
+        DatLstEntry endOfList, 0
+1$:
+        .short catCPU /* Category: Display */
+        .short typeDesk /* Type: Video */
+        .short drSwMacCPU
+        .short 0
+2$:
+        .asciz "ElliotThing"
+3$:
+        OSLstEntry sCPU_68020, InputDRVR
+        DatLstEntry endOfList, 0
+
+InputDRVR:
+        .long 9$-.
 		.incbin "build-drvr/device-input.drvr"
         .align 2
-_DRVREnd:
-        .byte 0
-        .byte 0
+9$:
 
-_DeclHeader:
-        .long (_sResourceDirectory-.) & 0xffffff
+/* Header, with magic number, must go at the end */
+        .long (sResourceDirectory-.) & 0xffffff
         .long ROMEND-ROMSTART
         .long 0 /* Checksum goes here */
         .byte 1 /* ROM format revision */
@@ -280,5 +236,4 @@ _DeclHeader:
         .byte 0 /* Must be zero */
         .byte 0x0F /* use all four byte lanes */
 ROMEND:
-
         .end
