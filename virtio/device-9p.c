@@ -23,6 +23,7 @@ not used because it is unavailable at the start of the boot process.
 #include <Start.h>
 #include <Traps.h>
 
+#include "callupp.h"
 #include "hashtab.h"
 #include "printf.h"
 #include "panic.h"
@@ -178,6 +179,9 @@ DriverDescription TheDriverDescription = {
 };
 
 char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
+
+const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask|dReadEnableMask;
+const char drvrNameVers[] = "\x09.virtio9p\0\x01\x00";
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
@@ -442,10 +446,20 @@ static OSErr boot(void) {
 	memcpy((void *)0x970, bootBlock + 106, 16); // ScrapTag
 	*(void **)0x96c = (void *)0x970; // ScrapName pointer --> ScrapTag string
 
+#if GENERATINGCFM
 	CallOSTrapUniversalProc(GetOSTrapAddress(_InitEvents), 0x33802, _InitEvents, 20);
+#else
+	__asm__ __volatile__("move.w #20,%%d0; .short 0xa06d;" ::: "memory");
+#endif
 
 	// When we are the boot disk, we control when the File Manager comes up: now!
+#if GENERATINGCFM
 	CallOSTrapUniversalProc(GetOSTrapAddress(_InitFS), 0x33802, _InitFS, 10);
+#else
+	asm volatile("move.w #10,%%d0; .short 0xa06c;" ::: "memory");
+#endif
+
+
 	installAndMountAndNotify();
 
 	// Is the System Folder not the root of the disk? (It usually isn't.)
@@ -471,14 +485,7 @@ static OSErr boot(void) {
 
 	// Call boot 2, never to return
 	printf("...starting System file\n");
-	CallUniversalProc(
-		(void *)thunk,
-		kCStackBased
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-			| STACK_ROUTINE_PARAMETER(2, kFourByteCode),
-		boot2hdl,
-		vcb.vcbFndrInfo[0] // a4 has in the past been the startup app dirID??
-	);
+	CALL2(void, thunk, Handle, boot2hdl, long, vcb.vcbFndrInfo[0]);
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {

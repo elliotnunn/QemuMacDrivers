@@ -7,10 +7,16 @@
 
 // Is the Mac OS 9 FCB format in use?
 // This can change at early boot, and is cheap to determine anyhow.
+#if GENERATINGCFM
 static int fcbFormat9(void) {
 	short fcbLen = *(short *)0x3f6;
 	return fcbLen > 0 && fcbLen != 94;
 }
+#else
+#define fcbFormat9() 0
+#define CallUniversalProc(a, ...) 0
+#define CallUniversalProc(a, ...) 0
+#endif
 
 static void *fcbBase(void) {
 	unsigned short hi = *(unsigned short *)0x34e;
