@@ -2,6 +2,8 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "printf.h"
+
 #include "unicode.h"
 
 /*

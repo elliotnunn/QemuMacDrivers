@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "printf.h"
+
 #include "paramblkprint.h"
 
 static const char *minilang(const char *pb, unsigned short selector, int pre);
