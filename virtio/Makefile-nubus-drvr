@@ -3,7 +3,7 @@
 BUILD = build-drvr
 
 CC = m68k-apple-macos-gcc
-CFLAGS = -c -O3 -mpcrel -mcpu=68020 -nostartfiles -ffreestanding -ffunction-sections -fdata-sections
+CFLAGS = -c -O3 -mcpu=68020 -nostartfiles -ffreestanding -ffunction-sections -fdata-sections
 
 AS = m68k-apple-macos-as
 ASFLAGS =
