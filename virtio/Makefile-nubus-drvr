@@ -41,5 +41,8 @@ $(BUILD)/device-%.drvr: $(BUILD)/device-%.elf
 $(BUILD)/device-input.elf: drvr.lds $(BUILD)/device-input.o $(COMMON)
 	m68k-apple-macos-ld --gc-sections -o $@ --script $^ `m68k-apple-macos-gcc -print-file-name=libgcc.a` `m68k-apple-macos-gcc -print-file-name=libc.a`
 
+$(BUILD)/device-9p.elf: drvr.lds $(BUILD)/device-9p.o $(COMMON) $(BUILD)/9p.o $(BUILD)/universalfcb.o $(BUILD)/hashtab.o $(BUILD)/unicode.o $(BUILD)/paramblkprint.o
+	m68k-apple-macos-ld --gc-sections -o $@ --script $^ `m68k-apple-macos-gcc -print-file-name=libgcc.a` `m68k-apple-macos-gcc -print-file-name=libc.a` `m68k-apple-macos-gcc -print-file-name=libg.a` `m68k-apple-macos-gcc -print-file-name=libm.a` `m68k-apple-macos-gcc -print-file-name=libstdc++.a`
+
 clean:
 	rm -rf $(BUILD)
