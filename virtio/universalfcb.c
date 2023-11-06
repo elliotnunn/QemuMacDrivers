@@ -74,9 +74,12 @@ OSErr UnivIndexFCB(VCBPtr volCtrlBlockPtr, short *fileRefNum, FCBRecPtr *fileCtr
 
 		for (;;) {
 			if (!refNumValid(*fileRefNum)) return fnfErr;
-			if (*(long *)(fcbBase() + *fileRefNum) != 0) {
+
+			*fileCtrlBlockPtr = fcbBase() + *fileRefNum;
+
+			if (*(long *)(*fileCtrlBlockPtr) != 0) {
 				if (volCtrlBlockPtr == NULL ||
-					*(VCBPtr *)(fcbBase() + *fileRefNum + 20) == volCtrlBlockPtr
+					(*fileCtrlBlockPtr)->fcbVPtr == volCtrlBlockPtr
 				) {
 					return noErr;
 				}
