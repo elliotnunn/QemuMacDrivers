@@ -44,7 +44,7 @@ notOpenOrClose:
 	lea     dce(%pc),%a0
 	move.l  %a1,(%a0)
 
-	bsr     DoDriverIO
+	jsr     DoDriverIO
 	add.w   #26,%sp
 
 	movem.l (%sp)+,%d2/%a0/%a1
