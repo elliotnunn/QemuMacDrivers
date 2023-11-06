@@ -18,7 +18,7 @@ COMMON = \
 	$(BUILD)/drvr.o \
 	$(BUILD)/hashtab.o \
 	$(BUILD)/panic.o \
-	$(BUILD)/paramblkprint.o
+	$(BUILD)/paramblkprint.o \
 	$(BUILD)/patch68k.o \
 	$(BUILD)/printf.o \
 	$(BUILD)/transport-mmio.o \
