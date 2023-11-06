@@ -448,58 +448,45 @@ static int transact(uint8_t cmd, const char *tfmt, const char *rfmt, ...) {
 	// (Assume that if a "B" trailer is supplied, it is large enough)
 	if (rs < 11 && rbigsize == 0) rs = 11;
 
-	// this awful API requires an array of pages!
+	long txn = 0, rxn = 0;
 	PhysicalAddress pa[bufcnt];
 	uint32_t sz[bufcnt];
 
-	struct AddressRange ranges[] = { // keep the tx before the rx ranges
-		{.base=t, .length=ts},
-		{.base=tbig, .length=tbigsize},
-		{.base=r, .length=rs}, // this won't work!!
-		{.base=rbig, .length=rbigsize},
+	struct MemoryBlock logiranges[] = { // keep the tx before the rx ranges
+		{.address=t, .count=ts},
+		{.address=tbig, .count=tbigsize},
+		{.address=r, .count=rs},
+		{.address=rbig, .count=rbigsize},
 	};
 
-	// A zero-length range is not allowed, so remove those
-	int nrange = 0;
+#define CLEANUP() {for (int i=0; i<4; i++) {if (beenlocked & (1<<i)) {UnlockMemory(logiranges[i].address, logiranges[i].count);}}}
+
+	int beenlocked = 0; // a bitmask for when we clean up
+
 	for (int i=0; i<4; i++) {
-		if (ranges[i].length != 0) {
-			ranges[nrange++] = ranges[i];
+		if (logiranges[i].count == 0) continue;
+
+		if (LockMemory(logiranges[i].address, logiranges[i].count)) {
+			CLEANUP();
+			panic("cannot lock memory");
 		}
-	}
 
-	struct IOPreparationTable prep = {
-		.options = kIOLogicalRanges|kIOMultipleRanges|kIOCoherentDataPath,
-		.addressSpace = kCurrentAddressSpaceID,
-		.physicalMapping = pa,
-		.mappingEntryCount = sizeof pa/sizeof *pa,
-		.rangeInfo = {.multipleRanges = {.entryCount = nrange, .rangeTable = ranges}}
-	};
+		beenlocked |= (1<<i);
 
-	// Should never return paramErr
-	if (PrepareMemoryForIO(&prep)) panic("PrepareMemoryForIO failure");
+		MemoryBlock mbs[256] = {logiranges[i]};
+		long extents = 255;
 
-	// Abandon a partial preparation
-	if (prep.lengthPrepared != ts+tbigsize+rs+rbigsize) {
-		CheckpointIO(prep.preparationID, 0);
-		return ENOMEM;
-	}
+		if (GetPhysical((void *)mbs, &extents) || extents >= 255) {
+			CLEANUP();
+			panic("cannot get physical memory");
+		}
 
-	// Associate a length with each physical address
-	// Don't bother chunking the addresses together
-	long txn=0, rxn=0;
-	int i=0, totalbytes=0;
-	for (int r=0; r<nrange; r++) {
-		long rngbytes=0;
-		while (rngbytes < ranges[r].length && totalbytes < prep.lengthPrepared) {
-			long size = 0x1000 - ((long)pa[i] & 0xfff); // 1 to 4096 bytes
-			if (size > ranges[r].length - rngbytes) size = ranges[r].length - rngbytes;
+		for (int j=0; j<extents; j++) {
+			if (txn+rxn == bufcnt) panic("too discontiguous");
 
-			totalbytes += size;
-			rngbytes += size;
-
-			sz[i++] = size;
-
-			if (ranges[r].base == t || ranges[r].base == tbig) {
+			pa[txn+rxn] = mbs[j+1].address;
+			sz[txn+rxn] = mbs[j+1].count;
+			if (i < 2) {
 				txn++;
 			} else {
 				rxn++;
@@ -512,7 +499,7 @@ static int transact(uint8_t cmd, const char *tfmt, const char *rfmt, ...) {
 	QNotify(0);
 	while (!flag) QPoll(0); // spin -- unfortunate
 
-	CheckpointIO(prep.preparationID, 0);
+	CLEANUP();
 
 // 	printf("< ");
 // 	for (int i=0; i<rs; i++) {
