@@ -18,6 +18,7 @@ Reclaim stale data in the array (e.g. free list inside the heap block)
 
 #include "hashtab.h"
 
+#include "callupp.h"
 #include "printf.h"
 #include "panic.h"
 
@@ -121,11 +122,13 @@ void HTallocatelater(void) {
 
 	printf("Hash table needs memory: posting notification task\n");
 
-	static RoutineDescriptor descriptor = BUILD_ROUTINE_DESCRIPTOR(
-		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode),
-		notificationProc);
-
-	static struct NMRec rec = {.qType=8, .nmResp=&descriptor};
+	static struct NMRec rec = {
+		.qType = 8,
+		.nmResp = STATICDESCRIPTOR(
+			notificationProc,
+			kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode)
+		),
+	};
 	NMInstall(&rec);
 	notificationPending = 1;
 }
