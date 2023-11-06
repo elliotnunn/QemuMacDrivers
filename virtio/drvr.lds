@@ -3,6 +3,8 @@ ENTRY(drvrOpen);                   /* causes .drvr section to be kept */
 SECTIONS {
 	. = 0;
 	.drvr : {              /* extract with `objcopy -j .drvr -O binary` */
+		PROVIDE(relocationZero = .);
+
 		/* create the DRVR header using a linker script */
 		KEEP(*(*.drvrFlags));      /* 2 bytes */
 		SHORT(0);                  /* drvrDelay (set in DCE, not here) */
@@ -25,6 +27,10 @@ SECTIONS {
 
 		/* is there a better way to make symbols mandatory? */
 		must_have = drvrFlags + drvrNameVers;
+
+		. = ALIGN(2);
+		QUAD(0x52454c4f43415445)   /* "RELOCATE" eyecatcher */
+		PROVIDE(relocationList = .);
 	}
 
 	/DISCARD/ : { *(*) }

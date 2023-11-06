@@ -35,11 +35,6 @@ static uint32_t picmask;
 
 static bool qnotifying, cnotifying;
 
-static struct SlotIntQElement siq = {
-	.sqType = sIQType,
-	.sqPrio = 100, // high priority, run first
-	.sqAddr = NULL, // no address relocation yet
-};
 static uint16_t interwrap[] = {
 	0x48e7, 0x6040,         // movem.l d1-d2/a1,-(sp)
 	0x4eb9, 0x0000, 0x0000, // jsr     c_handler
@@ -48,32 +43,36 @@ static uint16_t interwrap[] = {
 	0x4e75                  // rts
 };
 
-static struct SlotIntQElement siq2 = {
+static struct SlotIntQElement siq = {
 	.sqType = sIQType,
-	.sqPrio = 50, // low priority, run last
-	.sqAddr = NULL, // no address relocation yet
+	.sqPrio = 100, // high priority, run first
+	.sqAddr = (void *)interwrap, // no address relocation yet
 };
+
 static uint16_t interstop[] = {
 	0x70ff,                 // moveq   #$ff,d0    "did handle the interrupt"
 	0x4e75                  // rts
 };
 
+static struct SlotIntQElement siq2 = {
+	.sqType = sIQType,
+	.sqPrio = 50, // low priority, run last
+	.sqAddr = (void *)interstop, // no address relocation yet
+};
+
 static struct DeferredTask dtq = {
 	.qType = dtQType,
-	.dtAddr = NULL,
+	.dtAddr = (void *)QNotified,
 };
 
 static struct DeferredTask dtc = {
 	.qType = dtQType,
-	.dtAddr = NULL,
+	.dtAddr = (void *)configIntBottomHalf,
 };
 
 // returns true for OK
 bool VInit(void *theDevice) {
 	// Work around a shortcoming in global initialisation
-	dtq.dtAddr = (void *)QNotified;
-	dtc.dtAddr = (void *)configIntBottomHalf;
-
 	int slotnum = *(uint32_t *)theDevice;
 	int devindex = 31;
 
@@ -119,8 +118,6 @@ bool VInit(void *theDevice) {
 
 	*(void **)(interwrap + 3) = &interruptTopHalf;
 	BlockMove(interwrap, interwrap, sizeof interwrap); // clear code cache
-	siq.sqAddr = (void *)interwrap;
-	siq2.sqAddr = (void *)interstop;
 
 	if (SIntInstall(&siq, 12)) return false;
 	if (SIntInstall(&siq2, 12)) return false;
