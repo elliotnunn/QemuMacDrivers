@@ -24,6 +24,7 @@ not used because it is unavailable at the start of the boot process.
 #include <Traps.h>
 
 #include "callupp.h"
+#include "device.h"
 #include "hashtab.h"
 #include "printf.h"
 #include "panic.h"
@@ -235,6 +236,14 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		return IOCommandIsComplete(cmdID, err);
 	}
 }
+
+void DNotified(uint16_t q, size_t len, void *tag) {
+	QueueNotified9();
+}
+
+void DConfigChange(void) {
+}
+
 
 static OSStatus finalize(DriverFinalInfo *info) {
 	return noErr;

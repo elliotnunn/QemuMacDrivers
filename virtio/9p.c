@@ -20,7 +20,6 @@ TODO:
 #include "panic.h"
 #include "virtqueue.h"
 
-#include "device.h" // implement DNotified and DConfigChange here instead
 #include "9p.h"
 
 enum {
@@ -347,12 +346,8 @@ int Write9(uint32_t fid, void *buf, uint64_t offset, uint32_t count, uint32_t *a
 		actual_count);
 }
 
-// This will be called (possibly by an interrupt) while transact() spins
-void DNotified(uint16_t q, size_t len, void *tag) {
+void QueueNotified9(void) {
 	flag = true;
-}
-
-void DConfigChange(void) {
 }
 
 /*
