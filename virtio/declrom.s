@@ -214,12 +214,12 @@ VirtioResource:
 	DatLstEntry sRsrcHWDevId, 1
 	DatLstEntry endOfList, 0
 1$:
-	.short catCPU /* Category: Display */
-	.short typeDesk /* Type: Video */
+	.short catCPU
+	.short typeDesk
 	.short drSwMacCPU
 	.short 0
 2$:
-	.asciz ".virtioinput"
+	.asciz ".virtio9p"
 	.align 2
 3$:
 	OSLstEntry sCPU_68020, InputDRVR
@@ -227,7 +227,7 @@ VirtioResource:
 
 InputDRVR:
 	.long 9$-.
-	.incbin "build-drvr/device-input.drvr"
+	.incbin "build-drvr/device-9p.drvr"
 	.align 2
 9$:
 

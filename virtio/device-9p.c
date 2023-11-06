@@ -107,12 +107,16 @@ static OSErr fsDispatch(void *pb, unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static OSErr controlStatusDispatch(long selector, void *pb);
 
+#if GENERATINGCFM
 static struct RoutineDescriptor fsCallDesc = BUILD_ROUTINE_DESCRIPTOR(
 	kCStackBased
 		| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
 		| STACK_ROUTINE_PARAMETER(2, kFourByteCode)
 		| RESULT_SIZE(kFourByteCode),
 	fsCall);
+#else
+#define fsCallDesc fsCall
+#endif
 
 // Single statically allocated array of path components
 // UTF-8, null-terminated
@@ -188,6 +192,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
+	logenable = 1;
+
 	if (code <= 6 && logenable)
 		printf("Drvr_%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, 1));
 
@@ -253,9 +259,9 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Debug output
 	drvrRefNum = info->refNum;
 	sprintf(logprefix, ".virtio9p(%d) ", drvrRefNum);
-	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
+// 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		logenable = 1;
-	}
+// 	}
 
 	printf("Primary init\n");
 
@@ -432,12 +438,11 @@ static char *mkbb(OSErr (*booter)(void), struct bbnames names) {
 	memcpy(bb + 0x0a, &names, sizeof names);
 
 	// Jump to booter()
-	RoutineDescriptor booter68 = BUILD_ROUTINE_DESCRIPTOR(
+	*(short *)(bb + 0x8a) = 0x4ef9;
+	*(void **)(bb + 0x8c) = STATICDESCRIPTOR(booter,
 		kCStackBased
 			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-			| RESULT_SIZE(kTwoByteCode),
-		booter);
-	memcpy(bb + 0x8a, &booter68, sizeof booter68);
+			| RESULT_SIZE(kTwoByteCode));
 
 	return bb;
 }
@@ -1771,7 +1776,7 @@ static int32_t getDBParent(int32_t cnid) {
 static long fsCall(void *pb, long selector) {
 	static unsigned char hdr;
 	if (hdr++ == 0) {
-		printf("%lu%% (browse/total) %d%% (relist/total)\n", browseTimer*100/hfsTimer, relistTimer*100/hfsTimer);
+		printf("%lu%% (browse/total) %d%% (relist/total)\n", browseTimer*100/(hfsTimer+1), relistTimer*100/(hfsTimer+1));
 	}
 
 	TIMEFUNC(hfsTimer);

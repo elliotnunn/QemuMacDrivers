@@ -23,6 +23,7 @@ SECTIONS {
 		*(.sdata .sdata.* .data .data.* .rodata .rodata.* .bss .bss.* COMMON);
 
 		QUAD(0x544845434f44453a)   /* "THECODE:" eyecatcher */
+		*(.text.drvr);             /* needs to be within 32k of start */
 		*(.text .text.*);
 
 		/* is there a better way to make symbols mandatory? */
