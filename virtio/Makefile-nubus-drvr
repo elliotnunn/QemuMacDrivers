@@ -13,18 +13,18 @@ LDFLAGS = --emit-relocs --gc-sections
 
 # Not acutally common-to-all, but this simplifies the Makefile!
 COMMON = \
-	$(BUILD)/drvr.o \
-	$(BUILD)/allocator-drvr.o \
-	$(BUILD)/transport-mmio.o \
-	$(BUILD)/virtqueue.o \
-	$(BUILD)/patch68k.o \
-	$(BUILD)/panic.o \
-	$(BUILD)/printf.o \
 	$(BUILD)/9p.o \
-	$(BUILD)/universalfcb.o \
+	$(BUILD)/allocator-drvr.o \
+	$(BUILD)/drvr.o \
 	$(BUILD)/hashtab.o \
-	$(BUILD)/unicode.o \
+	$(BUILD)/panic.o \
 	$(BUILD)/paramblkprint.o
+	$(BUILD)/patch68k.o \
+	$(BUILD)/printf.o \
+	$(BUILD)/transport-mmio.o \
+	$(BUILD)/unicode.o \
+	$(BUILD)/universalfcb.o \
+	$(BUILD)/virtqueue.o \
 
 STANDARD = $(shell for x in libInterface.a libgcov.a libg.a libm.a libstdc++.a libgcc.a libc.a; do m68k-apple-macos-gcc -print-file-name=$$x; done)
 
