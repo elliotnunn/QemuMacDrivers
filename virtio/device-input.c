@@ -56,7 +56,7 @@ DriverDescription TheDriverDescription = {
 	{"\x0cpci1af4,1052", {0x00, 0x10, 0x80, 0x00}}, // v0.1
 	{kDriverIsLoadedUponDiscovery |
 		kDriverIsOpenedUponLoad,
-		"\x09.virtioinput"},
+		"\x09.VirtioInput"},
 	{1, // nServices
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
@@ -64,7 +64,7 @@ DriverDescription TheDriverDescription = {
 char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
 
 const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask;
-const char drvrNameVers[] = "\x0c.virtioinput\0\x01\x00";
+const char drvrNameVers[] = "\x0c.VirtioInput\0\x01\x00";
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
@@ -118,7 +118,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 }
 
 static OSStatus initialize(void *device) {
-	strcpy(logprefix, ".virtioinput ");
+	strcpy(logprefix, ".VirtioInput ");
 	logenable = 1;
 
 	printf("Virtio-input driver starting\n");

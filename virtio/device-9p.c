@@ -178,7 +178,7 @@ DriverDescription TheDriverDescription = {
 	{"\x0cpci1af4,1009", {0x00, 0x10, 0x80, 0x00}}, // v0.1
 	{kDriverIsLoadedUponDiscovery |
 		kDriverIsOpenedUponLoad,
-		"\x09.virtio9p"},
+		"\x09.Virtio9P"},
 	{1, // nServices
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsGeneric, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
@@ -186,7 +186,7 @@ DriverDescription TheDriverDescription = {
 char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
 
 const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask|dReadEnableMask;
-const char drvrNameVers[] = "\x09.virtio9p\0\x01\x00";
+const char drvrNameVers[] = "\x09.Virtio9P\0\x01\x00";
 
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
@@ -258,7 +258,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static OSStatus initialize(DriverInitInfo *info) {
 	// Debug output
 	drvrRefNum = info->refNum;
-	sprintf(logprefix, ".virtio9p(%d) ", drvrRefNum);
+	sprintf(logprefix, ".Virtio9P(%d) ", drvrRefNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		logenable = 1;
 // 	}
@@ -356,7 +356,7 @@ static void installAndMountAndNotify(void) {
 	} else {
 		// External filesystems need a big stack, and they can't
 		// share the FileMgr stack because of reentrancy problems
-		// (Note that this is shared between .virtio9p instances)
+		// (Note that this is shared between .Virtio9P instances)
 		char *stack = NewPtrSysClear(STACKSIZE);
 		if (stack == NULL) panic("failed extfs stack allocation");
 

@@ -232,7 +232,7 @@ Resource9P:
 	.short drSwMacCPU
 	.short 0x5609
 2$:
-	.asciz ".virtio9p"
+	.asciz ".Virtio9P"
 	.align 2
 3$:
 	OSLstEntry sCPU_68020, Driver9P
@@ -251,7 +251,7 @@ ResourceInput:
 	.short drSwMacCPU
 	.short 0x5612
 2$:
-	.asciz ".virtioinput"
+	.asciz ".VirtioInput"
 	.align 2
 3$:
 	OSLstEntry sCPU_68020, DriverInput
