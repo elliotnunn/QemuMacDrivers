@@ -1,8 +1,8 @@
 #include <DriverSynchronization.h>
 #include <MixedMode.h>
 #include <Patches.h>
-#include <QuickDraw.h>
-#include <QuickDrawText.h>
+#include <Quickdraw.h>
+#include <QuickdrawText.h>
 #include <stdint.h>
 #include <Traps.h>
 #include <Types.h>
