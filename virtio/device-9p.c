@@ -68,20 +68,35 @@ struct longdqe {
 	void *dispatcher;
 };
 
-struct bbnames {
-	unsigned char sys[16]; // "System"
-	unsigned char fnd[16]; // "Finder"
-	unsigned char dbg[16]; // "MacsBug"
-	unsigned char dis[16]; // "Disassembler"
-	unsigned char scr[16]; // "StartUpScreen"
-	unsigned char app[16]; // "Finder"
-	unsigned char clp[16]; // "Clipboard"
-};
+struct bootBlock {
+	uint16_t magic;
+	uint32_t entryBSR;
+	uint16_t version;
+	uint16_t page2flags;
+	unsigned char systemFileName[16];
+	unsigned char finderFileName[16];
+	unsigned char debuggerFileName[16];
+	unsigned char disassemblerFileName[16];
+	unsigned char startupScreenFileName[16];
+	unsigned char helloFileName[16];
+	unsigned char clipboardFileName[16];
+	uint16_t numFCBs;
+	uint16_t numEvents;
+	uint32_t sysHeapSize128k;
+	uint32_t sysHeapSize256k;
+	uint32_t sysHeapSize;
+	uint16_t alignPad; // keep the delicate PPC structures 4-byte aligned
+#if GENERATINGCFM
+	RoutineDescriptor rd;
+#else
+	uint16_t jmp;
+	void *routine;
+#endif
+} __attribute__((packed));
 
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void installAndMountAndNotify(void);
-static char *mkbb(OSErr (*booter)(void), struct bbnames names);
 static OSErr boot(void);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static bool setPath(int32_t cnid);
@@ -131,7 +146,31 @@ static unsigned long hfsTimer, browseTimer, relistTimer;
 static short drvrRefNum;
 static struct Qid9 root;
 static bool mounted;
-static char *bootBlock;
+static struct bootBlock bootBlock = {
+	.magic = 0x4c4b,
+	.entryBSR = 0x61000088,
+	.version = 0x4418,
+	.page2flags = 0,
+	.systemFileName = "\x06" "System",
+	.finderFileName = "\x06" "Finder",
+	.debuggerFileName = "\x07" "MacsBug",
+	.disassemblerFileName = "\x0c" "Disassembler",
+	.startupScreenFileName = "\x0d" "StartUpScreen",
+	.helloFileName = "\x06" "Finder",
+	.clipboardFileName = "\x09" "Clipboard",
+	.numFCBs = 10,
+	.numEvents = 20,
+	.sysHeapSize128k = 0x4300,
+	.sysHeapSize256k = 0x8000,
+	.sysHeapSize = 0x20000,
+	.alignPad = 0,
+#if GENERATINGCFM
+	.rd = BUILD_ROUTINE_DESCRIPTOR(kCStackBased | RESULT_SIZE(kTwoByteCode), boot),
+#else
+	.jmp = 0x4ef9,
+	.routine = &boot,
+#endif
+};
 static struct longdqe dqe = {
 	.flags = 0x00080000, // fixed disk
 	.dqe = {.dQFSID = FSID},
@@ -218,8 +257,8 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 		struct IOParam *param = &pb.pb->ioParam;
 		param->ioActCount = param->ioReqCount;
 		for (long i=0; i<param->ioReqCount; i++) {
-			if (param->ioPosOffset+i < 512 && bootBlock != NULL) {
-				param->ioBuffer[i] = bootBlock[i];
+			if (param->ioPosOffset+i < sizeof bootBlock) {
+				param->ioBuffer[i] = ((char *)&bootBlock)[i];
 			} else {
 				param->ioBuffer[i] = 0;
 			}
@@ -319,15 +358,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 			printf("FM down, bootable System Folder: I am the boot drive\n");
 			vcb.vcbFndrInfo[0] = systemFolder;
 
-			struct bbnames bbn = {};
-			memcpy(bbn.sys, "\pSystem", 7);
-			memcpy(bbn.fnd, "\pFinder", 7);
-			memcpy(bbn.dbg, "\pMacsBug", 8);
-			memcpy(bbn.dis, "\pDisassembler", 13);
-			memcpy(bbn.clp, "\pClipboard", 10);
-
-			bootBlock = mkbb(boot, bbn);
-
 			SetTimeout(1); // give up on the default disk quickly
 		} else {
 			printf("FM down, not bootable\n");
@@ -425,28 +455,6 @@ static void installAndMountAndNotify(void) {
 	PostEvent(diskEvt, dqe.dqe.dQDrive);
 }
 
-// Make (in the heap) a single 512-byte block that the ROM will boot from
-// (A mere trampoline for one of our routines)
-static char *mkbb(OSErr (*booter)(void), struct bbnames names) {
-	char *bb = NewPtrSysClear(512);
-	if (!bb) return NULL;
-
-	// Larry Kenyon's magic number, BRA routine descriptor, executable flavour
-	memcpy(bb, (const short []){0x4c4b, 0x6000, 0x0086, 0x4418}, 8);
-
-	// List of 16-byte names: "System", "Finder" etc
-	memcpy(bb + 0x0a, &names, sizeof names);
-
-	// Jump to booter()
-	*(short *)(bb + 0x8a) = 0x4ef9;
-	*(void **)(bb + 0x8c) = STATICDESCRIPTOR(booter,
-		kCStackBased
-			| STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-			| RESULT_SIZE(kTwoByteCode));
-
-	return bb;
-}
-
 // C function that our stub boot block will jump to.
 // Do the job of a System 7 boot block: load and run System resource 'boot' 2.
 // Not worth checking return values: if boot fails then the reason is clear enough
@@ -455,9 +463,9 @@ static OSErr boot(void) {
 
 	// Populate low memory from the declarative part of the boot block.
 	// (We use the copy from our own globals. There is a copy A5+0x270.)
-	memcpy((void *)0xad8, bootBlock + 10, 16); // SysResName
-	memcpy((void *)0x2e0, bootBlock + 26, 16); // FinderName
-	memcpy((void *)0x970, bootBlock + 106, 16); // ScrapTag
+	memcpy((void *)0xad8, bootBlock.systemFileName, 16); // SysResName
+	memcpy((void *)0x2e0, bootBlock.finderFileName, 16); // FinderName
+	memcpy((void *)0x970, bootBlock.clipboardFileName, 16); // ScrapTag
 	*(void **)0x96c = (void *)0x970; // ScrapName pointer --> ScrapTag string
 
 #if GENERATINGCFM

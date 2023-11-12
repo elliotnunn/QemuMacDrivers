@@ -122,13 +122,10 @@ void HTallocatelater(void) {
 
 	printf("Hash table needs memory: posting notification task\n");
 
-	static struct NMRec rec = {
-		.qType = 8,
-		.nmResp = STATICDESCRIPTOR(
-			notificationProc,
-			kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode)
-		),
-	};
+	static struct NMRec rec = {.qType=8};
+	rec.nmResp = STATICDESCRIPTOR(
+		notificationProc,
+		kPascalStackBased | STACK_ROUTINE_PARAMETER(1, kFourByteCode));
 	NMInstall(&rec);
 	notificationPending = 1;
 }
