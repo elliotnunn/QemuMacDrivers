@@ -79,7 +79,8 @@ bool VInit(RegEntryID *id) {
 	picmask = 1 << devindex;
 
 	pic = (void *)(0xf0000000 + 0x1000000*slotnum);
-	device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1)); // TODO which device in which slot?
+	device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1));
+	VConfig = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1) + 0x100);
 
 	SynchronizeIO();
 	if (device->magicValue != 0x74726976) return false;
