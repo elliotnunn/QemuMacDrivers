@@ -70,7 +70,7 @@ struct longdqe {
 
 struct bootBlock {
 	uint16_t magic;
-	uint32_t entryBSR;
+	uint32_t entryBRA;
 	uint16_t version;
 	uint16_t page2flags;
 	unsigned char systemFileName[16];
@@ -148,7 +148,7 @@ static struct Qid9 root;
 static bool mounted;
 static struct bootBlock bootBlock = {
 	.magic = 0x4c4b,
-	.entryBSR = 0x61000088,
+	.entryBRA = 0x60000088,
 	.version = 0x4418,
 	.page2flags = 0,
 	.systemFileName = "\x06" "System",
