@@ -63,6 +63,7 @@ void _putchar(char character) {
 
 
 	volatile char *aData = *(char **)0x1dc + 6;
+	// On a Quadra this is 50f0c026
 
 	static char lastchar = '\n';
 	if (lastchar == '\n') {
