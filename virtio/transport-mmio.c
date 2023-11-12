@@ -71,18 +71,15 @@ static struct DeferredTask dtc = {
 };
 
 // returns true for OK
-bool VInit(void *theDevice) {
+bool VInit(RegEntryID *id) {
 	// Work around a shortcoming in global initialisation
-	int slotnum = *(uint32_t *)theDevice;
-	int devindex = 31;
+	int slotnum = id->contents[0];
+	int devindex = id->contents[1];
 
 	picmask = 1 << devindex;
 
 	pic = (void *)(0xf0000000 + 0x1000000*slotnum);
 	device = (void *)(0xf0000000 + 0x1000000*slotnum + 0x200*(devindex+1)); // TODO which device in which slot?
-
-	printf("slotnum %d pic %p device %p mask %p\n", slotnum, pic, device, picmask);
-
 
 	SynchronizeIO();
 	if (device->magicValue != 0x74726976) return false;

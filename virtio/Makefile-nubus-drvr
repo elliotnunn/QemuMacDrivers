@@ -3,7 +3,7 @@
 BUILD = build-drvr
 
 CC = m68k-apple-macos-gcc
-CFLAGS = -c -O3 -mcpu=68020 -nostartfiles -ffreestanding -ffunction-sections -fdata-sections
+CFLAGS = -c -Os -mcpu=68020 -nostartfiles -ffreestanding -ffunction-sections -fdata-sections
 
 AS = m68k-apple-macos-as
 ASFLAGS =
@@ -37,8 +37,13 @@ $(BUILD)/declrom: $(BUILD)/declrom.elf
 $(BUILD)/declrom.elf: $(BUILD)/declrom.o
 	m68k-apple-macos-ld -o $@ $^
 
-$(BUILD)/declrom.o: declrom.s $(BUILD)/device-input.drvr
+$(BUILD)/declrom.o: declrom.s $(BUILD)/primaryinit.bin $(BUILD)/device-input.drvr $(BUILD)/device-9p.drvr
 	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD)/primaryinit.bin: primaryinit.c
+	$(CC) -c -mpcrel -nostdlib -nostartfiles -ffreestanding -o $(BUILD)/primaryinit.o $^
+	m68k-apple-macos-ld -e primaryinit -o $(BUILD)/primaryinit.elf $(BUILD)/primaryinit.o $(STANDARD)
+	m68k-apple-macos-objcopy --only-section .text -O binary $(BUILD)/primaryinit.elf $@
 
 $(BUILD)/%.o: %.c
 	$(CC) $(CFLAGS) -o $@ $^

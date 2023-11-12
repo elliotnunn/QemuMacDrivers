@@ -34,7 +34,7 @@ static void findLogicalBARs(RegEntryID *pciDevice, void *barArray[6]);
 
 // For PCI devices, the void pointer is a RegEntryIDPtr.
 // Leave the device in DRIVER status.
-bool VInit(void *dev) {
+bool VInit(RegEntryID *dev) {
 	void *bars[6];
 	findLogicalBARs(dev, bars);
 

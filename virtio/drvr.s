@@ -14,7 +14,7 @@ drvrOpen: drvrClose: drvrControl: drvrStatus: drvrPrime:
 	movem.l %d2/%a0/%a1,-(%sp)      /* save registers */
 
 /* Push a DriverInitInfo/DriverFinalInfo struct */
-	subq    #6,%sp
+	sub.w   #18,%sp
 
 	moveq.l #0,%d0
 	move.b  7(%a0),%d0              /* ioTrap number */
@@ -31,13 +31,14 @@ drvrOpen: drvrClose: drvrControl: drvrStatus: drvrPrime:
 
 	bsr     fixUpPointers
 
-	lea     20(%sp),%a0
+	lea     20(%sp),%a0             /* replace PB with init/final info */
 	move.l  %a0,8(%sp)
 
 	move.w  24(%a1),(%a0)+ /* DCE.refnum */
-	move.l  #12,(%a0) /* RegEntryID becomes slot number TODO */
+	bsr     whichDeviceInSlot
+	movem.l %d0/%d1,(%a0) /* RegEntryID becomes true sub-device address */
 
-	addq.l  #7,12(%sp)
+	addq.l  #7,12(%sp)              /* convert IOCommandCode */
 notOpenOrClose:
 
 /* Opportunistically set DCE global */
@@ -45,7 +46,7 @@ notOpenOrClose:
 	move.l  %a1,(%a0)
 
 	jsr     DoDriverIO
-	add.w   #26,%sp
+	add.w   #20+18,%sp
 
 	movem.l (%sp)+,%d2/%a0/%a1
 
@@ -96,6 +97,35 @@ fixUpPointers:
 
 	movem.l (%sp)+,%d0-%d1/%a0-%a2
 3$:
+	rts
+
+
+whichDeviceInSlot: /* expect DCE ptr in a1, return slot and index in d0/d1 */
+	movem.l %d2-%d4/%a0-%a2,-(%sp)
+
+	move.b  40(%a1),%d3 /* slot number */
+	move.b  41(%a1),%d4 /* sResource number */
+
+	moveq   #56/4-1,%d0 /* make an SpBlock */
+1$:
+	clr.l   -(%sp)
+	dbf     %d0,1$
+	move.l  %sp,%a0
+
+	move.b  %d3,49(%a0) /* slot number */
+	move.b  %d4,50(%a0) /* sResource number */
+	moveq   #11,%d0 /* call SGetSRsrc */
+	.short  0xa06e
+
+	moveq.l #0,%d0
+	move.b  %d3,%d0
+
+	moveq.l #0,%d1 /* ioReserved field */
+	move.w  36(%a0),%d1
+
+	lea     56(%sp),%sp
+
+	movem.l (%sp)+,%d2-%d4/%a0-%a2
 	rts
 
 

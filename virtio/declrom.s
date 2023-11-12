@@ -97,15 +97,25 @@ SEBlock.size:
 
 
 
-
-
 	.section .text
 ROMSTART:
 
 /* The list of all the sResources on the ROM */
+.set resNum, 128
+
 sResourceDirectory:
 	OSLstEntry 1, BoardResource
-	OSLstEntry 128, VirtioResource
+
+.rept 1 /* Maximum number of 9P devices */
+	OSLstEntry resNum, Resource9P
+.set resNum, resNum+1
+.endr
+
+.rept 1 /* Maximum number of input devices */
+OSLstEntry resNum, ResourceInput
+.set resNum, resNum+1
+.endr
+
 	DatLstEntry endOfList, 0
 
 /* Information applying to the "physical" board */
@@ -127,14 +137,19 @@ BoardName:
 	.asciz "Virtio bus"
 	.align 2
 PrimaryInitRec:
-	.long 9$-.
+	.long InitEnd-.
 	.byte 2 /* code revision? */
 	.byte sCPU_68020 /* CPU type */
 	.short 0 /* reserved */
 	.long 4 /* offset to code */
-	move.w #0,seStatus(%a0)
+
+	move.l  %a0,-(%sp)
+	jsr     cprimaryinit
+	addq.l  #4,%sp
 	rts
-9$:
+cprimaryinit:
+	.incbin "build-drvr/primaryinit.bin"
+InitEnd:
 
 VendorInfoRec:
 	OSLstEntry vendorId, VendorId
@@ -204,9 +219,7 @@ Cicn:  .long CicnEnd-Cicn
 	.align 2
 CicnEnd:
 
-/* Functional resources, one per actual virtio device */
-
-VirtioResource:
+Resource9P:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
 	OSLstEntry sRsrcDrvrDir, 3$
@@ -217,17 +230,43 @@ VirtioResource:
 	.short catCPU
 	.short typeDesk
 	.short drSwMacCPU
-	.short 0
+	.short 0x5609
 2$:
 	.asciz ".virtio9p"
 	.align 2
 3$:
-	OSLstEntry sCPU_68020, InputDRVR
+	OSLstEntry sCPU_68020, Driver9P
 	DatLstEntry endOfList, 0
 
-InputDRVR:
+ResourceInput:
+	OSLstEntry sRsrcType, 1$
+	OSLstEntry sRsrcName, 2$
+	OSLstEntry sRsrcDrvrDir, 3$
+	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
+	DatLstEntry sRsrcHWDevId, 1
+	DatLstEntry endOfList, 0
+1$:
+	.short catCPU
+	.short typeDesk
+	.short drSwMacCPU
+	.short 0x5612
+2$:
+	.asciz ".virtioinput"
+	.align 2
+3$:
+	OSLstEntry sCPU_68020, DriverInput
+	DatLstEntry endOfList, 0
+
+/* Include the DRVR binaries (don't duplicate like sResources!) */
+Driver9P:
 	.long 9$-.
 	.incbin "build-drvr/device-9p.drvr"
+	.align 2
+9$:
+
+DriverInput:
+	.long 9$-.
+	.incbin "build-drvr/device-input.drvr"
 	.align 2
 9$:
 
