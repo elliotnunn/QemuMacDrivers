@@ -29,7 +29,7 @@ typedef void (*GNEFilterType)(EventRecord *event, Boolean *result);
 
 short funnel(long commandCode, void *pb);
 static OSStatus finalize(DriverFinalInfo *info);
-static OSStatus initialize(void *device);
+static OSStatus initialize(DriverInitInfo *info);
 static void handleEvent(struct event e);
 static void myGNEFilter(EventRecord *event, Boolean *result);
 static void lateBootHook(void);
@@ -72,13 +72,10 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 
 	logenable = 1;
 
-	printf("%p %p %p %p %p\n", spaceID, cmdID, pb, code, kind);
-
 	switch (code) {
 	case kInitializeCommand:
 	case kReplaceCommand:
-		printf("refnum %d\n", pb.initialInfo->refNum);
-		err = initialize(&pb.initialInfo->deviceEntry);
+		err = initialize(pb.initialInfo);
 		break;
 	case kFinalizeCommand:
 	case kSupersededCommand:
@@ -117,21 +114,38 @@ static OSStatus finalize(DriverFinalInfo *info) {
 	return noErr;
 }
 
-static OSStatus initialize(void *device) {
-	strcpy(logprefix, ".VirtioInput ");
-	logenable = 1;
+static OSStatus initialize(DriverInitInfo *info) {
+	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
+// 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
+		logenable = 1;
+// 	}
 
-	printf("Virtio-input driver starting\n");
+	printf("Starting\n");
+
+	if (!VInit(&info->deviceEntry)) {
+		printf("Transport layer failure\n");
+		VFail();
+		return openErr;
+	};
 
 	lpage = AllocPages(1, &ppage);
-	if (lpage == NULL) return openErr;
+	if (lpage == NULL) {
+		printf("Memory allocation failure\n");
+		VFail();
+		return openErr;
+	}
 
-	if (!VInit(device)) return openErr;
+	if (!VFeaturesOK()) {
+		printf("Feature negotiation failure\n");
+		VFail();
+		return openErr;
+	}
 
 	VDriverOK();
 
 	int nbuf = QInit(0, 4096 / sizeof (struct event));
 	if (nbuf == 0) {
+		printf("Virtqueue layer failure\n");
 		VFail();
 		return openErr;
 	}
@@ -142,10 +156,7 @@ static OSStatus initialize(void *device) {
 	}
 	QNotify(0);
 
-	printf("Virtio-input driver started\n");
-
-	printf("Installing late-boot hook: ");
-
+	printf("Hooking Process Manager startup: ");
 	Patch68k(
 		_Gestalt,
 		"0c80 6f732020" //      cmp.l   #'os  ',d0
@@ -167,7 +178,7 @@ static OSStatus initialize(void *device) {
 }
 
 static void lateBootHook(void) {
-	printf("Late boot: installing TrackControl patch\n");
+	printf("Patching TrackControl\n");
 
 	oldTrackControl = (ControlActionUPP)GetToolTrapAddress(_TrackControl);
 
@@ -181,7 +192,7 @@ static void lateBootHook(void) {
 				| RESULT_SIZE(kTwoByteCode)),
 		_TrackControl);
 
-	printf("Late boot: installing GNEFilter patch\n");
+	printf("Patching GNEFilter\n");
 
 #if GENERATINGCFM
 	oldGNEFilter = LMGetGNEFilter(); // PowerPC version calls through the chain

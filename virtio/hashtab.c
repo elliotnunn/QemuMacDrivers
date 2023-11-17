@@ -78,7 +78,7 @@ void HTallocate(void) {
 			if (table) DisposePtr((void *)table);
 			table = newtable;
 			tablesize = newtablesize;
-			printf("Hash table slots = %d\n", tablesize);
+			printf("Hash table slots: %d\n", tablesize);
 		}
 	}
 
@@ -95,7 +95,7 @@ void HTallocate(void) {
 			blobsize = GetHandleSize(blob);
 			HLock(blob);
 		}
-		printf("Hash table storage bytes = %d\n", blobsize);
+		printf("Hash table storage bytes: %d\n", blobsize);
 	}
 
 	LMSetMemErr(saveMemErr);
@@ -245,7 +245,7 @@ static void *entryval(struct entry *e) {
 }
 
 static void dump(void) {
-	printf("hashtable dump\n");
+	printf("Hashtable dump\n");
 	for (int i=0; i<tablesize; i++) {
 		if (table[i].klen == 0) continue;
 

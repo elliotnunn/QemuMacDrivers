@@ -20,6 +20,7 @@
 #include "dirtyrectpatch.h"
 #include "gammatables.h"
 #include "printf.h"
+#include "panic.h"
 #include "patch68k.h"
 #include "transport.h"
 #include "structs-gpu.h"
@@ -185,6 +186,9 @@ DriverDescription TheDriverDescription = {
 	{{kServiceCategoryNdrvDriver, kNdrvTypeIsVideo, {0x00, 0x10, 0x80, 0x00}}}} //v0.1
 };
 
+const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask;
+const char drvrNameVers[] = "\x1b.Display_Video_Apple_Virtio\x01\x00";
+
 static const char *controlNames[] = {
 	"Reset",                        // 0
 	"KillIO",                       // 1
@@ -325,26 +329,41 @@ static OSStatus initialize(DriverInitInfo *info) {
 	long ram = 0;
 	short width, height;
 
-	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
+	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
+// 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		logenable = 1;
-	}
+// 	}
+
+	printf("Starting\n");
 
 	// No need to signal FAILED if cannot communicate with device
-	if (!VInit(&info->deviceEntry)) return paramErr;
+	if (!VInit(&info->deviceEntry)) {
+		printf("Transport layer failure\n");
+		return openErr;
+	};
 
 	// Try enabling Virgl (3D)
 	VSetFeature(0, virgl_enable = VGetDevFeature(0));
-	if (!VFeaturesOK()) goto fail;
+	if (!VFeaturesOK()) {
+		printf("Feature negotiation failure\n");
+		goto fail;
+	}
 
 	// Can have (descriptor count)/4 updateScreens in flight at once
 	maxinflight = QInit(0, 4*maxinflight /*n(descriptors)*/) / 4;
-	if (maxinflight < 1) goto fail;
+	if (maxinflight < 1) {
+		printf("Virtqueue layer failure\n");
+		goto fail;
+	}
 
 	freebufs = (1 << maxinflight) - 1;
 
 	// All our descriptors point into this wired-down page
 	lpage = AllocPages(1, &ppage);
-	if (lpage == NULL) goto fail;
+	if (lpage == NULL) {
+		printf("Memory allocation failure\n");
+		goto fail;
+	}
 
 	// Use no more than a quarter of RAM (but allow for a few KB short of a MB)
 	bufsize = MAXBUF;
@@ -362,15 +381,19 @@ static OSStatus initialize(DriverInitInfo *info) {
 		if (frontbuf != NULL) FreePages(frontbuf);
 
 		bufsize /= 2;
-		if (bufsize < MINBUF) goto fail;
+		if (bufsize < MINBUF) {
+			printf("Framebuffer allocation failure\n");
+			goto fail;
+		}
 	}
 
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
 	VDriverOK();
 
 	getBestSize(&width, &height);
-	if (!mode(k32bit, idForRes(width, height, true)))
-		goto fail;
+	if (!mode(k32bit, idForRes(width, height, true))) {
+		panic("Could not start up in any mode");
+	}
 
 	setGammaTable((GammaTbl *)&builtinGamma[0].table);
 	linearCLUT();
@@ -384,6 +407,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// MacsBug disables interrupts (including our frame timer)
 	// so catch when it polls the keyboard (continuously)
+	printf("Hooking DebugUtil for screen updates: ");
 	Patch68k(
 		_DebugUtil,
 		"0c80 00000003" //      cmp.l   #3,d0
@@ -397,6 +421,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	// We can only patch drawing code *after* QuickDraw is fully installed,
 	// so wait for ProcessMgr to NewGestalt('os  ') right before the desktop.
+	printf("Hooking Process Manager startup: ");
 	Patch68k(
 		_Gestalt,
 		"0c80 6f732020" //      cmp.l   #'os  ',d0
@@ -423,7 +448,7 @@ fail:
 	if (backbuf) PoolDeallocate(backbuf);
 	if (frontbuf) FreePages(frontbuf);
 	VFail();
-	return paramErr;
+	return openErr;
 }
 
 static OSStatus finalize(DriverFinalInfo *info) {
@@ -770,7 +795,7 @@ static void lateBootHook(void) {
 	InstallDirtyRectPatch();
 	updateScreen(0, 0, H, W);
 	DConfigChange();
-	printf("INSTALLED QUICKDRAW PATCHES");
+	printf("Patched QuickDraw to capture draw events\n");
 }
 
 void DirtyRectCallback(short top, short left, short bottom, short right) {
@@ -1331,8 +1356,6 @@ static OSStatus RetrieveGammaTable(VDRetrieveGammaRec *rec) {
 	if (id < first || id > last) {
 		return paramErr;
 	}
-
-	printf("copying gamma table %d x %db\n", id, sizeof(builtinGamma[0].table));
 
 	memcpy(rec->csGammaTablePtr, &builtinGamma[id-first].table, sizeof(builtinGamma[0].table));
 

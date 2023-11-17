@@ -169,12 +169,16 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	setvec(vector, &block->code); // install
 
 	if (logenable) {
-		printf("Patched %#x. Old code at %p. New code in sys heap at %p:\n   ",
+		printf("vector=%X, oldcode=%p, newcode=%p\n",
 			vector, block->original, &block->code);
-		for (char *i=block->code; i<code; i+=2) {
-			printf(" %02x%02x", 255&i[0], 255&i[1]);
+
+		int cnt = code - block->code;
+		for (int i=0; i<cnt; i+=2) {
+			printf("%s%04x%c",
+				(i%16) ? "" : "    ",
+				0xffff & *(uint16_t *)(block->code + i),
+				(i==cnt-2 || (i%16)==14) ? '\n' : ' ');
 		}
-		printf("\n");
 	}
 
 	return &block->code;
@@ -185,7 +189,7 @@ pascal void Unpatch68k(void *patch) {
 
 	if (getvec(block->vector) == &block->code) {
 		// yay, we never got over-patched
-		printf("Unpatched %#x back to %p\n", block->vector, block->original);
+		printf("Unpatched %X back to %p\n", block->vector, block->original);
 
 		setvec(block->vector, block->original);
 		DisposePtr((Ptr)block);

@@ -154,7 +154,7 @@ static struct bootBlock bootBlock = {
 	.systemFileName = "\x06" "System",
 	.finderFileName = "\x06" "Finder",
 	.debuggerFileName = "\x07" "MacsBug",
-	.disassemblerFileName = "\x0c" "Disassembler",
+	.disassemblerFileName = "\x0c""Disassembler",
 	.startupScreenFileName = "\x0d" "StartUpScreen",
 	.helloFileName = "\x06" "Finder",
 	.clipboardFileName = "\x09" "Clipboard",
@@ -231,8 +231,6 @@ OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
 
-	logenable = 1;
-
 	if (code <= 6 && logenable)
 		printf("Drvr_%s", PBPrint(pb.pb, (*pb.pb).ioParam.ioTrap | 0xa000, 1));
 
@@ -297,24 +295,23 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static OSStatus initialize(DriverInitInfo *info) {
 	// Debug output
 	drvrRefNum = info->refNum;
-	sprintf(logprefix, ".Virtio9P(%d) ", drvrRefNum);
+	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		logenable = 1;
 // 	}
 
-	printf("Primary init\n");
+	printf("Starting\n");
 
-	// Start the Virtio layer
 	if (!VInit(&info->deviceEntry)) {
-		printf("...failed VInit()\n");
-		return paramErr;
+		printf("Transport layer failure\n");
+		return openErr;
 	};
 
-	// Request mount_tag in the config area
-	VSetFeature(0, 1);
+	VSetFeature(0, 1); // Request mount_tag in the config area
 	if (!VFeaturesOK()) {
-		printf("...failed VFeaturesOK()\n");
-		return paramErr;
+		printf("Feature negotiation failure\n");
+		VFail();
+		return openErr;
 	}
 
 	// Cannot go any further without touching virtqueues, which requires DRIVER_OK
@@ -326,45 +323,42 @@ static OSStatus initialize(DriverInitInfo *info) {
 	// Request enough buffers to transfer a megabyte in page sized chunks
 	uint16_t viobufs = QInit(0, 256);
 	if (viobufs < 2) {
-		printf("...failed QInit()\n");
-		return paramErr;
+		printf("Virtqueue layer failure\n");
+		VFail();
+		return openErr;
 	}
 	QInterest(0, 1);
 
 	// Start the 9P layer
 	int err9;
 	if ((err9 = Init9(viobufs)) != 0) {
-		return paramErr;
+		printf("9P layer failure\n");
+		VFail();
+		return openErr;
 	}
 
 	if ((err9 = Attach9(ROOTFID, (uint32_t)~0 /*auth=NOFID*/, "", "", 0, &root)) != 0) {
-		return paramErr;
+		return openErr;
 	}
 
 	// Hook into the Device Manager as a block device
 	dqe.dqe.dQDrive=4; // lower numbers reserved
 	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
 	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
+	printf("Drive number: %d\n", dqe.dqe.dQDrive);
 
-	// Trick: hook into the File Manager, or arrange for this to be done later
-	if ((long)GetVCBQHdr()->qHead != -1 && (long)GetVCBQHdr()->qHead != 0) {
-		printf("FM up: mounting now\n");
+	int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
+	vcb.vcbFndrInfo[0] = systemFolder>0 ? systemFolder : 0;
+	printf("System Folder: %s\n", systemFolder>0 ? "present" : "absent");
+
+	printf("File Manager: %s\n", GetVCBQHdr()->qHead != (void *)-1 ? "present" : "absent");
+
+	if (GetVCBQHdr()->qHead != (void *)-1) {
 		installAndMountAndNotify();
-	} else {
-		// Bootable filesystem?
-		// TODO: this needs to check for a ZSYS and FNDR file
-		int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
-		if (systemFolder > 0) {
-			printf("FM down, bootable System Folder: I am the boot drive\n");
-			vcb.vcbFndrInfo[0] = systemFolder;
-
-			SetTimeout(1); // give up on the default disk quickly
-		} else {
-			printf("FM down, not bootable\n");
-		}
+	} else if (systemFolder > 0) {
+		SetTimeout(1); // give up on the default disk quickly (hack!)
 	}
 
-	printf("...primary init succeeded\n");
 	return noErr;
 }
 
@@ -380,7 +374,7 @@ static void installAndMountAndNotify(void) {
 	long patched = 0;
 	Gestalt(selector, &patched);
 
-	printf("ToExtFS hook (Gestalt %.4s): ", &selector);
+	printf("Hooking ToExtFS (Gestalt %.4s): ", &selector);
 	if (patched) {
 		printf("already installed\n");
 	} else {
@@ -506,7 +500,7 @@ static OSErr boot(void) {
 	BlockMove(thunk, thunk, sizeof thunk);
 
 	// Call boot 2, never to return
-	printf("...starting System file\n");
+	printf("Jumping to boot 2 resource\n");
 	CALL2(void, thunk, Handle, boot2hdl, long, vcb.vcbFndrInfo[0]);
 }
 
@@ -529,9 +523,6 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	vcb.vcbVRefNum = -1;
 
 	while (findVol(vcb.vcbVRefNum) != NULL) vcb.vcbVRefNum--;
-
-	printf("refnums are driver=%d drive=%d volume=%d\n",
-		drvrRefNum, dqe.dqe.dQDrive, vcb.vcbVRefNum);
 
 	if (GetVCBQHdr()->qHead == NULL) {
 		LMSetDefVCBPtr((Ptr)&vcb);
@@ -560,8 +551,6 @@ static OSErr fsGetVolInfo(struct HVolumeParam *pb) {
 		struct WDCBRec *wdcb = findWD(pb->ioVRefNum);
 		if (wdcb) cnid = wdcb->wdDirID;
 	}
-
-	if (cnid != 2) printf("GetVolInfo on subdir\n");
 
 	// Count contained files
 	pb->ioVNmFls = 0;
@@ -627,7 +616,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	int32_t cnid = pbDirID(pb);
 
 	if (idx > 0) {
-		printf("GCI index mode\n");
+		printf("Find by: directory+index\n");
 
 		// Software commonly calls with index 1, 2, 3 etc
 		// Cache Readdir9 to avoid quadratically relisting the directory per-call
@@ -678,11 +667,11 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 
 		browse(MYFID, cnid, "");
 	} else if (idx == 0) {
-		printf("GCI name mode\n");
+		printf("Find by: directory+path\n");
 		cnid = browse(MYFID, cnid, pb->ioNamePtr);
 		if (iserr(cnid)) return cnid;
 	} else {
-		printf("GCI ID mode\n");
+		printf("Find by: directory only\n");
 		cnid = browse(MYFID, cnid, "\p");
 		if (iserr(cnid)) return cnid;
 	}
@@ -691,7 +680,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 
 	// Here's some tricky debugging
 	if (logenable) {
-		printf("GCI found "); cnidPrint(cnid); printf("\n");
+		printf("Found: "); cnidPrint(cnid); printf("\n");
 	}
 
 	// Return the filename
@@ -749,7 +738,6 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		FCBRec *openFCB;
 		while (UnivIndexFCB(&vcb, &openFork, &openFCB) == noErr) {
 			if (openFCB->fcbFlNm == cnid) {
-				printf("yes! a doubly open file!\n");
 				pb->ioFRefNum = openFork;
 				break;
 			}
@@ -920,11 +908,9 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		char rname[512];
 		sprintf(rname, "%s.rsrc", getDBName(cnid));
 
-		printf("CREATING RSRC %s\n", rname);
-
 		// Make sure the sidecar file exists
 		Walk9(fid, 10, 1, (const char *[]){".."}, NULL, NULL); // parent dir
-		if (Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, rname, NULL, NULL) == 0) printf("created otherwise missing sidecar file!");
+		Lcreate9(10, O_CREAT|O_EXCL, 0777, 0, rname, NULL, NULL);
 		Clunk9(10);
 
 		if (Walk9(fid, fid, 2, (const char *[]){"..", rname}, NULL, NULL)) return ioErr;
@@ -939,7 +925,6 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		}
 	} else {
 		if (Lopen9(fid, O_RDWR, NULL, NULL)) {
-			printf("did sadly fail to get write permission\n");
 			pb->ioPermssn = fsRdPerm;
 			if (Lopen9(fid, O_RDONLY, NULL, NULL)) {
 				return permErr;
@@ -1132,12 +1117,9 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 		} else {
 			// Yes, a read/write succeeded beyond EOF, so the file is longer
 			// Tell all the other FCBs about this
-			printf("Lengthening fork to %d:", pb->ioPosOffset);
 			short fellowFile = pb->ioRefNum;
 			FCBRec *fellowFCB;
 			for (;;) {
-				printf(" refnum-%d", fellowFile);
-
 				if (UnivResolveFCB(fellowFile, &fellowFCB)) panic("FCB linked list broken (RW)");
 
 				fellowFCB->fcbEOF = pb->ioPosOffset;
@@ -1145,7 +1127,6 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 				fellowFile = fellowFCB->fcb9Link;
 				if (fellowFile == pb->ioRefNum) break;
 			}
-			printf("\n");
 		}
 	}
 
@@ -1350,7 +1331,7 @@ static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath) 
 	}
 
 
-	printf("Browsing for /");
+	printf("Browsing for: /");
 	const char *suffix = "/";
 	for (int i=0; i<pathCompCnt; i++) {
 		printf(i<pathCompCnt-1 ? "%s/" : "%s", pathComps[i]);
