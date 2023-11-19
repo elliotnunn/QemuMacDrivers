@@ -7,6 +7,9 @@
 #include "unicode.h"
 
 /*
+char * means UTF-8
+unsigned char * means Mac Roman
+
 TODO:
 Preserve file extensions
 Represent unknown chars with fewer than one-per-UTF8-byte "?"s
@@ -228,8 +231,10 @@ long utf8char(unsigned char roman) {
 	}
 }
 
-static int toMacRoman(const char **utf8) {
+static int toMacRoman(const char **utf8signed) {
 	int nbytes, roman;
+
+	const unsigned char **utf8 = (const unsigned char **)utf8signed;
 
 	if ((*utf8)[0]=='A' && (*utf8)[1]==0xcc && (*utf8)[2]==0x88) {
 		// LATIN CAPITAL LETTER A + COMBINING DIAERESIS
@@ -446,7 +451,7 @@ static int toMacRoman(const char **utf8) {
 	} else if ((*utf8)[0]<0x80) {
 		// ASCII and not followed by a known combining code point
 		nbytes = 1;
-		roman = (unsigned char)(*utf8)[0];
+		roman = (*utf8)[0];
 	} else if ((*utf8)[0]==0xc3 && (*utf8)[1]==0x84) {
 		// LATIN CAPITAL LETTER A WITH DIAERESIS
 		nbytes = 2;
