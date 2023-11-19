@@ -683,6 +683,12 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		printf("Found: "); cnidPrint(cnid); printf("\n");
 	}
 
+	if (longform) {
+		memset((char *)pb + 30, 0, 100 - 30);
+	} else {
+		memset((char *)pb + 30, 0, 80 - 30);
+	}
+
 	// Return the filename
 	if (idx!=0 && pb->ioNamePtr!=NULL) {
 		mr31name(pb->ioNamePtr, getDBName(cnid));
