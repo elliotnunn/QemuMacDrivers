@@ -37,13 +37,18 @@ $(BUILD)/declrom: $(BUILD)/declrom.elf
 $(BUILD)/declrom.elf: $(BUILD)/declrom.o
 	m68k-apple-macos-ld -o $@ $^
 
-$(BUILD)/declrom.o: declrom.s $(BUILD)/primaryinit.bin $(BUILD)/device-input.drvr $(BUILD)/device-9p.drvr
+$(BUILD)/declrom.o: declrom.s $(BUILD)/primaryinit.bin $(BUILD)/slotdrvrload.bin $(BUILD)/device-input.drvr $(BUILD)/device-9p.drvr
 	$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD)/primaryinit.bin: primaryinit.c
 	$(CC) -c -mpcrel -nostdlib -nostartfiles -ffreestanding -o $(BUILD)/primaryinit.o $^
 	m68k-apple-macos-ld -e primaryinit -o $(BUILD)/primaryinit.elf $(BUILD)/primaryinit.o $(STANDARD)
 	m68k-apple-macos-objcopy --only-section .text -O binary $(BUILD)/primaryinit.elf $@
+
+$(BUILD)/slotdrvrload.bin: slotdrvrload.c
+	$(CC) -c -mpcrel -nostdlib -nostartfiles -ffreestanding -o $(BUILD)/slotdrvrload.o $^
+	m68k-apple-macos-ld -e slotdrvrload -o $(BUILD)/slotdrvrload.elf $(BUILD)/slotdrvrload.o $(STANDARD)
+	m68k-apple-macos-objcopy --only-section .text -O binary $(BUILD)/slotdrvrload.elf $@
 
 $(BUILD)/%.o: %.c
 	$(CC) $(CFLAGS) -o $@ $^

@@ -11,6 +11,7 @@
 	.set sRsrcName, 2
 	.set sRsrcIcon, 3
 	.set sRsrcDrvrDir, 4
+	.set sRsrcLoadRec, 5
 	.set sRsrcFlags, 7
 	.set sRsrcHWDevId, 8
 	.set minorBase, 10
@@ -223,6 +224,7 @@ Resource9P:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
 	OSLstEntry sRsrcDrvrDir, 3$
+	OSLstEntry sRsrcLoadRec, SharedDriverLoader
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
 	DatLstEntry endOfList, 0
@@ -242,6 +244,7 @@ ResourceInput:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
 	OSLstEntry sRsrcDrvrDir, 3$
+	OSLstEntry sRsrcLoadRec, SharedDriverLoader
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
 	DatLstEntry endOfList, 0
@@ -256,6 +259,22 @@ ResourceInput:
 3$:
 	OSLstEntry sCPU_68020, DriverInput
 	DatLstEntry endOfList, 0
+
+/* Work around the 64K driver limitation in the Slot Manager */
+SharedDriverLoader:
+	.long LoaderEnd-.
+	.byte 2 /* code revision? */
+	.byte sCPU_68020 /* CPU type */
+	.short 0 /* reserved */
+	.long 4 /* offset to code */
+
+	move.l  %a0,-(%sp)
+	jsr     cdrvrloader
+	addq.l  #4,%sp
+	rts
+cdrvrloader:
+	.incbin "build-drvr/slotdrvrload.bin"
+LoaderEnd:
 
 /* Include the DRVR binaries (don't duplicate like sResources!) */
 Driver9P:
