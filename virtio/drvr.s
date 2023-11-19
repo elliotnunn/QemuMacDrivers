@@ -77,7 +77,8 @@ fixUpPointers:
 	movem.l %d0-%d1/%a0-%a2,-(%sp)
 	lea     relocationZero(%pc),%a0 /* a0 = base register */
 	move.l  %a0,%d0                 /* d0 = base register too */
-	lea     relocationList(%pc),%a1 /* a1 = relocation list (moves) */
+	lea.l   relocationList,%a1      /* a1 = relocation list */
+	add.l   %d0,%a1                 /* hack: can't use 16-bit pc-relative lea */
 
 1$:
 	move.l  (%a1)+,%d1              /* d1 = relocation offset */

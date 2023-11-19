@@ -19,12 +19,12 @@ SECTIONS {
 		KEEP(*(*.drvrNameVers));   /* better be a pascal string */
 		. = ALIGN(2);
 
-		QUAD(0x474c4f42414c533a)   /* "GLOBALS:" eyecatcher */
-		*(.sdata .sdata.* .data .data.* .rodata .rodata.* .bss .bss.* COMMON);
-
 		QUAD(0x544845434f44453a)   /* "THECODE:" eyecatcher */
 		*(.text.drvr);             /* needs to be within 32k of start */
 		*(.text .text.*);
+
+		QUAD(0x474c4f42414c533a)   /* "GLOBALS:" eyecatcher */
+		*(.sdata .sdata.* .data .data.* .rodata .rodata.* .bss .bss.* COMMON);
 
 		/* is there a better way to make symbols mandatory? */
 		must_have = drvrFlags + drvrNameVers;
