@@ -98,6 +98,8 @@ static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void installAndMountAndNotify(void);
 static OSErr boot(void);
+static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid);
+static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid);
 static int32_t browse(uint32_t fid, int32_t cnid, const unsigned char *paspath);
 static bool setPath(int32_t cnid);
 static bool appendRelativePath(const unsigned char *path);
@@ -585,7 +587,7 @@ static OSErr fsGetVolParms(struct HIOParam *pb) {
 // <--    16    ioResult       word         <--    16    ioResult      word
 // <->    18    ioNamePtr      pointer      <->    18    ioNamePtr     pointer
 // -->    22    ioVRefNum      word         -->    22    ioVRefNum     word
-// <--    24    ioFRefNum      word         <--    24    ioFRefNum     word
+// <--    24    ioFRefNum      word         <--    24    ioFRefNum     word (ERROR: NOT SET FOR DIRS)
 // -->    28    ioFDirIndex    word         -->    28    ioFDirIndex   word
 // <--    30    ioFlAttrib     byte         <--    30    ioFlAttrib    byte
 // <--    31    ioACUser       byte         access rights for directory only
@@ -607,11 +609,10 @@ static OSErr fsGetVolParms(struct HIOParam *pb) {
 static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 	enum {MYFID=3};
 
-	bool flat = (pb->ioTrap&0xf2ff) == 0xa00c; // GetFileInfo without "H"
-	bool longform = (pb->ioTrap&0x00ff) == 0x0060; // GetCatInfo
+	bool catalogCall = (pb->ioTrap&0x00ff) == 0x0060; // GetCatInfo
 
 	int idx = pb->ioFDirIndex;
-	if (idx<0 && !longform) idx=0; // make named GetFInfo calls behave right
+	if (idx<0 && !catalogCall) idx=0; // make named GetFInfo calls behave right
 
 	int32_t cnid = pbDirID(pb);
 
@@ -654,7 +655,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 			// GetFileInfo/HGetFileInfo ignores child directories
 			// Note that Rreaddir does return a qid, but the type field of that
 			// qid is unpopulated. So we use the Linux-style type byte instead.
-			if ((!longform && type == 4) || !visName(name)) {
+			if ((!catalogCall && type == 4) || !visName(name)) {
 				continue;
 			}
 
@@ -676,109 +677,107 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		if (iserr(cnid)) return cnid;
 	}
 
-	// MYFID and cnid now both valid
-
-	// Here's some tricky debugging
 	if (logenable) {
 		printf("Found: "); cnidPrint(cnid); printf("\n");
 	}
 
-	if (longform) {
-		memset((char *)pb + 30, 0, 100 - 30);
-	} else {
-		memset((char *)pb + 30, 0, 80 - 30);
-	}
-
-	// Return the filename
-	if (idx!=0 && pb->ioNamePtr!=NULL) {
+	// A special case, doesn't set the field, just follows the pointer
+	if ((idx != 0) && (pb->ioNamePtr != NULL)) {
 		mr31name(pb->ioNamePtr, getDBName(cnid));
 	}
 
-	struct Stat9 stat;
-	if (Getattr9(MYFID, STAT_ALL, &stat)) return permErr;
-
-	pb->ioDirID = cnid; // alias ioDrDirID
-
-	// This is outside the GetFileInfo block: anticipate catastrophe
-	if (longform) {
-		pb->ioFlParID = getDBParent(cnid); // alias ioDrDirID
-	}
-
-	if (stat.qid.type & 0x80) { // directory
-		if (!longform) return fnfErr; // GetFileInfo doesn't do hierarchical
-
-		int n=0;
-		char childname[512];
-		Lopen9(MYFID, O_RDONLY|O_DIRECTORY, NULL, NULL); // iterate
-		char scratch[4096];
-		InitReaddir9(MYFID, scratch, sizeof scratch);
-		while (Readdir9(scratch, NULL, NULL, childname) == 0) {
-			if (!visName(childname)) continue;
-			n++;
-		}
-
-		pb->ioFRefNum = 0;
-		pb->ioFlAttrib = 0x10;
-		pb->ioFlFndrInfo = (struct FInfo){}; // alias ioDrUsrWds
-		pb->ioFlStBlk = n; // alias ioDrNmFls
-		pb->ioFlCrDat = 0; // alias ioDrCrDat
-		pb->ioFlMdDat = 0; // alias ioDrMdDat
-		if (longform) {
-			pb->ioFlBkDat = 0; // alias ioDrBkDat
-			pb->ioFlXFndrInfo = (struct FXInfo){0}; // alias ioDrFndrInfo
-		}
-	} else { // file
-		struct Stat9 rstat = {};
-		char rname[512];
-		sprintf(rname, "%s.rsrc", getDBName(cnid));
-		uint16_t oksteps = 0;
-
-		Walk9(MYFID, 19, 2, (const char *[]){"..", rname}, &oksteps, NULL);
-		if (oksteps == 2) {
-			Getattr9(19, STAT_SIZE, &rstat);
-		}
-
-		// Check whether the file is open
-		pb->ioFRefNum = 0;
-		short openFork = 0;
-		FCBRec *openFCB;
-		while (UnivIndexFCB(&vcb, &openFork, &openFCB) == noErr) {
-			if (openFCB->fcbFlNm == cnid) {
-				pb->ioFRefNum = openFork;
-				break;
-			}
-		}
-
-		pb->ioFlAttrib = 0;
-		pb->ioACUser = 0;
-		pb->ioFlFndrInfo = (struct FInfo){0};
-		pb->ioFlStBlk = 0;
-		pb->ioFlLgLen = stat.size;
-		pb->ioFlPyLen = (stat.size + 511) & -512;
-		pb->ioFlRStBlk = 0;
-		pb->ioFlRLgLen = rstat.size;
-		pb->ioFlRPyLen = (rstat.size + 511) & -512;
-		pb->ioFlCrDat = 0;
-		pb->ioFlMdDat = 0;
-		if (longform) {
-			pb->ioFlBkDat = 0;
-			pb->ioFlXFndrInfo = (struct FXInfo){0};
-			pb->ioFlClpSiz = 0;
-		}
-
-		char iname[512];
-		sprintf(iname, "%s.idump", getDBName(cnid));
-		oksteps = 0;
-
-		Walk9(MYFID, 19, 2, (const char *[]){"..", iname}, &oksteps, NULL);
-		if (oksteps == 2) {
-			if (!Lopen9(19, O_RDONLY, NULL, NULL)) {
-				Read9(19, &pb->ioFlFndrInfo, 0, 8, NULL); // don't care about actual count
-			}
-		}
+	if (isdir(cnid)) {
+		if (!catalogCall) return fnfErr; // GetFileInfo predates directories
+		setDirPBInfo((void *)pb, cnid, MYFID);
+	} else {
+		setFilePBInfo((void *)pb, cnid, MYFID);
 	}
 
 	return noErr;
+}
+
+static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid) {
+	// 9P/Unix lack a call to count the contents of a directory, so list it
+	int valence=0;
+	char childname[512];
+	char scratch[4096];
+
+	Lopen9(fid, O_RDONLY|O_DIRECTORY, NULL, NULL);
+	InitReaddir9(fid, scratch, sizeof scratch);
+	while (Readdir9(scratch, NULL, NULL, childname) == 0 && valence < 0x7fff) {
+		if (visName(childname)) valence++;
+	}
+	Clunk9(fid);
+
+	// Clear fields from ioFlAttrib onward
+	memset((char *)pb + 30, 0, 100 - 30);
+
+	pb->ioFRefNum = 0; // not sure what this means for dirs?
+	pb->ioFlAttrib = ioDirMask;
+	pb->ioDrDirID = cnid;
+	pb->ioDrNmFls = valence;
+	pb->ioDrParID = getDBParent(cnid);
+}
+
+static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid) {
+	// Could use this for "permissions" info in the future
+	struct Stat9 stat = {};
+	Getattr9(fid, STAT_SIZE, &stat);
+
+	// Resource fork info-getting, needs to be factored out
+	struct Stat9 rstat = {};
+	char rname[512];
+	strcpy(rname, getDBName(cnid));
+	strcat(rname, ".rsrc");
+	if (!Walk9(fid, 19, 2, (const char *[]){"..", rname}, NULL, NULL))
+		Getattr9(19, STAT_SIZE, &rstat);
+
+	// Finder info-getting, needs to be factored out
+	struct FInfo finfo = {};
+	char iname[512];
+	strcpy(iname, getDBName(cnid));
+	strcat(iname, ".idump");
+	if (!Walk9(fid, 19, 2, (const char *[]){"..", iname}, NULL, NULL))
+		if (!Lopen9(19, O_RDONLY, NULL, NULL))
+			Read9(19, &finfo, 0, 8, NULL);
+
+	// Determine whether the file is open
+	bool openRF = false, openDF = false;
+	short openAs = 0, refnum = 0;
+	FCBRec *fcb = NULL;
+	while (UnivIndexFCB(&vcb, &refnum, &fcb) == noErr) {
+		if (fcb->fcbFlNm != cnid) continue;
+
+		openAs = refnum;
+		if (fcb->fcbFlags & fcbResourceMask) {
+			openRF = true;
+		} else {
+			openDF = true;
+		}
+	}
+
+	// Clear shared "FileInfo" fields, from ioFlAttrib onward
+	memset((char *)pb + 30, 0, 80 - 30);
+
+	pb->ioFRefNum = openAs;
+	pb->ioFlAttrib =
+		(kioFlAttribResOpenMask * openRF) |
+		(kioFlAttribDataOpenMask * openDF) |
+		(kioFlAttribFileOpenMask * (openRF || openDF));
+	pb->ioFlFndrInfo = finfo;
+	if (pb->ioTrap & 0x200) pb->ioDirID = cnid; // peculiar field
+	pb->ioFlLgLen = stat.size;
+	pb->ioFlPyLen = (stat.size + 511) & -512;
+	pb->ioFlRLgLen = rstat.size;
+	pb->ioFlRPyLen = (rstat.size + 511) & -512;
+
+	if ((pb->ioTrap & 0xff) != 0x60) return;
+	// GetCatInfo only beyond this point
+
+	// Clear only "CatInfo" fields, from ioFlBkDat onward
+	memset((char *)pb + 80, 0, 108 - 80);
+
+	pb->ioFlParID = getDBParent(cnid);
 }
 
 // Set creator and type on files only
