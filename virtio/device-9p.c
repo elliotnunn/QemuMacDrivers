@@ -940,7 +940,9 @@ static OSErr fsOpen(struct HIOParam *pb) {
 
 	*fcb = (struct FCBRec){
 		.fcbFlNm = cnid,
-		.fcbFlags = (rfork ? 2 : 0) | (pb->ioPermssn == fsRdPerm ? 0 : 1),
+		.fcbFlags =
+			(fcbResourceMask * rfork) |
+			(fcbWriteMask * (pb->ioPermssn != fsRdPerm)),
 		.fcbTypByt = 0, // MFS only
 		.fcb9FID = fid,
 		.fcb9Link = refn,
@@ -966,7 +968,7 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	while (UnivIndexFCB(&vcb, &fellowFile, &fellowFCB) == noErr) {
 		if (fellowFile == refn) continue; // can't be literally the same FCB
 		if (fellowFCB->fcbFlNm != fcb->fcbFlNm) continue; // must be same CNID
-		if ((fellowFCB->fcbFlags & 2) != (fcb->fcbFlags & 2)) continue; // must be same data/rsrc
+		if ((fellowFCB->fcbFlags & fcbResourceMask) != (fcb->fcbFlags & fcbResourceMask)) continue; // must be same data/rsrc
 
 		fcb->fcb9Link = fellowFCB->fcb9Link;
 		fellowFCB->fcb9Link = refn;
@@ -1059,7 +1061,7 @@ static OSErr fsReadWrite(struct IOParam *pb) {
 
 	bool iswrite = ((pb->ioTrap & 0xff) == (_Write & 0xff));
 
-	if (iswrite && (fcb->fcbFlags & 1) == 0) return wrPermErr;
+	if (iswrite && (fcb->fcbFlags & fcbWriteMask) == 0) return wrPermErr;
 
 	char seek = pb->ioPosMode & 3;
 	if (seek == fsAtMark) {
