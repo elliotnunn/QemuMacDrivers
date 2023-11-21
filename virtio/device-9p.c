@@ -1658,6 +1658,8 @@ static void cnidPrint(int32_t cnid) {
 		cnid = getDBParent(cnid);
 	}
 
+	if (remain == sizeof big) big[--remain] = '/'; // root is not "empty path"
+
 	printf("%.*s", sizeof big - remain, big + remain);
 }
 
