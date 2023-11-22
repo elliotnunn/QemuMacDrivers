@@ -681,7 +681,7 @@ static OSErr fsGetFileInfo(struct HFileInfo *pb) {
 		printf("Found: "); cnidPrint(cnid); printf("\n");
 	}
 
-	// A special case, doesn't set the field, just follows the pointer
+	// A special return field: don't change the field, just follow the pointer
 	if ((idx != 0) && (pb->ioNamePtr != NULL)) {
 		mr31name(pb->ioNamePtr, getDBName(cnid));
 	}
