@@ -937,6 +937,14 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		}
 	}
 
+	long type = '????';
+	char iname[512];
+	strcpy(iname, getDBName(cnid));
+	strcat(iname, ".idump");
+	if (!Walk9(fid, 19, 2, (const char *[]){"..", iname}, NULL, NULL))
+		if (!Lopen9(19, O_RDONLY, NULL, NULL))
+			Read9(19, &type, 0, 8, NULL);
+
 	*fcb = (struct FCBRec){
 		.fcbFlNm = cnid,
 		.fcbFlags =
@@ -953,7 +961,7 @@ static OSErr fsOpen(struct HIOParam *pb) {
 		.fcbClmpSize = 512,
 		.fcbBTCBPtr = NULL, // reserved
 		.fcbExtRec = {}, // own use
-		.fcbFType = 'APPL',
+		.fcbFType = type,
 		.fcbCatPos = 0, // own use
 		.fcbDirID = getDBParent(cnid),
 	};
