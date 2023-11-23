@@ -943,7 +943,7 @@ static OSErr fsOpen(struct HIOParam *pb) {
 	strcat(iname, ".idump");
 	if (!Walk9(fid, 19, 2, (const char *[]){"..", iname}, NULL, NULL))
 		if (!Lopen9(19, O_RDONLY, NULL, NULL))
-			Read9(19, &type, 0, 8, NULL);
+			Read9(19, &type, 0, sizeof type, NULL);
 
 	*fcb = (struct FCBRec){
 		.fcbFlNm = cnid,
