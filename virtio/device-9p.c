@@ -1214,7 +1214,18 @@ static OSErr fsDelete(struct IOParam *pb) {
 		}
 	}
 
+	// This is hacky, needs to be replaced with systematic sidecar management
+	Walk9(10, 9, 1, (const char *[]){".."}, NULL, NULL);
+
 	if (Remove9(10)) return fBsyErr; // assume it was a full directory
+
+	const char *sidecars[] = {"%s.rsrc", "%s.idump", "._%s"};
+	for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
+		char delname[512];
+		sprintf(delname, sidecars[i], getDBName(cnid));
+		printf("unlinking %s\n", delname);
+		Unlinkat9(9, delname, 0);
+	}
 
 	return noErr;
 }

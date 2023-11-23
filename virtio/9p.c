@@ -190,6 +190,15 @@ int Remove9(uint32_t fid) {
 		fid);
 }
 
+int Unlinkat9(uint32_t fid, const char *name, uint32_t flags) {
+	enum {Tunlinkat = 76}; // size[4] Tunlinkat tag[2] dirfd[4] name[s] flags[4]
+	enum {Runlinkat = 77}; // size[4] Runlinkat tag[2]
+	// only flag is AT_REMOVEDIR = 0x200
+
+	return transact(Tunlinkat, "dsd", "",
+		fid, name, flags);
+}
+
 int Renameat9(uint32_t olddirfid, const char *oldname, uint32_t newdirfid, const char *newname) {
 	enum {Trenameat = 74}; // size[4] Trenameat tag[2] olddirfid[4] oldname[s] newdirfid[4] newname[s]
 	enum {Rrenameat = 75}; // size[4] Rrenameat tag[2]
