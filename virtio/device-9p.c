@@ -46,7 +46,7 @@ not used because it is unavailable at the start of the boot process.
 #define p2cstr(c, p) {uint8_t l=p[0]; memcpy(c, p+1, l); c[l]=0;}
 #define pstrcpy(d, s) memcpy(d, s, 1+(unsigned char)s[0])
 
-#define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1));
+#define unaligned32(ptr) (((uint32_t)*(uint16_t *)(ptr) << 16) | *((uint16_t *)(ptr) + 1))
 
 // rename some FCB fields for our own use
 #define fcb9FID fcbSBlk // type is unsigned short
