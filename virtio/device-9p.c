@@ -1961,6 +1961,50 @@ static OSErr fsDispatch(void *pb, unsigned short selector) {
 	}
 }
 
+static OSErr cIcon(struct CntrlParam *pb) {
+	struct about {
+		uint32_t icon[64];
+		unsigned char location[];
+	};
+
+	// B&W HD icon, Sys 8+ converts to colour version
+	static const struct about hd = {
+		0x00000000, 0x00000000, 0x00000000, 0x00000000, // Icon
+		0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		0x00000000, 0x00000000, 0x7ffffffe, 0x80000001,
+		0x80000001, 0x80000001, 0x80000001, 0x80000001,
+		0x80000001, 0x88000001, 0x80000001, 0x80000001,
+		0x7ffffffe, 0x00000000, 0x00000000, 0x00000000,
+		0x00000000, 0x00000000, 0x00000000, 0x00000000, // Mask
+		0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		0x00000000, 0x00000000, 0x7ffffffe, 0xffffffff,
+		0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+		0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+		0x7ffffffe, 0x00000000, 0x00000000, 0x00000000,
+		"\x06" "Virtio" // "Where" field in Get Info
+	};
+
+	static const void *ret = &hd;
+	memcpy(pb->csParam, &ret, sizeof ret);
+	return noErr;
+}
+
+static OSErr cDriveInfo(struct CntrlParam *pb) {
+	uint32_t ret =
+		(0 << 8) |  // set for external, clear for internal
+		(1 << 9) |  // set if SCSI, clear if IWM
+		(1 << 10) | // set if fixed, clear if can be removed
+		(1 << 11) | // set for secondary drives, clear for primary drive
+		1;
+
+	memcpy(pb->csParam, &ret, sizeof ret);
+	return noErr;
+}
+
 static OSErr controlStatusCall(struct CntrlParam *pb) {
 	// Coerce csCode or driverGestaltSelector into one long
 	// Negative is Status/DriverGestalt, positive is Control/DriverConfigure
@@ -1978,6 +2022,9 @@ static OSErr controlStatusCall(struct CntrlParam *pb) {
 
 static OSErr controlStatusDispatch(long selector, void *pb) {
 	switch (selector) {
+	case kDriveIcon: return cIcon(pb);
+	case kMediaIcon: return cIcon(pb);
+	case kDriveInfo: return cDriveInfo(pb);
 	default:
 		if (selector > 0) {
 			return controlErr;
