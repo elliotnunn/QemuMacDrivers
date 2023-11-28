@@ -350,7 +350,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 	}
 
 	// Hook into the Device Manager as a block device
-	dqe.dqe.dQDrive=4; // lower numbers reserved
+	dqe.dqe.dQDrive=8; // conventional lowest number for HD
 	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
 	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
 	printf("Drive number: %d\n", dqe.dqe.dQDrive);
