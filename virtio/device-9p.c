@@ -63,7 +63,10 @@ enum {
 };
 
 struct longdqe {
-	uint32_t flags; // 4 bytes of flags at neg offset
+	char writeProt; // bit 7 = 1 if volume is locked
+	char diskInPlace; // 0 = no disk place, 1 or 2 = disk in place
+	char installed; // 0 = don't know, 1 = installed, -1 = not installed
+	char sides; // -1 = 2-sided, 0 = 1-sided
 	DrvQEl dqe; // AddDrive points here
 	void *dispatcher;
 };
@@ -174,7 +177,10 @@ static struct bootBlock bootBlock = {
 #endif
 };
 static struct longdqe dqe = {
-	.flags = 0x00080000, // fixed disk
+	.writeProt = 0,
+	.diskInPlace = 8, // ???
+	.installed = 1,
+	.sides = 0,
 	.dqe = {.dQFSID = FSID},
 	.dispatcher = &fsCallDesc, // procedure for our ToExtFS patch
 };
