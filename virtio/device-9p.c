@@ -119,7 +119,7 @@ static bool visName(const char *name);
 static void setDB(int32_t cnid, int32_t pcnid, const char *name);
 static const char *getDBName(int32_t cnid);
 static int32_t getDBParent(int32_t cnid);
-static long fsCall(void *pb, long selector);
+static long fsCall(void *pb, long selector, void *stack);
 static OSErr fsDispatch(void *pb, unsigned short selector);
 static OSErr controlStatusCall(struct CntrlParam *pb);
 static OSErr controlStatusDispatch(long selector, void *pb);
@@ -403,14 +403,13 @@ static void installAndMountAndNotify(void) {
 			"2f38 0110 "      // move.l  StkLowPt,-(sp)
 			"42b8 0110 "      // clr.l   StkLowPt
 			"43f9 %l "        // lea.l   stack,a1
-			"230f "           // move.l  sp,-(a1)
-			"2e49 "           // move.l  a1,sp
+			"c34f"            // exg     a1,sp
+			"2f09 "           // move.l  a1,-(sp)
 			"2f00 "           // move.l  d0,-(sp)
 			"2f08 "           // move.l  a0,-(sp)
 			"2042 "           // move.l  d2,a0
 			"4e90 "           // jsr     (a0)
-			"504f "           // addq    #8,sp
-			"2e57 "           // move.l  (sp),sp
+			"2e6f 0008"       // move.l  8(sp),sp
 			"21df 0110 "      // move.l  (sp)+,StkLowPt
 			"4e75 "           // rts
 
@@ -1790,13 +1789,32 @@ static int32_t getDBParent(int32_t cnid) {
 	return rec->parent;
 }
 
-static long fsCall(void *pb, long selector) {
+static long fsCall(void *pb, long selector, void *stack) {
 	static unsigned char hdr;
 	if (hdr++ == 0) {
 		printf("%lu%% (browse/total) %d%% (relist/total)\n", browseTimer*100/(hfsTimer+1), relistTimer*100/(hfsTimer+1));
 	}
 
 	TIMEFUNC(hfsTimer);
+
+	// Hideously nasty stack-sniffing debug code
+// 	void *top = LMGetMemTop() - 32;
+// 	if (top > stack+512) top = stack+512;
+// 	while (stack < top) {
+// 		void *addr = *(void **)stack - 2;
+// 		void *memtop = LMGetMemTop();
+// 		void *romstart = LMGetROMBase();
+// 		void *romend = romstart + *(uint32_t *)(romstart + 64);
+//
+// 		if (((int)addr & 1) == 0 && (addr < memtop || (addr >= romstart && addr < romend))) {
+// 			if (*(uint16_t *)addr == *(uint16_t *)(pb + 6)) {
+// 				printf("caller seems to be %p\n", addr);
+// 				break;
+// 			}
+// 		}
+//
+// 		stack += 2;
+// 	}
 
 	HTallocatelater(); // schedule some system task time if needed
 
