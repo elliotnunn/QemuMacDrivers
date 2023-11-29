@@ -99,7 +99,9 @@ struct bootBlock {
 
 static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
-static void installAndMountAndNotify(void);
+static void installDrive(void);
+static void installExtFS(void);
+static void insertionEvent(void);
 static OSErr boot(void);
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid);
 static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid);
@@ -349,11 +351,7 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return openErr;
 	}
 
-	// Hook into the Device Manager as a block device
-	dqe.dqe.dQDrive=8; // conventional lowest number for HD
-	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
-	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
-	printf("Drive number: %d\n", dqe.dqe.dQDrive);
+	installDrive();
 
 	int32_t systemFolder = browse(3 /*fid*/, 2 /*cnid*/, "\pSystem Folder");
 	vcb.vcbFndrInfo[0] = systemFolder>0 ? systemFolder : 0;
@@ -362,20 +360,40 @@ static OSStatus initialize(DriverInitInfo *info) {
 	printf("File Manager: %s\n", GetVCBQHdr()->qHead != (void *)-1 ? "present" : "absent");
 
 	if (GetVCBQHdr()->qHead != (void *)-1) {
-		installAndMountAndNotify();
-	} else if (systemFolder > 0) {
-		SetTimeout(1); // give up on the default disk quickly (hack!)
+		installExtFS();
+		insertionEvent();
+	} else {
+		Patch68k(
+			_InitFS,
+			"4eb9 %o "   // jsr     originalInitFS
+			"48e7 e0c0 " // movem.l d0-d2/a0-a1,-(sp)
+			"4eb9 %l "   // jsr     installExtFS
+			"4eb9 %l "   // jsr     insertionEvent
+			"4cdf 0307", // movem.l (sp)+,d0-d2/a0-a1
+			             // fallthru to uninstall code (which will tst.w d0)
+			STATICDESCRIPTOR(installExtFS, kCStackBased),
+			STATICDESCRIPTOR(insertionEvent, kCStackBased)
+		);
 	}
+
+	// Hack:
+	// We might be bootable but (so far) cannot be set as THE boot disk,
+	// so give up early and broaden the search.
+	SetTimeout(1);
 
 	return noErr;
 }
 
-// Run this only when the File Manager is up
-static void installAndMountAndNotify(void) {
-	static bool alreadyUp;
-	if (alreadyUp) return;
-	alreadyUp = true;
+// Does not require _InitFS to have been called
+static void installDrive(void) {
+	dqe.dqe.dQDrive = 8; // conventional lowest number for HD
+	while (findDrive(dqe.dqe.dQDrive) != NULL) dqe.dqe.dQDrive++;
+	AddDrive(drvrRefNum, dqe.dqe.dQDrive, &dqe.dqe);
+	printf("Drive number: %d\n", dqe.dqe.dQDrive);
+}
 
+// Requires _InitFS to have been called
+static void installExtFS(void) {
 	// A single ToExtFS patch can be shared between multiple 9P device drivers
 	// Use a Gestalt selector to declare its presence
 	long selector = FSID<<16 | 'h'<<8 | 'k';
@@ -385,75 +403,78 @@ static void installAndMountAndNotify(void) {
 	printf("Hooking ToExtFS (Gestalt %.4s): ", &selector);
 	if (patched) {
 		printf("already installed\n");
-	} else {
-		// External filesystems need a big stack, and they can't
-		// share the FileMgr stack because of reentrancy problems
-		// (Note that this is shared between .Virtio9P instances)
-		char *stack = NewPtrSysClear(STACKSIZE);
-		if (stack == NULL) panic("failed extfs stack allocation");
-
-		// All instances of this driver share the one 68k hook (and one stack)
-		Patch68k(
-			0x3f2, // ToExtFS:
-			// Fast path is when ReqstVol points to a 9p device (inspect VCB)
-			"2438 03ee "      // move.l  ReqstVol,d2
-			"67 %MOUNTCK "    // beq.s   MOUNTCK
-			"2242 "           // move.l  d2,a1
-			"0c69 %w 004c "   // cmp.w   #FSID,vcbFSID(a1)
-			"66 %PUNT "       // bne.s   PUNT
-
-			"2429 00a8 "      // move.l  vcbCtlBuf(a1),d2
-
-			// Commit to calling the 9p routine (d2)
-			"GO: "
-			"2f38 0110 "      // move.l  StkLowPt,-(sp)
-			"42b8 0110 "      // clr.l   StkLowPt
-			"43f9 %l "        // lea.l   stack,a1
-			"c34f"            // exg     a1,sp
-			"2f09 "           // move.l  a1,-(sp)
-			"2f00 "           // move.l  d0,-(sp)
-			"2f08 "           // move.l  a0,-(sp)
-			"2042 "           // move.l  d2,a0
-			"4e90 "           // jsr     (a0)
-			"2e6f 0008"       // move.l  8(sp),sp
-			"21df 0110 "      // move.l  (sp)+,StkLowPt
-			"4e75 "           // rts
-
-			// Slow path is MountVol on a 9p device (find and inspect DQE)
-			"MOUNTCK: "
-			"0c28 000f 0007 " // cmp.b   #_MountVol&255,ioTrap+1(a0)
-			"66 %PUNT "       // bne.s   PUNT
-
-			"43f8 030a "      // lea     DrvQHdr+QHead,a1
-			"LOOP: "
-			"2251 "           // move.l  (a1),a1
-			"2409 "           // move.l  a1,d2
-			"67 %PUNT "       // beq.s   PUNT
-			"3428 0016 "      // move.w  ioVRefNum(a0),d2
-			"b469 0006 "      // cmp.w   dQDrive(a1),d2
-			"66 %LOOP "       // bne.s   LOOP
-
-			// Found matching drive, is it one of ours?
-			"2429 %w "        // move.l  dispatcher(a1),d2
-			"0c69 %w 000a "   // cmp.w   #FSID,dQFSID(a1)
-			"67 %GO "         // beq.s   GO
-
-			"PUNT: "
-			"4ef9 %o ",       // jmp     original
-
-			FSID,
-			stack + STACKSIZE - 100,
-			offsetof(struct longdqe, dispatcher) - offsetof(struct longdqe, dqe),
-			FSID
-		);
-
-		SetGestaltValue(selector, 1);
+		return;
 	}
 
-	struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
-	PBMountVol((void *)&pb);
+	SetGestaltValue(selector, 1);
 
+	// External filesystems need a big stack, and they can't
+	// share the FileMgr stack because of reentrancy problems
+	// (Note that this is shared between .Virtio9P instances)
+	char *stack = NewPtrSysClear(STACKSIZE);
+	if (stack == NULL) panic("failed extfs stack allocation");
+
+	// All instances of this driver share the one 68k hook (and one stack)
+	Patch68k(
+		0x3f2, // ToExtFS:
+		// Fast path is when ReqstVol points to a 9p device (inspect VCB)
+		"2438 03ee "      // move.l  ReqstVol,d2
+		"67 %MOUNTCK "    // beq.s   MOUNTCK
+		"2242 "           // move.l  d2,a1
+		"0c69 %w 004c "   // cmp.w   #FSID,vcbFSID(a1)
+		"66 %PUNT "       // bne.s   PUNT
+
+		"2429 00a8 "      // move.l  vcbCtlBuf(a1),d2
+
+		// Commit to calling the 9p routine (d2)
+		"GO: "
+		"2f38 0110 "      // move.l  StkLowPt,-(sp)
+		"42b8 0110 "      // clr.l   StkLowPt
+		"43f9 %l "        // lea.l   stack,a1
+		"c34f"            // exg     a1,sp
+		"2f09 "           // move.l  a1,-(sp)
+		"2f00 "           // move.l  d0,-(sp)
+		"2f08 "           // move.l  a0,-(sp)
+		"2042 "           // move.l  d2,a0
+		"4e90 "           // jsr     (a0)
+		"2e6f 0008"       // move.l  8(sp),sp
+		"21df 0110 "      // move.l  (sp)+,StkLowPt
+		"4e75 "           // rts
+
+		// Slow path is MountVol on a 9p device (find and inspect DQE)
+		"MOUNTCK: "
+		"0c28 000f 0007 " // cmp.b   #_MountVol&255,ioTrap+1(a0)
+		"66 %PUNT "       // bne.s   PUNT
+
+		"43f8 030a "      // lea     DrvQHdr+QHead,a1
+		"LOOP: "
+		"2251 "           // move.l  (a1),a1
+		"2409 "           // move.l  a1,d2
+		"67 %PUNT "       // beq.s   PUNT
+		"3428 0016 "      // move.w  ioVRefNum(a0),d2
+		"b469 0006 "      // cmp.w   dQDrive(a1),d2
+		"66 %LOOP "       // bne.s   LOOP
+
+		// Found matching drive, is it one of ours?
+		"2429 %w "        // move.l  dispatcher(a1),d2
+		"0c69 %w 000a "   // cmp.w   #FSID,dQFSID(a1)
+		"67 %GO "         // beq.s   GO
+
+		"PUNT: "
+		"4ef9 %o ",       // jmp     original
+
+		FSID,
+		stack + STACKSIZE - 100,
+		offsetof(struct longdqe, dispatcher) - offsetof(struct longdqe, dqe),
+		FSID
+	);
+}
+
+// Requires _InitEvents to have been called
+// (which is true if _InitFS has been called)
+static void insertionEvent(void) {
 	PostEvent(diskEvt, dqe.dqe.dQDrive);
+	printf("Posted diskEvt, %d\n", dqe.dqe.dQDrive);
 }
 
 // C function that our stub boot block will jump to.
@@ -482,8 +503,8 @@ static OSErr boot(void) {
 	asm volatile("move.w #10,%%d0; .short 0xa06c;" ::: "memory");
 #endif
 
-
-	installAndMountAndNotify();
+	struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
+	PBMountVol((void *)&pb);
 
 	// Is the System Folder not the root of the disk? (It usually isn't.)
 	// Make it a working directory and call that the default (fake) volume.
