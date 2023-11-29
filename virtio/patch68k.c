@@ -14,7 +14,7 @@
 struct block {
 	void *original;
 	long vector;
-	char code[128];
+	unsigned char code[128];
 };
 
 static int hex(char c) {
@@ -53,7 +53,7 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	block->vector = vector;
 	block->original = getvec(vector);
 
-	char *code = block->code;
+	unsigned char *code = block->code;
 	int midhex = 0;
 
 	int labels[26] = {};
@@ -123,8 +123,8 @@ void *Patch68k(unsigned long vector, const char *fmt, ...) {
 	va_end(argp);
 
 	for (int i=0; i<nfixups; i++) {
-		char *caller = block->code + fixups[i];
-		char *callee = block->code + labels[*caller-'A'];
+		unsigned char *caller = block->code + fixups[i];
+		unsigned char *callee = block->code + labels[*caller-'A'];
 		if (fixups[i] % 2) {
 			// At odd offsets, the off-by-one offset byte in a bra.s
 			*caller = (signed char)(callee - caller - 1);
