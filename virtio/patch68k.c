@@ -207,7 +207,7 @@ pascal void Unpatch68k(void *patch) {
 		BlockMove(block, block, 14); // clear 68k emulator cache
 
 		printf("Unpatched %#x using a thunk:\n   ", block->vector);
-		for (char *i=block->code; i<block->code+6; i+=2) {
+		for (unsigned char *i=block->code; i<block->code+6; i+=2) {
 			printf(" %02x%02x", i[0], i[1]);
 		}
 		printf("\n");
