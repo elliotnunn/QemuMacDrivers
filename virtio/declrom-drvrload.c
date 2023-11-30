@@ -14,7 +14,7 @@ struct driverRec {
 	char code[];
 };
 
-void slotdrvrload(struct SEBlock *pb) {
+void exec(struct SEBlock *pb) {
 	int err;
 
 	struct SpBlock sp = {.spSlot=pb->seSlot, .spID=pb->sesRsrcId};

@@ -149,7 +149,7 @@ PrimaryInitRec:
 	addq.l  #4,%sp
 	rts
 cprimaryinit:
-	.incbin "build-drvr/primaryinit.bin"
+	.incbin "build-drvr/declrom-primaryinit"
 InitEnd:
 
 VendorInfoRec:
@@ -273,7 +273,7 @@ SharedDriverLoader:
 	addq.l  #4,%sp
 	rts
 cdrvrloader:
-	.incbin "build-drvr/slotdrvrload.bin"
+	.incbin "build-drvr/declrom-drvrload"
 LoaderEnd:
 
 /* Include the DRVR binaries (don't duplicate like sResources!) */

@@ -7,7 +7,7 @@
 
 #include "structs-mmio.h"
 
-void primaryinit(struct SEBlock *pb) {
+void exec(struct SEBlock *pb) {
 	void *base = (void *)0xf0000000 + ((long)pb->seSlot << 24);
 
 	// Get the device type for each of the 32 virtio devices
