@@ -1249,7 +1249,6 @@ static OSErr fsDelete(struct IOParam *pb) {
 	for (int i=0; i<sizeof sidecars/sizeof *sidecars; i++) {
 		char delname[512];
 		sprintf(delname, sidecars[i], getDBName(cnid));
-		printf("unlinking %s\n", delname);
 		Unlinkat9(9, delname, 0);
 	}
 
