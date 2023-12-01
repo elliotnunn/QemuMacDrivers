@@ -1,5 +1,4 @@
 // Load DRVRs over 64K because the Slot Manager can't
-// No global variables allowed
 
 #include <Memory.h>
 #include <Slots.h>

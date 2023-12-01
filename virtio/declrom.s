@@ -138,19 +138,7 @@ BoardName:
 	.asciz "Virtio bus"
 	.align 2
 PrimaryInitRec:
-	.long InitEnd-.
-	.byte 2 /* code revision? */
-	.byte sCPU_68020 /* CPU type */
-	.short 0 /* reserved */
-	.long 4 /* offset to code */
-
-	move.l  %a0,-(%sp)
-	jsr     cprimaryinit
-	addq.l  #4,%sp
-	rts
-cprimaryinit:
-	.incbin "build-drvr/declrom-primaryinit"
-InitEnd:
+	.incbin "build-drvr/slotexec-primaryinit"
 
 VendorInfoRec:
 	OSLstEntry vendorId, VendorId
@@ -262,19 +250,7 @@ ResourceInput:
 
 /* Work around the 64K driver limitation in the Slot Manager */
 SharedDriverLoader:
-	.long LoaderEnd-.
-	.byte 2 /* code revision? */
-	.byte sCPU_68020 /* CPU type */
-	.short 0 /* reserved */
-	.long 4 /* offset to code */
-
-	move.l  %a0,-(%sp)
-	jsr     cdrvrloader
-	addq.l  #4,%sp
-	rts
-cdrvrloader:
-	.incbin "build-drvr/declrom-drvrload"
-LoaderEnd:
+	.incbin "build-drvr/slotexec-drvrload"
 
 /* Include the DRVR binaries (don't duplicate like sResources!) */
 Driver9P:

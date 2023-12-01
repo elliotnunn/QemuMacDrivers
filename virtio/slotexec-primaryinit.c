@@ -1,4 +1,4 @@
-// No global variables allowed and very few Toolbox calls
+// Very few Toolbox calls allowed at Primary Init time
 
 #include <DriverSynchronization.h>
 #include <Slots.h>

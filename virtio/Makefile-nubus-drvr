@@ -37,13 +37,13 @@ $(BUILD)/declrom: $(BUILD)/declrom.elf
 $(BUILD)/declrom.elf: $(BUILD)/declrom.o
 	m68k-apple-macos-ld -o $@ $^
 
-$(BUILD)/declrom.o: declrom.s $(BUILD)/declrom-primaryinit $(BUILD)/declrom-drvrload $(BUILD)/device-input.drvr $(BUILD)/device-9p.drvr
+$(BUILD)/declrom.o: declrom.s $(BUILD)/slotexec-primaryinit $(BUILD)/slotexec-drvrload $(BUILD)/device-input.drvr $(BUILD)/device-9p.drvr
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BUILD)/declrom-%: declrom-%.c
+$(BUILD)/slotexec-%: slotexec-%.c slotexec.lds
 	$(CC) -c -Os -mpcrel -nostdlib -mcpu=68020 -nostartfiles -ffreestanding -o $@.o $^
-	m68k-apple-macos-ld -e exec -o $@.elf $@.o $(STANDARD)
-	m68k-apple-macos-objcopy --only-section .text -O binary $@.elf $@
+	m68k-apple-macos-ld --script slotexec.lds -o $@.elf $@.o $(STANDARD)
+	m68k-apple-macos-objcopy --only-section .exec -O binary $@.elf $@
 
 $(BUILD)/%.o: %.c
 	$(CC) $(CFLAGS) -o $@ $^
