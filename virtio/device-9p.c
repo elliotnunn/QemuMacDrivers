@@ -152,7 +152,6 @@ static int pathBlobSize;
 static unsigned long hfsTimer, browseTimer, relistTimer;
 static short drvrRefNum;
 static struct Qid9 root;
-static bool mounted;
 static struct bootBlock bootBlock = {
 	.magic = 0x4c4b,
 	.entryBRA = 0x60000088,
@@ -545,7 +544,7 @@ static OSErr boot(void) {
 }
 
 static OSErr fsMountVol(struct IOParam *pb) {
-	if (mounted) return volOnLinErr;
+	if (dqe.dqe.qType) return volOnLinErr;
 
 	// Read mount_tag from config space into a C string
 	char name[128] = {};
@@ -574,8 +573,6 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	}
 
 	Enqueue((QElemPtr)&vcb, GetVCBQHdr());
-
-	mounted = true;
 
 	// Hack to show this volume in the Startup Disk cdev
 	dqe.dqe.dQFSID = 0;
