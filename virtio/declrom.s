@@ -107,7 +107,7 @@ ROMSTART:
 sResourceDirectory:
 	OSLstEntry 1, BoardResource
 
-.rept 1 /* Maximum number of 9P devices */
+.rept 32 /* Maximum number of 9P devices */
 	OSLstEntry resNum, Resource9P
 .set resNum, resNum+1
 .endr
