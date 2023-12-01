@@ -12,6 +12,7 @@
 	.set sRsrcIcon, 3
 	.set sRsrcDrvrDir, 4
 	.set sRsrcLoadRec, 5
+	.set sRsrcBootRec, 6
 	.set sRsrcFlags, 7
 	.set sRsrcHWDevId, 8
 	.set minorBase, 10
@@ -212,7 +213,8 @@ Resource9P:
 	OSLstEntry sRsrcType, 1$
 	OSLstEntry sRsrcName, 2$
 	OSLstEntry sRsrcDrvrDir, 3$
-	OSLstEntry sRsrcLoadRec, SharedDriverLoader
+	/*OSLstEntry sRsrcLoadRec, SharedDriverLoader -- DISABLED because it can crash BootRec */
+	OSLstEntry sRsrcBootRec, BootRec
 	DatLstEntry sRsrcFlags, 2 /* open at start, use 32-bit addressing */
 	DatLstEntry sRsrcHWDevId, 1
 	DatLstEntry endOfList, 0
@@ -251,6 +253,9 @@ ResourceInput:
 /* Work around the 64K driver limitation in the Slot Manager */
 SharedDriverLoader:
 	.incbin "build-drvr/slotexec-drvrload"
+
+BootRec:
+	.incbin "build-drvr/slotexec-boot"
 
 /* Include the DRVR binaries (don't duplicate like sResources!) */
 Driver9P:

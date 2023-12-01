@@ -40,6 +40,7 @@ $(BUILD)/declrom.elf: $(BUILD)/declrom.o
 $(BUILD)/declrom.o: declrom.s \
 		$(BUILD)/slotexec-primaryinit \
 		$(BUILD)/slotexec-drvrload \
+		$(BUILD)/slotexec-boot \
 		$(BUILD)/device-input.drvr \
 		$(BUILD)/device-9p.drvr
 	$(AS) $(ASFLAGS) -o $@ $<
