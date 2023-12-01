@@ -30,7 +30,8 @@ void exec(struct SEBlock *pb) {
 		if ((sp.spDrvrHW & 0xff00) != 0x5600) continue; // not a virtio sResource
 
 		int whichdev = -1;
-		for (int j=0; j<32; j++) {
+		// reverse iterate the list so first cmdline arg appears first
+		for (int j=31; j>=0; j--) {
 			if ((sp.spDrvrHW & 0xff) == devtypes[j]) {
 				whichdev = j;
 				break;
