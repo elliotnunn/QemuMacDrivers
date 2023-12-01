@@ -580,8 +580,6 @@ static OSErr fsMountVol(struct IOParam *pb) {
 	// Hack to show this volume in the Startup Disk cdev
 	dqe.dqe.dQFSID = 0;
 
-// 	if (vcb.vcbVRefNum & 1)
-// 		strcpy(logprefix, "                              ");
 	return noErr;
 }
 
