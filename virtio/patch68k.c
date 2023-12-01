@@ -1,3 +1,4 @@
+#include <Gestalt.h>
 #include <Memory.h>
 #include <MixedMode.h>
 #include <Patches.h>
@@ -24,7 +25,9 @@ static int hex(char c) {
 }
 
 static void *getvec(long vec) {
-	if ((vec & 0xa800) == 0xa800) {
+	if (vec & 0xffff0000) {
+		return NULL; // GetGestaltProcPtr is sometimes unavailable
+	} else if ((vec & 0xa800) == 0xa800) {
 		return GetToolTrapAddress(vec);
 	} else if ((vec & 0xa800) == 0xa000) {
 		return GetOSTrapAddress(vec);
@@ -34,7 +37,11 @@ static void *getvec(long vec) {
 }
 
 static void setvec(long vec, void *addr) {
-	if ((vec & 0xa800) == 0xa800) {
+	if (vec & 0xffff0000) {
+		SelectorFunctionUPP old;
+		if (NewGestalt(vec, addr) != noErr)
+			ReplaceGestalt(vec, addr, &old);
+	} else if ((vec & 0xa800) == 0xa800) {
 		SetToolTrapAddress(addr, vec);
 	} else if ((vec & 0xa800) == 0xa000) {
 		SetOSTrapAddress(addr, vec);
