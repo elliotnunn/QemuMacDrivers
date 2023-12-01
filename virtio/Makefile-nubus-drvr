@@ -40,7 +40,7 @@ $(BUILD)/declrom.elf: $(BUILD)/declrom.o
 $(BUILD)/declrom.o: declrom.s $(BUILD)/slotexec-primaryinit $(BUILD)/slotexec-drvrload $(BUILD)/device-input.drvr $(BUILD)/device-9p.drvr
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BUILD)/slotexec-%: slotexec-%.c slotexec.lds
+$(BUILD)/slotexec-%: slotexec-%.c
 	$(CC) -c -Os -mpcrel -nostdlib -mcpu=68020 -nostartfiles -ffreestanding -o $@.o $^
 	m68k-apple-macos-ld --script slotexec.lds -o $@.elf $@.o $(STANDARD)
 	m68k-apple-macos-objcopy --only-section .exec -O binary $@.elf $@
