@@ -37,7 +37,11 @@ $(BUILD)/declrom: $(BUILD)/declrom.elf
 $(BUILD)/declrom.elf: $(BUILD)/declrom.o
 	m68k-apple-macos-ld -o $@ $^
 
-$(BUILD)/declrom.o: declrom.s $(BUILD)/slotexec-primaryinit $(BUILD)/slotexec-drvrload $(BUILD)/device-input.drvr $(BUILD)/device-9p.drvr
+$(BUILD)/declrom.o: declrom.s \
+		$(BUILD)/slotexec-primaryinit \
+		$(BUILD)/slotexec-drvrload \
+		$(BUILD)/device-input.drvr \
+		$(BUILD)/device-9p.drvr
 	$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD)/slotexec-%: slotexec-%.c
