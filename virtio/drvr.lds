@@ -1,3 +1,8 @@
+/*
+Produce a Mac OS DRVR blob
+Requires: drvr.s to be build, drvrOpen etc C functions, a drvrNameVers global
+*/
+
 ENTRY(drvrOpen);                   /* causes .drvr section to be kept */
 
 SECTIONS {
