@@ -397,16 +397,14 @@ static void installExtFS(void) {
 	// A single ToExtFS patch can be shared between multiple 9P device drivers
 	// Use a Gestalt selector to declare its presence
 	long selector = FSID<<16 | 'h'<<8 | 'k';
-	long patched = 0;
-	Gestalt(selector, &patched);
+	void *patchaddr;
+	if (Gestalt(selector, (long *)&patchaddr) != noErr) patchaddr = NULL;
 
-	printf("Hooking ToExtFS (Gestalt %.4s): ", &selector);
-	if (patched) {
-		printf("already installed\n");
+	printf("Hooking ToExtFS (Gestalt '%.4s'): ", &selector);
+	if (patchaddr) {
+		printf("already installed at %p\n", patchaddr);
 		return;
 	}
-
-	SetGestaltValue(selector, 1);
 
 	// External filesystems need a big stack, and they can't
 	// share the FileMgr stack because of reentrancy problems
@@ -415,7 +413,7 @@ static void installExtFS(void) {
 	if (stack == NULL) panic("failed extfs stack allocation");
 
 	// All instances of this driver share the one 68k hook (and one stack)
-	Patch68k(
+	patchaddr = Patch68k(
 		0x3f2, // ToExtFS:
 		// Fast path is when ReqstVol points to a 9p device (inspect VCB)
 		"2438 03ee "      // move.l  ReqstVol,d2
@@ -467,6 +465,19 @@ static void installExtFS(void) {
 		stack + STACKSIZE - 100,
 		offsetof(struct longdqe, dispatcher) - offsetof(struct longdqe, dqe),
 		FSID
+	);
+
+	// Use this single code path instead of SetGestaltValue
+	printf("Setting Gestalt '%.4s' to %p: ", &selector, patchaddr);
+	Patch68k(
+		selector,
+		"205f "    // move.   (sp)+,a0 ; a0 = return address
+		"225f "    // move.   (sp)+,a1 ; a1 = address to return result
+		"584f "    // addq    #4,sp    ; selector, discard
+		"4257 "    // clr.w   (sp)     ; return value = noErr
+		"22bc %l " // move.l  #value,(a1)
+		"4ed0",    // jmp     (a0)
+		patchaddr
 	);
 }
 
