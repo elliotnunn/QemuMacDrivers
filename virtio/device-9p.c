@@ -416,8 +416,9 @@ static void installExtFS(void) {
 	patchaddr = Patch68k(
 		0x3f2, // ToExtFS:
 		// Fast path is when ReqstVol points to a 9p device (inspect VCB)
+		// (ReqstVol can be -1 on a Quadra in early boot)
 		"2438 03ee "      // move.l  ReqstVol,d2
-		"67 %MOUNTCK "    // beq.s   MOUNTCK
+		"6f %MOUNTCK "    // ble.s   MOUNTCK
 		"2242 "           // move.l  d2,a1
 		"0c69 %w 004c "   // cmp.w   #FSID,vcbFSID(a1)
 		"66 %PUNT "       // bne.s   PUNT
