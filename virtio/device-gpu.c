@@ -24,7 +24,6 @@
 #include "patch68k.h"
 #include "transport.h"
 #include "structs-gpu.h"
-#include "virgl.h"
 #include "virtqueue.h"
 #include "wait.h"
 
@@ -164,8 +163,6 @@ static bool qdworks;
 
 static bool pending_notification; // deduplicate NMInstall
 static bool change_in_progress; // SetMode/SwitchMode lock out frame interrupts
-
-static bool virgl_enable; // 3D mode
 
 // Cursor that the driver composites (like a hardware cursor)
 static bool curs_set;
@@ -342,8 +339,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 		return openErr;
 	};
 
-	// Try enabling Virgl (3D)
-	VSetFeature(0, virgl_enable = VGetDevFeature(0));
 	if (!VFeaturesOK()) {
 		printf("Feature negotiation failure\n");
 		goto fail;
@@ -439,8 +434,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 		STATICDESCRIPTOR(lateBootHook, kCStackBased)
 	);
 
-	if (virgl_enable) VirglTest();
-
 	return noErr;
 
 fail:
@@ -518,18 +511,6 @@ static void transact(void *req, size_t req_size, void *reply, size_t reply_size)
 	QNotify(0);
 	while (last_tag != (void *)'done') QPoll(0);
 	memcpy(reply, (char *)lpage + 2048, reply_size);
-}
-
-// Take a buffer and return the "type" (error value)
-uint32_t VirglSend(void *req, size_t req_size) {
-	uint32_t ret;
-	bool restore = change_in_progress;
-	change_in_progress = true; // cheat, lock out other updates
-
-	transact(req, req_size, &ret, sizeof(ret));
-
-	change_in_progress = restore;
-	return ret;
 }
 
 static void getSuggestedSizes(struct virtio_gpu_display_one pmodes[16]) {
