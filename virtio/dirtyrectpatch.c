@@ -1,3 +1,5 @@
+#if GENERATINGCFM // currently this is PowerPC-only
+
 #include <DriverSynchronization.h>
 #include <MixedMode.h>
 #include <Patches.h>
@@ -480,3 +482,5 @@ static void myCopyDeepMask(const BitMap *srcBits, const BitMap *maskBits, const 
 	LOCALTOGLOBAL(dstBits, t, l, b, r);
 	DirtyRectCallback(t, l, b, r);
 }
+
+#endif

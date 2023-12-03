@@ -98,8 +98,9 @@ SEBlock.size:
 	.set dCtlSlot, 40
 
 
-
+	.globl _start
 	.section .text
+_start:
 ROMSTART:
 
 /* The list of all the sResources on the ROM */
@@ -139,7 +140,7 @@ BoardName:
 	.asciz "Virtio bus"
 	.align 2
 PrimaryInitRec:
-	.incbin "build-drvr/slotexec-primaryinit"
+	.incbin "build/classic/slotexec-primaryinit"
 
 VendorInfoRec:
 	OSLstEntry vendorId, VendorId
@@ -252,21 +253,21 @@ ResourceInput:
 
 /* Work around the 64K driver limitation in the Slot Manager */
 SharedDriverLoader:
-	.incbin "build-drvr/slotexec-drvrload"
+	.incbin "build/classic/slotexec-drvrload"
 
 BootRec:
-	.incbin "build-drvr/slotexec-boot"
+	.incbin "build/classic/slotexec-boot"
 
 /* Include the DRVR binaries (don't duplicate like sResources!) */
 Driver9P:
 	.long 9$-.
-	.incbin "build-drvr/device-9p.drvr"
+	.incbin "build/classic/drvr-9p"
 	.align 2
 9$:
 
 DriverInput:
 	.long 9$-.
-	.incbin "build-drvr/device-input.drvr"
+	.incbin "build/classic/drvr-input"
 	.align 2
 9$:
 
