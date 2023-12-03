@@ -14,14 +14,14 @@ LDFLAGS = --emit-relocs --gc-sections
 # Not acutally common-to-all, but this simplifies the Makefile!
 COMMON = \
 	$(BUILD)/9p.o \
-	$(BUILD)/allocator-drvr.o \
+	$(BUILD)/allocator-classic.o \
 	$(BUILD)/drvr.o \
 	$(BUILD)/hashtab.o \
 	$(BUILD)/panic.o \
 	$(BUILD)/paramblkprint.o \
 	$(BUILD)/patch68k.o \
 	$(BUILD)/printf.o \
-	$(BUILD)/transport-mmio.o \
+	$(BUILD)/transport-classic.o \
 	$(BUILD)/unicode.o \
 	$(BUILD)/universalfcb.o \
 	$(BUILD)/virtqueue.o \

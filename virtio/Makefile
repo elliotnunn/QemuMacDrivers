@@ -12,9 +12,9 @@ SYSLIBS = \
 	-lControlsLib \
 
 COMMON_PPC = \
-	transport-pci.o \
+	transport-ndrv.o \
 	virtqueue.o \
-	allocator-ppc.o \
+	allocator-ndrv.o \
 	printf.o \
 	patch68k.o \
 	panic.o \

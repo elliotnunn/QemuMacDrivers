@@ -1,4 +1,4 @@
-// Implemented by transport-[ppc|drvr].c
+// Implemented by transport-*.c
 
 #pragma once
 
