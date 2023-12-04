@@ -1,6 +1,8 @@
 # Build the drivers (PPC and 68k) with:
 #     PATH=Retro68-build/toolchain/bin make
-all: build/classic/declrom
+all: classic ndrv
+classic: build/classic/declrom
+ndrv: build/ndrv/ndrv-9p
 
 # Tell make not to delete the intermediate files
 # (helpful when debugging this ususual build process)
@@ -19,6 +21,8 @@ DEVICES_NDRV = 9p input
 SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(wildcard *.c))))
 SUPPORT_NDRV = $(filter-out %-classic.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(wildcard *.c))))
 
+############################# CLASSIC DRVR #############################
+
 # The classic drivers are linked together into one "card declaration ROM":
 #     qemu-system-m68k -device nubus-virtio-mmio,romfile=build/classic/declrom
 # This ROM incorporates the actual DRVRs and a few "slotexec" functions.
@@ -34,11 +38,11 @@ build/classic/declrom: declrom.s \
 # The "slotexec" helper functions are also needed in the declaration ROM,
 # but are built using different compiler options (PC-relative addressing FYI)
 build/classic/slotexec-%.o: slotexec-%.c
-	m68k-apple-macos-gcc -c -Os -mpcrel -nostdlib -o $@ $^
+	m68k-apple-macos-gcc -c -Os -mpcrel -o $@ $^
 
 # Wrap an "sExecBlock" header around the slotexec code using a linker script
 build/classic/slotexec-%.elf: slotexec.lds build/classic/slotexec-%.o
-	m68k-apple-macos-ld -o $@ --script $^ $(STANDARD)
+	m68k-apple-macos-ld -o $@ --script $^ $(DRVRSTATICLIBS)
 
 # Extract the "sExecBlock" from an ELF, ready for inclusion in the decl ROM
 build/classic/slotexec-%: build/classic/slotexec-%.elf
@@ -46,13 +50,13 @@ build/classic/slotexec-%: build/classic/slotexec-%.elf
 
 # Compile the DRVR code files (slotexec code has different compiler options)
 build/classic/%.o: %.c
-	m68k-apple-macos-gcc -c -Os -nostartfiles -ffunction-sections -fdata-sections -o $@ $<
+	m68k-apple-macos-gcc -c -Os -ffunction-sections -fdata-sections -o $@ $<
 
 # Link each DRVR, creating the Device Manager header using a linker script.
 # "Classic 68k runtime" is statically linked, so pull in a libc and some MacOS glue code.
-STANDARD = $(shell for x in libInterface.a libgcov.a libg.a libm.a libstdc++.a libgcc.a libc.a; do m68k-apple-macos-gcc -print-file-name=$$x; done)
+DRVRSTATICLIBS = $(shell for x in libInterface.a libgcov.a libg.a libm.a libstdc++.a libgcc.a libc.a; do m68k-apple-macos-gcc -print-file-name=$$x; done)
 build/classic/drvr-%.elf: drvr.lds build/classic/drvr.o build/classic/device-%.o $(patsubst %.c,build/classic/%.o,$(SUPPORT_CLASSIC))
-	m68k-apple-macos-ld --emit-relocs --gc-sections -o $@ --script $^ $(STANDARD)
+	m68k-apple-macos-ld --emit-relocs --gc-sections -o $@ --script $^ $(DRVRSTATICLIBS)
 
 # The DRVR has some assembly code to fix up interior pointers and call through to C.
 build/classic/drvr.o: drvr.s
@@ -63,3 +67,20 @@ build/classic/drvr.o: drvr.s
 build/classic/drvr-%: build/classic/drvr-%.elf
 	m68k-apple-macos-objcopy -O binary -j .drvr $^ $@
 	(m68k-apple-macos-objdump -r $^ | fgrep R_68K_32; echo 00000000) | cut -w -f1 | xxd -r -p >>$@
+
+############################# POWERPC NDRV #############################
+
+# In future, I will blob the PowerPC drivers together into an Open Firmware loader image.
+# For now, they are separate "ndrv" files.
+# Worse still, they need a filetype and resource fork to work in the System Folder!
+
+build/ndrv/%.o: %.c
+	powerpc-apple-macos-gcc -c -O3 -ffunction-sections -fdata-sections -o $@ $<
+
+# GNU LD is just too fiddly to call directly
+NDRVDYLIBS = StdCLib DriverServicesLib MathLib NameRegistryLib PCILib VideoServicesLib InterfaceLib ControlsLib
+build/ndrv/ndrv-%.elf: build/ndrv/device-%.o $(patsubst %.c,build/ndrv/%.o,$(SUPPORT_NDRV))
+	powerpc-apple-macos-gcc -shared -Wl,--gc-sections -Wl,-bE:ndrv.exp -o $@ $^ $(patsubst %,-l%,$(NDRVDYLIBS))
+
+build/ndrv/ndrv-%: build/ndrv/ndrv-%.elf
+	MakePEF -o $@ $^
