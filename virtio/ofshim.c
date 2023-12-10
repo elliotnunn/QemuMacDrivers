@@ -43,7 +43,7 @@ int of(const char *s, int narg, ...) {
 	// Need asm glue because ofcode is a raw code pointer, not a full function ptr
 	int result;
 	asm volatile (
-		"mtctr   %[ofcode]    \n"
+		"mtctr   %[ofcode]  \n"
 		"mr      3,%[array] \n"
 		"bctrl              \n"
 		"mr      %[result],3\n"
