@@ -34,9 +34,7 @@ int of(const char *s, int nargs, ...) {
 		array[3+i] = (long)va_arg(list, void *);
 	}
 
-	int nrets = va_arg(list, int);
-
-	array[2] = nrets;
+	int nrets = array[2] = va_arg(list, int);
 
 	// Need asm glue because it's a code pointer, not a full function ptr
 	asm volatile (
