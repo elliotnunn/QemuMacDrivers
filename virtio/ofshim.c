@@ -11,6 +11,7 @@ int of(const char *s, int narg, ...);
 void ofprint(const char *s);
 void ofhex(long x);
 
+// Entry point (via the asm glue in ofshim.s)
 void ofmain(void *initrd, long initrdsize, void *ci) {
 	ofcode = ci; // the vector for calling into Open Firmware
 	of("interpret",
