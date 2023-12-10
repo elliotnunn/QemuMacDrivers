@@ -50,9 +50,11 @@ int of(const char *s, int narg, ...) {
 		: "ctr", "lr", "r3", "r4", "r5", "r6", "r7", "r8", "memory" // clobbers
 	);
 
-	for (int i=0; i<nret; i++) {
-		long *ptr = va_arg(list, long *);
-		if (ptr) *ptr = array[3+narg+i];
+	if (result == 0) {
+		for (int i=0; i<nret; i++) {
+			long *ptr = va_arg(list, long *);
+			if (ptr) *ptr = array[3+narg+i];
+		}
 	}
 	va_end(list);
 
