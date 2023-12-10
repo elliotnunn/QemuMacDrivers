@@ -50,7 +50,7 @@ int of(const char *s, int nargs, ...) {
 		long *ptr = va_arg(list, long *);
 		if (ptr) *ptr = (long)array[3+nargs+i];
 	}
-	va_end(args);
+	va_end(list);
 
 	return array[3+nargs+nrets];
 }
