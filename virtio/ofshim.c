@@ -7,7 +7,7 @@ void *ofcode;
 // Protos
 int of(const char *s, int narg, ...);
 
-void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
+void ofmain(void *initrd, long initrdsize, void *ci) {
 	ofcode = ci;
 
 	int r;

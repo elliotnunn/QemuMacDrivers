@@ -10,7 +10,7 @@ are through a transition vector:
 Our XCOFF entry point is actually such a tvector. But Open Firmware only half-
 understands this structure: it jumps to the code correctly, but doesn't set r2.
 
-So we make a tvector, knowing that OF will ignore the second word:
+So we make a fake tvector, knowing that OF will ignore the second word:
 */
 
 	.global entrytvec
@@ -22,10 +22,11 @@ entrytvec:
 /*
 This machine code cannot go in the .text section because it contains a relocation.
 */
+	.section .data
 r2setup:
 
 /*
-Use link register tricks to load an address, because I can't code a lis/ori idiom?
+Get the address of the real tvector. (Use blrl because I can't code a lis/ori idiom?)
 */
 	mflr    %r0
 	bl      jumphere
@@ -43,5 +44,5 @@ Now follow this tvector so that the C code can find its globals.
 
 jumphere:
 	blrl
-	.global openFirmwareEntry
-	.long   openFirmwareEntry
+	.global ofmain
+	.long   ofmain
