@@ -132,7 +132,7 @@ void putNDRVs(void) {
 
 	struct support supported[64] = {};
 
-	ofprint("\nClassic Mac OS Virtio Driver Loader (");
+	ofprint("Classic Mac OS Virtio Driver Loader (");
 	const char *next = allndrv;
 	while (next < allndrv + allndrvlen) {
 		const char *this = next;
@@ -195,8 +195,6 @@ void putNDRVs(void) {
 			ofprint("\n");
 		}
 	}
-
-	ofprint("\n");
 }
 
 // Very basic hex reader, treat bad chars as zero
