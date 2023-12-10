@@ -10,6 +10,7 @@ long stdout; // OF ihandle
 int of(const char *s, int narg, ...);
 void ofprint(const char *s);
 void ofhex(long x);
+void putNDRVs(void);
 
 // Entry point (via the asm glue in ofshim.s)
 void ofmain(void *initrd, long initrdsize, void *ci) {
@@ -18,9 +19,7 @@ void ofmain(void *initrd, long initrdsize, void *ci) {
 		1, "stdout @",
 		2, NULL, &stdout); // get handle for logging
 
-	ofprint("it seems to be working\n");
-	ofhex(0); ofhex(1); ofhex(-10);
-	ofprint("<- like it?\n");
+	putNDRVs();
 }
 
 // Call wrapper for Open Firmware Client Interface
@@ -76,4 +75,8 @@ void ofhex(long x) {
 		s[i] = hex[15 & (x >> (28-i*4))];
 	}
 	ofprint(s);
+}
+
+void putNDRVs(void) {
+	ofprint("Copying Virtio NDRVs into device tree:\n");
 }
