@@ -10,7 +10,11 @@ long stdout; // OF ihandle
 int of(const char *s, int narg, ...);
 void ofprint(const char *s);
 void ofhex(long x);
+long dtroot(void);
+long dtstep(long prev);
 void putNDRVs(void);
+long readhex(const char *s, int len);
+int virtiotype(int deviceid);
 
 // Entry point (via the asm glue in ofshim.s)
 void ofmain(void *initrd, long initrdsize, void *ci) {
@@ -77,6 +81,147 @@ void ofhex(long x) {
 	ofprint(s);
 }
 
+long dtroot(void) {
+	long phandle;
+	of("finddevice",
+		1, "/",
+		1, &phandle);
+	return phandle;
+}
+
+long dtstep(long prev) {
+	long phandle = 0;
+	of("child",
+		1, prev,
+		1, &phandle);
+	if (phandle != 0) return phandle;
+
+	for (;;) {
+		of("peer",
+			1, prev,
+			1, &phandle);
+		if (phandle != 0) return phandle;
+		of("parent",
+			1, prev,
+			1, &prev);
+		if (prev == 0) return 0; // finished
+	}
+}
+
+// Acquire large blob of concatenated NDRVs
+extern const char allndrv[];
+extern const long allndrvlen;
+asm (
+	".section .data                 \n"
+	".balign 4                      \n"
+	".global allndrv, allndrvlen    \n"
+	"allndrvlen:                    \n"
+	".long allndrvend-allndrv       \n"
+	"allndrv:                       \n"
+	".incbin \"build/ndrv/allndrv\" \n"
+	"allndrvend:                    \n"
+	".section .text                 \n"
+);
+
 void putNDRVs(void) {
-	ofprint("Copying Virtio NDRVs into device tree:\n");
+	struct support {
+		const void *ndrv;
+		long len;
+		const char *name;
+	};
+
+	struct support supported[64] = {};
+
+	ofprint("\nClassic Mac OS Virtio Driver Loader (");
+	const char *next = allndrv;
+	while (next < allndrv + allndrvlen) {
+		const char *this = next;
+
+		for (;;) {
+			next++;
+			if (next >= allndrv + allndrvlen) break;
+			if (next[0]=='J' && next[1]=='o' && next[2]=='y' && next[3]=='!' && next[4]=='p') break;
+		}
+
+		// Find TheDriverDescription (better not be compressed)
+		const char *mtej = this;
+		for (;;) {
+			mtej++;
+			if (mtej + 0x70 >= next) {
+				mtej = NULL;
+				break;
+			}
+
+			if (!memcmp(mtej, "mtej" "\0\0\0\0" "\x0cpci1af4,", 17)) break;
+		}
+		if (!mtej) continue;
+
+		int vid = virtiotype(readhex(mtej+17, 4));
+		if (!vid) continue;
+
+		supported[vid] = (struct support) {.ndrv=this, .len=next-this, .name=mtej+0x31};
+		if (this != allndrv) ofprint(" ");
+		ofprint(supported[vid].name);
+	}
+	ofprint(")\n");
+
+	ofprint("Copying NDRVs to device tree:\n");
+
+	for (long ph=dtroot(); ph!=0; ph=dtstep(ph)) {
+		long vendorid = 0, deviceid = 0;
+		of("getprop",
+			4, ph, "vendor-id", &vendorid, sizeof vendorid,
+			1, NULL);
+		of("getprop",
+			4, ph, "device-id", &deviceid, sizeof deviceid,
+			1, NULL);
+
+		// Virtio devices only
+		int vid = virtiotype(deviceid);
+		if (vendorid != 0x1af4 || vid == 0) continue;
+
+		if (supported[vid].ndrv) {
+			long len = 0;
+			of("setprop",
+				4, ph, "driver,AAPL,MacOS,PowerPC", supported[vid].ndrv, supported[vid].len,
+				1, &len);
+
+			ofprint("  ");
+			ofprint(supported[vid].name);
+			ofprint("\n");
+		} else {
+			ofprint("  no NDRV for Virtio type ");
+			ofhex(vid);
+			ofprint("\n");
+		}
+	}
+
+	ofprint("\n");
+}
+
+// Very basic hex reader, treat bad chars as zero
+long readhex(const char *s, int len) {
+	long n = 0;
+	for (int i=0; i<len; i++) {
+		n <<= 4;
+		char c = s[i];
+		if (c >= '0' && c <= '9') n += c - '0';
+		else if (c >= 'a' && c <= 'f') n += c - 'a' + 16;
+		else if (c >= 'A' && c <= 'F') n += c - 'A' + 16;
+	}
+	return n;
+}
+
+int virtiotype(int deviceid) {
+	// Legacy Virtio range
+	if (deviceid >= 0x1000 && deviceid <= 0x1009) {
+		const char table[] = {1, 2, 5, 3, 8, 4, 0, 0, 0, 9};
+		return table[deviceid - 0x1000];
+	}
+
+	// Virtio v1 range
+	if (deviceid >= 0x1041 && deviceid <= 0x107f) return deviceid - 0x1041;
+
+	// Not a Virtio device
+	return 0;
 }

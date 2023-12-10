@@ -18,8 +18,8 @@ DEVICES_CLASSIC = 9p input
 DEVICES_NDRV = 9p input
 
 # And these are the C files that each device-*.c depends on (some are arch-specific)
-SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(wildcard *.c))))
-SUPPORT_NDRV = $(filter-out %-classic.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(wildcard *.c))))
+SUPPORT_CLASSIC = $(filter-out %-ndrv.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(filter-out ofshim.c,$(wildcard *.c)))))
+SUPPORT_NDRV = $(filter-out %-classic.c,$(filter-out slotexec-%.c,$(filter-out device-%.c,$(filter-out ofshim.c,$(wildcard *.c)))))
 
 ############################# CLASSIC DRVR #############################
 
@@ -74,8 +74,12 @@ build/classic/drvr-%: build/classic/drvr-%.elf
 # To load: -device loader,force-raw=on,addr=0x4000000,file=build/ndrv/ofshim
 # To run: -prom-env 'use-nvramrc?=true' -prom-env 'nvramrc=init-program go'
 # These code addresses match the Mac OS Trampoline loader, so they're safe
-build/ndrv/ofshim: ofshim.c ofshim.s
-	powerpc-apple-macos-gcc -O2 -e entrytvec -Wl,--section-start=.data=0x100000 -Wl,--section-start=.text=0x200000 -o $@ $^
+build/ndrv/ofshim: ofshim.s ofshim.c build/ndrv/allndrv
+	powerpc-apple-macos-gcc -O2 -e entrytvec -Wl,--section-start=.data=0x100000 -Wl,--section-start=.text=0x200000 -o $@ ofshim.s ofshim.c
+
+# Glom all the NDRVs together: the loader shim can unpick them
+build/ndrv/allndrv: $(patsubst %,build/ndrv/ndrv-%,$(DEVICES_NDRV))
+	cat $^ >$@
 
 build/ndrv/%.o: %.c
 	powerpc-apple-macos-gcc -c -O3 -ffunction-sections -fdata-sections -o $@ $<
