@@ -4,14 +4,16 @@
 #include <stddef.h>
 
 // Open Firmware Client Interface, a special function pointer
-int (*ofci)(long *ary);
+void *tvec[2];
+int (*ofci)(long *ary) = (void *)tvec;
 
 // Protos
 int of(const char *s, int nargs, ...);
 
 // Until the linker works, this must be the first entry
 void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
-	ofci = ci;
+// 	ofci = ci;
+	tvec[0] = ci;
 
 	int r;
 

@@ -70,16 +70,12 @@ build/classic/drvr-%: build/classic/drvr-%.elf
 
 ############################# POWERPC NDRV #############################
 
-# In future, I will blob the PowerPC drivers together into an Open Firmware loader image.
-# For now, they are separate "ndrv" files.
-# Worse still, they need a filetype and resource fork to work in the System Folder!
-build/ndrv/ofshim.o: ofshim.c
-	powerpc-eabi-gcc -c -O2 -ffreestanding -o $@ $^
-
-build/ndrv/ofshim: build/ndrv/ofshim.o
-	powerpc-eabi-ld -e openFirmwareEntry --section-start=.text=0x100000 -o $@ $^
-
-# -prom-env 'use-nvramrc?=true' -prom-env 'nvramrc=12 load-state >ls.file-type ! 1000000 load-state >ls.entry ! init-program go'
+# Part of a nascent early-boot system
+# To load: -device loader,force-raw=on,addr=0x4000000,file=build/ndrv/ofshim
+# To run: -prom-env 'use-nvramrc?=true' -prom-env 'nvramrc=init-program go'
+# These code addresses match the Mac OS Trampoline loader, so they're safe
+build/ndrv/ofshim: ofshim.c ofshim.s
+	powerpc-apple-macos-gcc -O2 -e entrytvec -Wl,--section-start=.data=0x100000 -Wl,--section-start=.text=0x200000 -o $@ $^
 
 build/ndrv/%.o: %.c
 	powerpc-apple-macos-gcc -c -O3 -ffunction-sections -fdata-sections -o $@ $<
