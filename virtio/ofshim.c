@@ -1,16 +1,12 @@
-// Write Hot Code And Lie
-
 #include <stdarg.h>
 #include <stddef.h>
 
-// Open Firmware Client Interface
-// Points to raw PowerPC code, not to a tvector
+// Open Firmware Client Interface (raw machine code, not a tvector)
 void *ofci;
 
 // Protos
 int of(const char *s, int narg, ...);
 
-// Until the linker works, this must be the first entry
 void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
 	ofci = ci;
 
