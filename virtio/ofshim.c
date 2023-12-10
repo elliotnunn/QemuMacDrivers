@@ -55,13 +55,3 @@ int of(const char *s, int nargs, ...) {
 
 	return array[3+nargs+nrets];
 }
-
-void *memset(void *s, int c, long len) {
-    unsigned char *dst = s;
-    while (len > 0) {
-        *dst = (unsigned char) c;
-        dst++;
-        len--;
-    }
-    return s;
-}
