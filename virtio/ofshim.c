@@ -30,7 +30,8 @@ void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
 //                 narg, arg1, arg2, ...
 //                 nret, ret1, ret2, ...)) {panic("failed")}
 int of(const char *s, int narg, ...) {
-	long array[16] = {(long)s, narg, 0 /*nret goes here*/};
+	// array to contain {nameptr, narg, arg1..., nret, ret1...}
+	long array[16] = {(long)s, narg, 0 /*nret will go here*/};
 	va_list list;
 
 	va_start(list, narg);
