@@ -66,7 +66,7 @@ int of(const char *s, int nargs, ...) {
 	   "bctrl              \n"
 	   : // no result
 	   : [array] "r" (array), [ofci] "r" (ofci) // args
-	   : "memory", "r3"
+	   : "ctr", "lr", "r3", "r4", "r5", "r6", "r7", "r8", "memory" // clobbers
    );
 //    return result;
 
