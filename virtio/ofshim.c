@@ -51,29 +51,21 @@ int of(const char *s, int nargs, ...) {
 
 	int nrets = va_arg(list, int);
 
-// 	for (int i=0; i<nrets; i++) ofci((long []){(long)"interpret", 1, 1, (long)".\" nret cnt\" cr", 0, 9999});
-
 	array[2] = nrets;
 
-// 	for (int i=0; i<array[1]; i++)
-// 		ofci((long []){(long)"interpret", 1, 1, (long)".\" array1\" cr", 0, 9999});
-// 	for (int i=0; i<array[2]; i++)
-// 		ofci((long []){(long)"interpret", 1, 1, (long)".\" array2\" cr", 0, 9999});
+	asm volatile (
+		"mtctr   %[ofci]    \n"
+		"mr      3,%[array] \n"
+		"bctrl              \n"
+		: // no result
+		: [array] "r" (array), [ofci] "r" (ofci) // args
+		: "ctr", "lr", "r3", "r4", "r5", "r6", "r7", "r8", "memory" // clobbers
+	);
 
-   asm volatile (
-	   "mtctr   %[ofci]    \n"
-	   "mr      3,%[array] \n"
-	   "bctrl              \n"
-	   : // no result
-	   : [array] "r" (array), [ofci] "r" (ofci) // args
-	   : "ctr", "lr", "r3", "r4", "r5", "r6", "r7", "r8", "memory" // clobbers
-   );
-//    return result;
-
-// 	for (int i=0; i<nrets; i++) {
-// 		long *ptr = va_arg(list, long *);
-// 		if (ptr) *ptr = (long)array[3+nargs+i];
-// 	}
+	for (int i=0; i<nrets; i++) {
+		long *ptr = va_arg(list, long *);
+		if (ptr) *ptr = (long)array[3+nargs+i];
+	}
 
 // 	return retval;
 }
