@@ -9,12 +9,15 @@ long stdout; // OF ihandle
 // Protos
 int of(const char *s, int narg, ...);
 void ofprint(const char *s);
+void ofhex(long x);
 
 void ofmain(void *initrd, long initrdsize, void *ci) {
 	ofcode = ci; // the vector for calling into Open Firmware
 	of("interpret", 1, "stdout @", 2, NULL, &stdout); // for logging
 
 	ofprint("it seems to be working\n");
+	ofhex(0); ofhex(1); ofhex(-10);
+	ofprint("<- like it?\n");
 }
 
 // Call wrapper for Open Firmware Client Interface
@@ -58,4 +61,13 @@ void ofprint(const char *s) {
 	of("write",
 		3, stdout, s, strlen(s),
 		1, NULL); // discard "bytes written"
+}
+
+void ofhex(long x) {
+	const char *hex = "0123456789abcdef";
+	char s[] = "00000000 ";
+	for (int i=0; i<8; i++) {
+		s[i] = hex[15 & (x >> (28-i*4))];
+	}
+	ofprint(s);
 }
