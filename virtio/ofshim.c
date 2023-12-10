@@ -8,7 +8,7 @@
 void *ofci;
 
 // Protos
-int of(const char *s, int nargs, ...);
+int of(const char *s, int narg, ...);
 
 // Until the linker works, this must be the first entry
 void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
@@ -31,18 +31,18 @@ void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
 
 // Call wrapper for OF Client Interface
 // Call as: if (of("name",
-//                 nargs, arg1, arg2, ...
-//                 nrets, ret1, ret2, ...)) {panic("failed")}
-int of(const char *s, int nargs, ...) {
-	long array[16] = {(long)s, nargs, 1234 /*nret placeholder*/};
+//                 narg, arg1, arg2, ...
+//                 nret, ret1, ret2, ...)) {panic("failed")}
+int of(const char *s, int narg, ...) {
+	long array[16] = {(long)s, narg, 0 /*nret goes here*/};
 	va_list list;
 
-	va_start(list, nargs);
-	for (int i=0; i<nargs; i++) {
+	va_start(list, narg);
+	for (int i=0; i<narg; i++) {
 		array[3+i] = (long)va_arg(list, void *);
 	}
 
-	int nrets = array[2] = va_arg(list, int);
+	int nret = array[2] = va_arg(list, int);
 
 	// Need asm glue because ofci is a raw code pointer, not a full function ptr
 	int result;
@@ -56,9 +56,9 @@ int of(const char *s, int nargs, ...) {
 		: "ctr", "lr", "r3", "r4", "r5", "r6", "r7", "r8", "memory" // clobbers
 	);
 
-	for (int i=0; i<nrets; i++) {
+	for (int i=0; i<nret; i++) {
 		long *ptr = va_arg(list, long *);
-		if (ptr) *ptr = (long)array[3+nargs+i];
+		if (ptr) *ptr = (long)array[3+narg+i];
 	}
 	va_end(list);
 
