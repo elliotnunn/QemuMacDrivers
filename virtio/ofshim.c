@@ -3,21 +3,20 @@
 #include <stdarg.h>
 #include <stddef.h>
 
-// Open Firmware Client Interface, a special function pointer
-void *tvec[2];
-int (*ofci)(long *ary) = (void *)tvec;
+// Open Firmware Client Interface
+// Points to raw PowerPC code, not to a tvector
+void *ofci;
 
 // Protos
 int of(const char *s, int nargs, ...);
 
 // Until the linker works, this must be the first entry
 void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
-// 	ofci = ci;
-	tvec[0] = ci;
+	ofci = ci;
 
 	int r;
 
- 	r = ofci((long []){(long)"interpret", 1, 1, (long)".\" elliot wins\" cr", 0, 9999});
+//  	r = ofci((long []){(long)"interpret", 1, 1, (long)".\" elliot wins\" cr", 0, 9999});
 
 	r = of("interpret",
 		1, "cr .\" how about this\" cr",
@@ -61,7 +60,15 @@ int of(const char *s, int nargs, ...) {
 // 	for (int i=0; i<array[2]; i++)
 // 		ofci((long []){(long)"interpret", 1, 1, (long)".\" array2\" cr", 0, 9999});
 
-	ofci(array);
+   asm volatile (
+	   "mtctr   %[ofci]    \n"
+	   "mr      3,%[array] \n"
+	   "bctrl              \n"
+	   : // no result
+	   : [array] "r" (array), [ofci] "r" (ofci) // args
+	   : "memory", "r3"
+   );
+//    return result;
 
 // 	for (int i=0; i<nrets; i++) {
 // 		long *ptr = va_arg(list, long *);
