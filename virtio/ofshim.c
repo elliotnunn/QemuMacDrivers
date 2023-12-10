@@ -22,7 +22,9 @@ void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
 }
 
 // Call wrapper for OF Client Interface
-// Call as of("name", nargs, arg1, arg2, nret, ret1, ret2)
+// Call as: of("name",
+//             nargs, arg1, arg2, ...
+//             nrets, ret1, ret2, ...);
 int of(const char *s, int nargs, ...) {
 	long array[16] = {(long)s, nargs, 1234 /*nret placeholder*/};
 	va_list list;
