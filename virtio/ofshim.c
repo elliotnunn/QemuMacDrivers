@@ -13,7 +13,9 @@ void ofhex(long x);
 
 void ofmain(void *initrd, long initrdsize, void *ci) {
 	ofcode = ci; // the vector for calling into Open Firmware
-	of("interpret", 1, "stdout @", 2, NULL, &stdout); // for logging
+	of("interpret",
+		1, "stdout @",
+		2, NULL, &stdout); // get handle for logging
 
 	ofprint("it seems to be working\n");
 	ofhex(0); ofhex(1); ofhex(-10);
