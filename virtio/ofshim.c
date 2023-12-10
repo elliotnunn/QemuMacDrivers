@@ -30,7 +30,6 @@ int of(const char *s, int nargs, ...) {
 	va_list list;
 
 	va_start(list, nargs);
-
 	for (int i=0; i<nargs; i++) {
 		array[3+i] = (long)va_arg(list, void *);
 	}
@@ -39,6 +38,7 @@ int of(const char *s, int nargs, ...) {
 
 	array[2] = nrets;
 
+	// Need asm glue because it's a code pointer, not a full function ptr
 	asm volatile (
 		"mtctr   %[ofci]    \n"
 		"mr      3,%[array] \n"
@@ -52,6 +52,7 @@ int of(const char *s, int nargs, ...) {
 		long *ptr = va_arg(list, long *);
 		if (ptr) *ptr = (long)array[3+nargs+i];
 	}
+	va_end(args);
 
 	return array[3+nargs+nrets];
 }
