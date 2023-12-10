@@ -36,7 +36,7 @@ int of(const char *s, int nargs, ...) {
 
 	int nrets = array[2] = va_arg(list, int);
 
-	// Need asm glue because it's a code pointer, not a full function ptr
+	// Need asm glue because ofci is a raw code pointer, not a full function ptr
 	asm volatile (
 		"mtctr   %[ofci]    \n"
 		"mr      3,%[array] \n"
