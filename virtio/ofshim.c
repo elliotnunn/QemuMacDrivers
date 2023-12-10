@@ -16,15 +16,23 @@ void openFirmwareEntry(void *initrd, long initrdsize, void *ci) {
 
 	int r;
 
-	r = of("interpret",
-		1, "cr .\" how about this\" cr",
-		1, NULL);
+	r = of("interpret", 1, "cr", 0);
+
+	if (r) {
+		r = of("interpret",
+			1, "cr .\" was nonzero\" cr",
+			1, NULL);
+	} else {
+		r = of("interpret",
+			1, "cr .\" was zero\" cr",
+			1, NULL);
+	}
 }
 
 // Call wrapper for OF Client Interface
-// Call as: of("name",
-//             nargs, arg1, arg2, ...
-//             nrets, ret1, ret2, ...);
+// Call as: if (of("name",
+//                 nargs, arg1, arg2, ...
+//                 nrets, ret1, ret2, ...)) {panic("failed")}
 int of(const char *s, int nargs, ...) {
 	long array[16] = {(long)s, nargs, 1234 /*nret placeholder*/};
 	va_list list;
@@ -37,11 +45,13 @@ int of(const char *s, int nargs, ...) {
 	int nrets = array[2] = va_arg(list, int);
 
 	// Need asm glue because ofci is a raw code pointer, not a full function ptr
+	int result;
 	asm volatile (
 		"mtctr   %[ofci]    \n"
 		"mr      3,%[array] \n"
 		"bctrl              \n"
-		: // no result
+		"mr      %[result],3\n"
+		: [result] "=r" (result)
 		: [array] "r" (array), [ofci] "r" (ofci) // args
 		: "ctr", "lr", "r3", "r4", "r5", "r6", "r7", "r8", "memory" // clobbers
 	);
@@ -52,5 +62,5 @@ int of(const char *s, int nargs, ...) {
 	}
 	va_end(list);
 
-	return array[3+nargs+nrets];
+	return result;
 }
