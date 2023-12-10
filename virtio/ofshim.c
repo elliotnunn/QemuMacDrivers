@@ -1,28 +1,20 @@
 #include <stdarg.h>
 #include <stddef.h>
+#include <string.h>
 
 // Open Firmware Client Interface (raw machine code, not a tvector)
 void *ofcode;
+long stdout; // OF ihandle
 
 // Protos
 int of(const char *s, int narg, ...);
+void ofprint(const char *s);
 
 void ofmain(void *initrd, long initrdsize, void *ci) {
-	ofcode = ci;
+	ofcode = ci; // the vector for calling into Open Firmware
+	of("interpret", 1, "stdout @", 2, NULL, &stdout); // for logging
 
-	int r;
-
-	r = of("interpret", 1, "cr", 0);
-
-	if (r) {
-		r = of("interpret",
-			1, "cr .\" was nonzero\" cr",
-			1, NULL);
-	} else {
-		r = of("interpret",
-			1, "cr .\" was zero\" cr",
-			1, NULL);
-	}
+	ofprint("it seems to be working\n");
 }
 
 // Call wrapper for Open Firmware Client Interface
@@ -60,4 +52,10 @@ int of(const char *s, int narg, ...) {
 	va_end(list);
 
 	return result;
+}
+
+void ofprint(const char *s) {
+	of("write",
+		3, stdout, s, strlen(s),
+		1, NULL); // discard "bytes written"
 }
