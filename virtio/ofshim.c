@@ -2,11 +2,11 @@
 #include <stddef.h>
 #include <string.h>
 
-// Open Firmware Client Interface (raw machine code, not a tvector)
-void *ofcode;
+// Globals
+void *ofcode; // Client Interface (raw machine code, not a tvector)
 long stdout; // OF ihandle
 
-// Protos
+// Prototypes
 int of(const char *s, int narg, ...);
 void ofprint(const char *s);
 void ofhex(long x);
@@ -62,6 +62,7 @@ int of(const char *s, int narg, ...) {
 	return result;
 }
 
+// I couldn't bear to static-link another printf implementation
 void ofprint(const char *s) {
 	of("write",
 		3, stdout, s, strlen(s),
