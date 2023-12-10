@@ -53,7 +53,7 @@ int of(const char *s, int nargs, ...) {
 		if (ptr) *ptr = (long)array[3+nargs+i];
 	}
 
-// 	return retval;
+	return array[3+nargs+nrets];
 }
 
 void *memset(void *s, int c, long len) {
