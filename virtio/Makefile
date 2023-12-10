@@ -73,6 +73,13 @@ build/classic/drvr-%: build/classic/drvr-%.elf
 # In future, I will blob the PowerPC drivers together into an Open Firmware loader image.
 # For now, they are separate "ndrv" files.
 # Worse still, they need a filetype and resource fork to work in the System Folder!
+build/ndrv/ofshim.o: ofshim.c
+	powerpc-eabi-gcc -c -O2 -ffreestanding -o $@ $^
+
+build/ndrv/ofshim: build/ndrv/ofshim.o
+	powerpc-eabi-ld -e openFirmwareEntry --section-start=.text=0x100000 -o $@ $^
+
+# -prom-env 'use-nvramrc?=true' -prom-env 'nvramrc=12 load-state >ls.file-type ! 1000000 load-state >ls.entry ! init-program go'
 
 build/ndrv/%.o: %.c
 	powerpc-apple-macos-gcc -c -O3 -ffunction-sections -fdata-sections -o $@ $<
