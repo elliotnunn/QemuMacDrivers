@@ -35,7 +35,7 @@ int of(const char *s, int narg, ...) {
 
 	va_start(list, narg);
 	for (int i=0; i<narg; i++) {
-		array[3+i] = (long)va_arg(list, void *);
+		array[3+i] = va_arg(list, long);
 	}
 
 	int nret = array[2] = va_arg(list, int);
@@ -54,7 +54,7 @@ int of(const char *s, int narg, ...) {
 
 	for (int i=0; i<nret; i++) {
 		long *ptr = va_arg(list, long *);
-		if (ptr) *ptr = (long)array[3+narg+i];
+		if (ptr) *ptr = array[3+narg+i];
 	}
 	va_end(list);
 
