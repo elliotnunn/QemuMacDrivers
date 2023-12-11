@@ -376,13 +376,14 @@ static pascal ControlPartCode myTrackControl(ControlRef theControl, Point startP
 	}
 
 	int32_t min, max, val;
-#if GENERATINGCFM
-	if (GetControl32BitValue != NULL) {
-		min = GetControl32BitMinimum(curScroller);
-		max = GetControl32BitMaximum(curScroller);
-		val = GetControl32BitValue(curScroller);
-	} else
-#endif
+// COMMENT OUT BECAUSE IT PREVENTS US LOADING AT EARLY BOOT!
+// #if GENERATINGCFM
+// 	if (GetControl32BitValue != NULL) {
+// 		min = GetControl32BitMinimum(curScroller);
+// 		max = GetControl32BitMaximum(curScroller);
+// 		val = GetControl32BitValue(curScroller);
+// 	} else
+// #endif
 	{
 		min = GetControlMinimum(curScroller);
 		max = GetControlMaximum(curScroller);
