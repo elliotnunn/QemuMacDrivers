@@ -101,7 +101,8 @@ static OSStatus finalize(DriverFinalInfo *info);
 static OSStatus initialize(DriverInitInfo *info);
 static void installDrive(void);
 static void installExtFS(void);
-static void insertionEvent(void);
+static void ensureFutureMount(void);
+static void lateBootHook(void);
 static OSErr boot(void);
 static void setDirPBInfo(struct DirInfo *pb, int32_t cnid, uint32_t fid);
 static void setFilePBInfo(struct HFileInfo *pb, int32_t cnid, uint32_t fid);
@@ -360,18 +361,18 @@ static OSStatus initialize(DriverInitInfo *info) {
 
 	if (GetVCBQHdr()->qHead != (void *)-1) {
 		installExtFS();
-		insertionEvent();
+		ensureFutureMount();
 	} else {
 		Patch68k(
 			_InitFS,
 			"4eb9 %o "   // jsr     originalInitFS
 			"48e7 e0c0 " // movem.l d0-d2/a0-a1,-(sp)
 			"4eb9 %l "   // jsr     installExtFS
-			"4eb9 %l "   // jsr     insertionEvent
+			"4eb9 %l "   // jsr     ensureFutureMount
 			"4cdf 0307", // movem.l (sp)+,d0-d2/a0-a1
 			             // fallthru to uninstall code (which will tst.w d0)
 			STATICDESCRIPTOR(installExtFS, kCStackBased),
-			STATICDESCRIPTOR(insertionEvent, kCStackBased)
+			STATICDESCRIPTOR(ensureFutureMount, kCStackBased)
 		);
 	}
 
@@ -481,11 +482,39 @@ static void installExtFS(void) {
 	);
 }
 
-// Requires _InitEvents to have been called
-// (which is true if _InitFS has been called)
-static void insertionEvent(void) {
+// Conventionally, posting a diskEvt some time after InitEvents was thought
+// to ensure an eventual MountVol. But OS 9 seems to lose events posted early
+// in the startup process, so we just call MountVol when startup is complete.
+// (TN1189 suggests repeatedly posting diskEvt at accRun time, but this would
+// need an NDRV compatible accRun substitute. Our way is simpler.)
+static void ensureFutureMount(void) {
 	PostEvent(diskEvt, dqe.dqe.dQDrive);
-	printf("Posted diskEvt, %d\n", dqe.dqe.dQDrive);
+	printf("Posted (diskEvt,%d) and will call MountVol after startup:\n", dqe.dqe.dQDrive);
+
+	// Process Manager calls NewGestalt('os  ') at the very end of startup
+	Patch68k(
+		_Gestalt,
+		"0c80 6f732020" //      cmp.l   #'os  ',d0
+		"661c"          //      bne.s   old
+		"0801 0009"     //      btst    #9,d1
+		"6716"          //      beq.s   old
+		"0801 000a"     //      btst    #10,d1
+		"6610"          //      bne.s   old
+		"48e7 e0e0"     //      movem.l d0-d2/a0-a2,-(sp)
+		"4eb9 %l"       //      jsr     lateBootHook
+		"4cdf 0707"     //      movem.l (sp)+,d0-d2/a0-a2
+		"6106"          //      bsr.s   uninstall
+		"4ef9 %o",      // old: jmp     originalGestalt
+		                // uninstall: (fallthrough code)
+		STATICDESCRIPTOR(lateBootHook, kCStackBased)
+	);
+}
+
+static void lateBootHook(void) {
+	if (dqe.dqe.qType == 0) {
+		struct IOParam pb = {.ioVRefNum = dqe.dqe.dQDrive};
+		PBMountVol((void *)&pb);
+	}
 }
 
 // C function that our stub boot block will jump to.
