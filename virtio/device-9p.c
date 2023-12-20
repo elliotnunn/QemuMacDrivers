@@ -2130,7 +2130,7 @@ static OSErr controlStatusCall(struct CntrlParam *pb) {
 	if (selector == kDriverGestaltCode)
 		selector = ((struct DriverGestaltParam *)pb)->driverGestaltSelector;
 
-	if ((pb->ioTrap & 0xa8ff) == _Status)
+	if ((pb->ioTrap & 0xff) == (_Status & 0xff))
 		selector = -selector;
 
 	return controlStatusDispatch(selector, pb);
