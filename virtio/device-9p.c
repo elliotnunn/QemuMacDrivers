@@ -379,11 +379,6 @@ static OSStatus initialize(DriverInitInfo *info) {
 		);
 	}
 
-	// Hack:
-	// We might be bootable but (so far) cannot be set as THE boot disk,
-	// so give up early and broaden the search.
-	SetTimeout(1);
-
 	return noErr;
 }
 
