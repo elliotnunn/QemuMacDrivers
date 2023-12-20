@@ -237,6 +237,8 @@ char BugWorkaroundExport2[] = "TheDriverDescription must not come first";
 const unsigned short drvrFlags = dNeedLockMask|dStatEnableMask|dCtlEnableMask|dReadEnableMask;
 const char drvrNameVers[] = "\x09.Virtio9P\0\x01\x00";
 
+RegEntryID regentryid;
+
 OSStatus DoDriverIO(AddressSpaceID spaceID, IOCommandID cmdID,
 	IOCommandContents pb, IOCommandCode code, IOCommandKind kind) {
 	OSStatus err;
@@ -305,6 +307,7 @@ static OSStatus finalize(DriverFinalInfo *info) {
 static OSStatus initialize(DriverInitInfo *info) {
 	// Debug output
 	drvrRefNum = info->refNum;
+	regentryid = info->deviceEntry;
 	sprintf(logprefix, "%.*s(%d) ", *drvrNameVers, drvrNameVers+1, info->refNum);
 // 	if (0 == RegistryPropertyGet(&info->deviceEntry, "debug", NULL, 0)) {
 		logenable = 1;
@@ -2071,6 +2074,53 @@ static OSErr cDriveInfo(struct CntrlParam *pb) {
 	return noErr;
 }
 
+// When the /chosen "bootpath" property is set to this PCI device,
+// the following three Driver Gestalt handlers tell the NewWorld ROM
+// to root from this volume -- without waiting for the ?-floppy to time out.
+
+// Essential to boot from 9P
+static OSErr dgNameRegistryEntry(struct DriverGestaltParam *pb) {
+	pb->driverGestaltResponse = (long)&regentryid;
+	return noErr;
+}
+
+// Essential to boot from 9P
+// kOFBootNotPartitioned/kOFBootAnyPartition take the same code path in StartLib
+// kOFBootSpecifiedPartition takes a separate path but still works
+// kOFBootNotBootable doesn't work (naturally)
+static OSErr dgOpenFirmwareBoot(struct DriverGestaltParam *pb) {
+	pb->driverGestaltResponse = kOFBootNotPartitioned;
+	return noErr;
+}
+
+// Essential to boot from 9P
+// Follows a four-byte structure ?inherited from a Slot Manager PRAM field
+// The upper 5 bits must equal a fake SCSI ID, which is (unit number - 32)
+static OSErr dgBoot(struct DriverGestaltParam *pb) {
+	long unitNum = ~drvrRefNum;
+	long scsiNum = unitNum - 32;
+	pb->driverGestaltResponse = scsiNum << 27;
+	return noErr;
+}
+
+// No effect on boot, opaque to the system
+static OSErr dgDeviceReference(struct DriverGestaltParam *pb) {
+	pb->driverGestaltResponse = 0;
+	return noErr;
+}
+
+// No effect on boot, even when answer is quite silly
+static OSErr dgInterface(struct DriverGestaltParam *pb) {
+	pb->driverGestaltResponse = kdgExtBus;
+	return noErr;
+}
+
+// No effect on boot
+static OSErr dgDeviceType(struct DriverGestaltParam *pb) {
+	pb->driverGestaltResponse = kdgDiskType;
+	return noErr;
+}
+
 static OSErr controlStatusCall(struct CntrlParam *pb) {
 	// Coerce csCode or driverGestaltSelector into one long
 	// Negative is Status/DriverGestalt, positive is Control/DriverConfigure
@@ -2091,6 +2141,12 @@ static OSErr controlStatusDispatch(long selector, void *pb) {
 	case kDriveIcon: return cIcon(pb);
 	case kMediaIcon: return cIcon(pb);
 	case kDriveInfo: return cDriveInfo(pb);
+	case -'nmrg': return dgNameRegistryEntry(pb);
+	case -'ofpt': case -'ofbt': return dgOpenFirmwareBoot(pb);
+	case -'boot': return dgBoot(pb);
+ 	case -'dvrf': return dgDeviceReference(pb);
+	case -'intf': return dgInterface(pb);
+ 	case -'devt': return dgDeviceType(pb);
 	default:
 		if (selector > 0) {
 			return controlErr;

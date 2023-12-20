@@ -14,6 +14,7 @@ long dtroot(void);
 long dtstep(long prev);
 void putNDRVs(void);
 long readhex(const char *s, int len);
+void chain9p(void);
 int virtiotype(int deviceid);
 
 // Entry point (via the asm glue in ofshim.s)
@@ -24,6 +25,7 @@ void ofmain(void *initrd, long initrdsize, void *ci) {
 		2, NULL, &stdout); // get handle for logging
 
 	putNDRVs();
+	chain9p();
 }
 
 // Call wrapper for Open Firmware Client Interface
@@ -195,6 +197,62 @@ void putNDRVs(void) {
 			ofprint("\n");
 		}
 	}
+}
+
+void chain9p(void) {
+	void *loadbase = (void *)0x4000000;
+	void *bootinfo = (void *)0x4400000;
+
+	if (memcmp(bootinfo, "<CHRP-BOOT", 10)) return;
+
+	ofprint("Chainloading Mac OS ROM file to start from 9P...\n");
+
+	long len=0x400000; // always shorter than 4 MB and never ends with a null
+	while (((char *)bootinfo)[len-1] == 0) len--;
+
+	memmove(loadbase, bootinfo, len);
+
+	of("interpret",
+		2, "!load-size", len,
+		0);
+
+	char path[512] = {};
+
+	// Set the CHOSEN property
+	for (long ph=dtroot(); ph!=0; ph=dtstep(ph)) {
+		long vendorid = 0, deviceid = 0;
+		of("getprop",
+			4, ph, "vendor-id", &vendorid, sizeof vendorid,
+			1, NULL);
+		of("getprop",
+			4, ph, "device-id", &deviceid, sizeof deviceid,
+			1, NULL);
+
+		// Virtio 9P devices only
+		if (vendorid == 0x1af4 && virtiotype(deviceid) == 9) {
+			of("package-to-path",
+				3, ph, path, sizeof path,
+				1, NULL);
+			strcat(path, ":,\\\\:tbxi");
+			break;
+		}
+	}
+
+	long chosenph = 0;
+	of("finddevice",
+		1, "/chosen",
+		1, &chosenph);
+
+	if (chosenph) {
+		of("setprop",
+			4, chosenph, "bootpath", path, strlen(path)+1,
+			1, NULL);
+	}
+
+	// OpenBIOS doesn't offer the "chain" service
+	of("interpret",
+		1, "init-program go",
+		0);
 }
 
 // Very basic hex reader, treat bad chars as zero
